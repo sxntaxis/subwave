@@ -129,6 +129,23 @@ export interface QueueItem {
   stemCueInSec?: number;
 }
 
+export type PickTarget =
+  | { kind: 'current'; item: QueueItem }
+  | { kind: 'held-tail'; item: QueueItem };
+
+export interface QueuePushArgs {
+  track: Track;
+  requestedBy?: string | null;
+  intent?: string | null;
+  introScript?: string | null;
+  introKind?: string;
+  introPersona?: Persona | null;
+  aiPicked?: boolean;
+  allowDuplicate?: boolean;
+  linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
+  linkClockAt?: Date | number | null;
+}
+
 // One row in the rolling recent-plays sidecar (the picker's repeat window).
 export interface RecentPlay {
   id: string | null;

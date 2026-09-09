@@ -68,7 +68,9 @@ import type {
   DjLogEntry,
   NowPlaying,
   Persona,
+  PickTarget,
   QueueItem,
+  QueuePushArgs,
   RecentPlay,
   Track,
 } from './queue/types.js';
@@ -89,6 +91,7 @@ import {
   sleep,
   voiceChannelFor,
 } from './queue/pure.js';
+import { pickTargetValid } from './queue/pick-target.js';
 import {
   PUSH_PROBE_INTERVAL_MS,
   PUSH_PROBE_MAX_READS,
@@ -616,18 +619,7 @@ class Queue {
   // the line if the real seam lands too far from it — the forecast is made from
   // the on-air track's remaining play and goes badly wrong when the pick misses
   // that seam and auto.m3u fills the slot.
-  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
-    track: Track;
-    requestedBy?: string | null;
-    intent?: string | null;
-    introScript?: string | null;
-    introKind?: string;
-    introPersona?: Persona | null;
-    aiPicked?: boolean;
-    allowDuplicate?: boolean;
-    linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
-    linkClockAt?: Date | number | null;
-  }) {
+  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: QueuePushArgs) {
     // The blocklist is absolute — even explicit manual queueing is refused
     // until the entry is unblocked — so it sits above `allowDuplicate`. Every
     // playback path funnels through push() (dj-agent, requests, MCP, studio
@@ -683,6 +675,14 @@ class Queue {
     this.persist();
     this.drainToLiquidsoap();  // fire-and-forget
     return this.upcoming.length;
+  }
+
+  async pushAiPick(args: QueuePushArgs, target: PickTarget): Promise<number | 'stale'> {
+    if (!pickTargetValid(target, this.current, this.upcoming)) {
+      this.log('stale-pick', `stale pick dropped: ${args.track.title} was selected for ${target.item.track.title}, but that successor slot changed before commit`);
+      return 'stale';
+    }
+    return this.push(args);
   }
 
   // A request the MIXER will silently eat (#1594). Log only — nothing is
@@ -2618,6 +2618,9 @@ class Queue {
   // text, the mini-run anchor, and the link's back-announce target.
   // Fire-and-forget like the original block; pickerBusy is the reentry guard.
   runPickCycle({ isAutonomous, predecessorItem = null }: { isAutonomous: boolean; predecessorItem?: QueueItem | null }) {
+    const pickTarget: PickTarget = predecessorItem
+      ? { kind: 'held-tail', item: predecessorItem }
+      : { kind: 'current', item: this.current! };
     let wantLink = false;
     if (this.autoLink && isAutonomous && this.history[0]) {
       this.tracksUntilLink--;
@@ -2726,6 +2729,7 @@ class Queue {
           showAt,
           predecessor: predecessorItem?.track ?? null,
           prior: predecessorItem ? (this.current?.track ?? null) : null,
+          target: pickTarget,
         });
       } catch (err) {
         this.log('error', `DJ track event failed: ${(err as Error).message}`);

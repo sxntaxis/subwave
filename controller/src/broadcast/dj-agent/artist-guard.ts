@@ -127,7 +127,8 @@ export type ArtistGuardOutcome<T> =
   | { kind: 'repicked'; object: { id?: string | null } & Record<string, unknown>; song: T }
   // The pool rescue filled the slot itself (it enqueues, links and records its
   // own session turn), so the caller has nothing left to do for this pick.
-  | { kind: 'rescued' };
+  | { kind: 'rescued' }
+  | { kind: 'stale' };
 
 // Everything the guard needs, injected — no queue, no settings, no model. This
 // module stays the ONE place the guard's decisions live (the reason it exists;
@@ -153,7 +154,7 @@ export interface ArtistGuardDeps<T> {
   ) => Promise<({ id?: string | null } & Record<string, unknown>) | null>;
   // The fallback pool asked for a pick that is NOT this artist. Only ever
   // called on the back-to-back cause — see the note at its call site.
-  poolRescue: (avoidArtist: string) => Promise<'queued' | 'empty' | 'collision'>;
+  poolRescue: (avoidArtist: string) => Promise<'queued' | 'empty' | 'collision' | 'stale'>;
   log: (line: string) => void;
   logEvent: (name: string, payload: Record<string, unknown>) => void;
 }
@@ -235,6 +236,7 @@ export async function runArtistGuard<T extends CandidateLike>(
     log(`back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
     return { kind: 'rescued' };
   }
+  if (rescued === 'stale') return { kind: 'stale' };
   // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
   // from 'collision' (it produced a pick that deduped against something already
   // queued) — an operator reading #1187-style reports must be able to tell "the

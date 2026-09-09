@@ -23,6 +23,7 @@ import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, prefe
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import { showNoRepeatGuard } from './show-recency.js';
 import * as likes from '../broadcast/likes.js';
+import { poolAnchor } from './picker-anchor.js';
 
 // A track flowing through the pool builder — a raw Subsonic child, a slimTrack
 // library row, or a Last.fm-derived stub, tagged with the internal _source /
@@ -859,7 +860,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only TAGGED tracks.
@@ -875,7 +876,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   // above: those scale because they are derived defaults, this one is a number
   // the operator typed. 0 (the default) yields an empty set — off.
   const recentAlbums = queue.recentAlbumKeys(settings.get().picker?.albumHours ?? 0);
-  const currentTrack = queue.current?.track || null;
+  const currentTrack = poolAnchor(explicitCurrent, queue.current?.track);
   // Resolve the active show once: its music-steering filters shape the pool
   // (below) and its brief steers the LLM pick (further down). Prefer the show
   // already resolved into ctx — near a show boundary the queue watcher passes

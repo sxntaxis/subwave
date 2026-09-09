@@ -14,6 +14,9 @@ import { echoesRecentRequest } from '../../util/request-guard.js';
 import { speechPaceScale } from '../../audio/tts.js';
 import { normalizeForDisplay, normalizeForSpeech, spokenWordScale } from '../../audio/speech-text.js';
 import { introMsOf } from './runs.js';
+import type { PickTarget } from '../queue/types.js';
+
+export type EnqueuePickOutcome = 'queued' | 'duplicate' | 'blocked' | 'stale';
 
 export function trackFields(song) {
   return {
@@ -125,7 +128,8 @@ export async function enqueuePick(
   linkPrev: any = null,
   { sweep = false, washout = false, blend = false, dissolve = false, chop = false, loop = false }: { sweep?: boolean; washout?: boolean; blend?: boolean; dissolve?: boolean; chop?: boolean; loop?: boolean } = {},
   { linkClockAt = null }: { linkClockAt?: Date | null } = {},
-): Promise<number> {
+  target: PickTarget,
+): Promise<EnqueuePickOutcome> {
   // Single chokepoint for the intro budget: every pick path (agent, pool, any
   // future producer) funnels its link through here, so enforcement can't be
   // skipped by a new caller. For callers that already trimmed (the agent path
@@ -150,7 +154,7 @@ export async function enqueuePick(
   if (dissolve) track.dissolve = true;
   if (chop) track.chop = true;
   if (loop) track.loop = true;
-  const pos = await queue.push({
+  const pos = await queue.pushAiPick({
     track,
     requestedBy: null,
     intent: reason || 'ai pick',
@@ -162,18 +166,18 @@ export async function enqueuePick(
     aiPicked: true,
     linkPrev,
     linkClockAt,
-  });
+  }, target);
+  if (pos === 'stale') return 'stale';
   if (pos === -2) {
     // Never-play blocklist refused the pick — library-db-sourced candidates
     // can slip past the subsonic filter. Same "didn't queue" signal as dedup;
     // the caller's normal no-pick handling covers it.
     queue.log('ai-pick', `${song.title} — ${song.artist} refused (never-play blocklist)`, { reason, source });
-    return -1;
+    return 'blocked';
   }
-  if (pos === -1) return -1;
+  if (pos === -1) return 'duplicate';
   queue.log('ai-pick', `${song.title} — ${song.artist}`, { reason, source });
   recordPick({ song, reason, source });
-  return pos;
+  return 'queued';
 }
-
 

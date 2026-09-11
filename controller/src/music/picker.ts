@@ -47,6 +47,29 @@ interface Candidate {
   _similarity?: number | null;
 }
 
+export interface PickTelemetry {
+  candidateCount: number;
+  candidateSources: Record<string, number>;
+  noRepeatWindow: number;
+  strictGenreResolvedCount: number;
+  strictGenreResolution: 'resolved' | 'unresolved' | 'not_strict';
+  playlistResolved: boolean;
+  playlistMatched: number | null;
+  playlistTotal: number | null;
+  minTrackSec: number | null;
+  avoidArtistGuard: boolean;
+  softRank?: {
+    randomBase: number;
+    bpmContribution: number;
+    keyContribution: number;
+    freshnessContribution: number;
+    offeredPenalty: number;
+    finalScore: number;
+  };
+}
+
+const softRankTelemetry = new WeakMap<object, PickTelemetry['softRank']>();
+
 interface QueueEntry {
   track: Candidate;
 }
@@ -137,14 +160,27 @@ function softRankByCompat(pool: Candidate[], current: { bpm: number | null; key:
   const hasAnchor = current.bpm != null || current.key != null;
   return pool
     .map((t) => {
-      const compat = hasAnchor
-        ? (() => {
-            const a = analysisFor(t);
-            return 0.4 * bpmCompat(current.bpm, a.bpm) + 0.3 * keyCompat(current.keyEnd ?? current.key, a.keyStart ?? a.key);
-          })()
-        : 0;
+      let bpmContribution = 0;
+      let keyContribution = 0;
+      if (hasAnchor) {
+        const a = analysisFor(t);
+        bpmContribution = 0.4 * bpmCompat(current.bpm, a.bpm);
+        keyContribution = 0.3 * keyCompat(current.keyEnd ?? current.key, a.keyStart ?? a.key);
+      }
+      const compat = bpmContribution + keyContribution;
       const fresh = AIRING_RANK_WEIGHT * freshness(lastAiredMsOf(t, aired), now);
-      return { t, score: Math.random() + compat + fresh - offerPenalty(t.id, now) };
+      const randomBase = Math.random();
+      const penalty = offerPenalty(t.id, now);
+      const score = randomBase + compat + fresh - penalty;
+      softRankTelemetry.set(t, {
+        randomBase,
+        bpmContribution,
+        keyContribution,
+        freshnessContribution: fresh,
+        offeredPenalty: penalty,
+        finalScore: score,
+      });
+      return { t, score };
     })
     .sort((x, y) => y.score - x.score)
     .map((s) => s.t);
@@ -675,6 +711,20 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     ? rawCandidates.filter((t) => t?.id && !excludedIds.has(t.id))
     : rawCandidates;
 
+  const telemetry = (chosen?: Candidate): PickTelemetry => ({
+    candidateCount: candidates.length,
+    candidateSources: sources,
+    noRepeatWindow: effN,
+    strictGenreResolvedCount: strictGenreResolution.genres.length,
+    strictGenreResolution: showFilter?.strict ? (strictGenreResolution.genres.length ? 'resolved' : 'unresolved') : 'not_strict',
+    playlistResolved: !!playlistPool,
+    playlistMatched: playlistInfo?.matched ?? null,
+    playlistTotal: playlistInfo?.total ?? null,
+    minTrackSec,
+    avoidArtistGuard: !!opts.avoidArtist,
+    ...(chosen && softRankTelemetry.get(chosen) ? { softRank: softRankTelemetry.get(chosen) } : {}),
+  });
+
   if (candidates.length === 0) {
     queue.log('picker', opts.avoidArtist
       ? `no candidates available excluding "${opts.avoidArtist}", skipping LLM pick`
@@ -800,6 +850,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
       song: candidates[0],
       reason: 'fallback (LLM pick failed)',
       source: candidates[0]._source,
+      decisionPath: 'pool_fallback_llm_error',
+      telemetry: telemetry(candidates[0]),
     };
   }
 
@@ -822,6 +874,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     return {
       song: candidates[0],
       reason: 'fallback (LLM returned invalid id)',
+      decisionPath: 'pool_fallback_invalid_id',
+      telemetry: telemetry(candidates[0]),
     };
   }
 
@@ -830,6 +884,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     song: chosen,
     reason: pickRaw.reason || null,
     source: chosen._source,
+    decisionPath: chosen !== candidates.find(c => c.id === pickRaw?.id) ? 'pool_repaired' : 'pool_llm',
+    telemetry: telemetry(chosen),
     // Present only when effects were active; applyMixTransition validates it.
     transition: pickRaw.transition ?? null,
   };

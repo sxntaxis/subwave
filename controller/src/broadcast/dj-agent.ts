@@ -54,6 +54,28 @@ import * as likes from './likes.js';
 import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 import type { PickTarget } from './queue/types.js';
 
+function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
+  const show = ctx?.activeShow;
+  return {
+    predecessorTrackId: current?.id ?? null,
+    priorTrackId: prior?.id ?? null,
+    incomingShowId: show?.id ?? null,
+    incomingShowName: show?.name ?? null,
+    showAt: showAt?.toISOString() ?? null,
+    predecessorOverride: !!predecessor,
+    target: target?.kind ?? null,
+    playlistStrict: !!show?.playlistStrict,
+    filtersStrict: !!show?.filtersStrict,
+    playlistResolved: null,
+    journeyActive: false,
+    runActive: false,
+  };
+}
+
+function emitPickDecision(data: Record<string, unknown>) {
+  logEvent('pick.decision', data);
+}
+
 // Re-exported so every existing `from './dj-agent.js'` import keeps working,
 // including scripts/llm-bench, which sits outside tsconfig's include.
 export { runActive } from './dj-agent/runs.js';
@@ -134,7 +156,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
@@ -214,6 +236,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     },
   ).window;
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
+  let decisionPath = 'agent';
   // A pinned anchor that resolves to nothing (stale id, or a Navidrome error —
   // resolveShowPlaylistPool swallows both) silently un-anchors the show, which
   // is undiagnosable from the operator's side unless it is logged.
@@ -270,6 +293,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       queue.log('picker', `agent id "${object.id}" repaired to near-miss match "${fixed}"`);
       object = { ...object, id: fixed };
       song = extras.seen.get(fixed);
+      decisionPath = 'agent_repaired';
     }
   }
   if (!song && extras.seen.size) {
@@ -279,6 +303,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       queue.log('picker', `agent returned unknown id "${object?.id}" — re-picked "${repicked.id}" from its own candidates`);
       object = repicked;
       song = extras.seen.get(repicked.id);
+      decisionPath = 'agent_repick';
     }
   }
 
@@ -330,7 +355,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     }),
     poolRescue: (avoidArtist) => pickViaPool(
       queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
-      { avoidArtist }, target,
+      { avoidArtist }, target, predecessorOverride, prior,
     ),
     log: (line) => queue.log('picker', line),
     logEvent,
@@ -338,10 +363,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // The pool rescue enqueues, links and records its own session turn, so a
   // rescued slot is a filled slot — runTrackEvent must treat it as done.
   if (guarded.kind === 'rescued') return true;
-  if (guarded.kind === 'stale') return 'stale';
+  if (guarded.kind === 'stale') {
+    emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
+    return 'stale';
+  }
   if (guarded.kind === 'repicked') {
     object = guarded.object;
     song = guarded.song;
+    decisionPath = 'agent_repick';
   }
 
   // Album cooldown (#1485 FR 3), at the same point of choice. Must run AFTER
@@ -372,6 +401,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     if (albumGuarded.kind === 'repicked') {
       object = albumGuarded.object;
       song = albumGuarded.song;
+      decisionPath = 'agent_repick';
     }
   }
 
@@ -422,7 +452,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // Pick was already queued/on-air and got deduped — don't record a session turn
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
-  if (queued === 'stale') return 'stale';
+  if (queued === 'stale') {
+    emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
+    return 'stale';
+  }
   if (queued !== 'queued') return false;
   session.appendTurn({
     role: 'dj', kind: 'pick',
@@ -431,6 +464,24 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       trackId: song.id, title: song.title, artist: song.artist,
       steps, toolCalls, say: say || null,
     },
+  });
+  emitPickDecision({
+    ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior),
+    playlistResolved: !!playlistTracks?.length,
+    journeyActive: !!audioWaypoint,
+    runActive: runActive(),
+    candidateCount: extras.seen.size,
+    candidateSources: null,
+    noRepeatWindow: effN,
+    strictGenreResolvedCount: genreLock?.length ?? 0,
+    strictGenreResolution: genreLock ? 'resolved' : (strict && activeShow?.genres?.length ? 'unresolved' : 'not_strict'),
+    minTrackSec,
+    avoidArtistGuard: false,
+    decisionPath,
+    chosenTrackId: song.id ?? null,
+    chosenCandidateSource: null,
+    selectionPath: 'agent',
+    fallback: false,
   });
   return true;
 }
@@ -457,7 +508,7 @@ function linkAirContext(ctx: any, airAt: Date | null) {
 // answer sends the guard back to its own same-artist pick, and only 'empty'
 // means the pool truly held no other artist — the relaxation event says which
 // (#1187).
-async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}, target: PickTarget): Promise<'queued' | 'empty' | 'collision' | 'stale'> {
+async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}, target: PickTarget, predecessorOverride = false, prior: any | null = null): Promise<'queued' | 'empty' | 'collision' | 'stale'> {
   // A DJ-mode mini-run (feature 4) anchors the pool re-rank to the run's
   // tempo/key target instead of the current track. null → today's behaviour.
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
@@ -465,6 +516,7 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   const result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint, opts, current);
   if (!result) {
     queue.log('picker', 'pool produced no pick');
+    emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'pool_no_candidates', chosenTrackId: null, selectionPath: 'pool', fallback: true, fallbackReason: opts.avoidArtist ? 'no_candidates_avoiding_artist' : 'no_candidates' });
     return 'empty';
   }
   // Build the link BEFORE enqueueing so it rides the queued item and airs when
@@ -523,8 +575,14 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
-  if (queued === 'stale') return 'stale';
-  if (queued !== 'queued') return 'collision';
+  if (queued === 'stale') {
+    emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), ...(result.telemetry || {}), decisionPath: 'collision_or_stale', chosenTrackId: null, selectionPath: 'pool', fallback: true, fallbackReason: 'stale' });
+    return 'stale';
+  }
+  if (queued !== 'queued') {
+    emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), ...(result.telemetry || {}), decisionPath: 'collision_or_stale', chosenTrackId: result.song.id ?? null, selectionPath: 'pool', fallback: true, fallbackReason: 'collision' });
+    return 'collision';
+  }
   // The reason text is concise on a successful pool pick and useful context for
   // the next turn — but on a failed pool LLM (picker.js returns the sentinel
   // 'fallback (LLM pick failed)'), recording it as the DJ's session turn primes
@@ -539,6 +597,19 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
     role: 'dj', kind: 'pick',
     text: sessionText,
     meta: { trackId: result.song.id, title: result.song.title, artist: result.song.artist },
+  });
+  emitPickDecision({
+    ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior),
+    ...(result.telemetry || {}),
+    playlistResolved: result.telemetry?.playlistResolved ?? null,
+    journeyActive: !!audioWaypoint,
+    runActive: runActive(),
+    decisionPath: result.decisionPath || 'pool_llm',
+    chosenTrackId: result.song.id ?? null,
+    chosenCandidateSource: result.source || null,
+    selectionPath: 'pool',
+    fallback: String(result.decisionPath || '').startsWith('pool_fallback'),
+    fallbackReason: String(result.decisionPath || '').startsWith('pool_fallback') ? result.reason : null,
   });
   return 'queued';
 }
@@ -581,6 +652,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // (stateless pool picker, no link).
     if (!budget.picksAllowed()) {
       queue.log('budget', 'daily LLM token cap reached — coasting on the auto playlist');
+      emitPickDecision({ ...pickDecisionBase(ctx, predecessor ?? queue.current?.track ?? null, showAt, target, predecessor, prior ?? queue.history[0]?.track ?? null), decisionPath: 'budget_coast', chosenTrackId: null, selectionPath: 'auto_playlist', fallback: true, fallbackReason: 'daily_llm_token_cap' });
       return;
     }
     const cheap = budget.preferCheapPicker();
@@ -699,7 +771,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         // can go stale (#1314). `airClock` covers both reasons it might not
         // have been told: no forecastable moment, and the clock switch.
         const queued = await pickViaAgent(queue, ctx, {
-          wantLink, audioWaypoint, current, showAt, rankTarget,
+           wantLink, audioWaypoint, current, prior: previous, predecessorOverride: !!predecessor, showAt, rankTarget,
           linkAirAt: linkClockStampFor(airAt, !!airClock), target,
         });
         breakerSuccess();
@@ -722,7 +794,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         }
       }
     }
-    const pooled = await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint, {}, target);
+    const pooled = await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint, {}, target, !!predecessor, previous);
     if (pooled === 'stale') return;
   });
 }

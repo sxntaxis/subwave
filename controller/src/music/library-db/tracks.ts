@@ -324,6 +324,14 @@ export function upsertTrackTags(id: string, tags: TagWrite): void {
     );
 }
 
+// Durable file MOOD is separate from the tagger. Update only moods so energy,
+// source, vectors, audio_moods, and every other editorial field stay untouched.
+export function setTrackEditorialMoods(id: string, moods: string[]): void {
+  requireDb()
+    .prepare(`UPDATE tracks SET moods = ? WHERE id = ?`)
+    .run(moods.length ? JSON.stringify(moods) : null, id);
+}
+
 // Back to the untagged pool. NULL every tag column rather than writing
 // moods='[]', so source/tagged_at don't go stale on an untagged row.
 export function clearTrackTags(id: string): void {

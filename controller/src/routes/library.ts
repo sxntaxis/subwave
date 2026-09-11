@@ -18,9 +18,7 @@ import { resolveEraYear } from '../music/show-filter.js';
 import { isInstrumental } from '../music/lyric-vocal.js';
 import { soundKnnWidth } from '../util/similar-tracks.js';
 import { buildGenreSuggest } from '../music/genre-suggest.js';
-import { tagBatch, TAGGER_CONTRACT_VERSION } from '../music/tagger-core.js';
-import { promptVocabHash } from '../music/embeddings.js';
-import { activeModelLabel } from '../llm/provider.js';
+import * as coyote from '../coyote/client.js';
 import { queue } from '../broadcast/queue.js';
 import { tagger, taggerView, startAnalyzer, startReconcile } from '../broadcast/tagger.js';
 import { refreshAutoPlaylist } from '../broadcast/scheduler.js';
@@ -39,6 +37,9 @@ export const router = express.Router();
 interface LibrarySong {
   id: string;
   albumId?: string;
+  artistId?: string;
+  path?: string | null;
+  musicBrainzId?: string | null;
   title?: string | null;
   artist?: string | null;
   album?: string | null;
@@ -49,6 +50,14 @@ interface LibrarySong {
   eraUntrusted?: boolean | null;
   genre?: string | null;
   duration?: number | null;
+}
+
+function coyoteHttpStatus(err: unknown): number {
+  if (!(err instanceof coyote.CoyoteError)) return 500;
+  if (err.code === 'INVALID_REQUEST' || err.code === 'INVALID_MOOD' || err.code === 'INVALID_LOCATOR') return 400;
+  if (err.code === 'IDENTITY_NOT_FOUND' || err.code === 'IDENTITY_AMBIGUOUS' || err.code === 'IDENTITY_DUPLICATE' || err.code === 'FORMAT_LIMITED') return 422;
+  if (err.code === 'COYOTE_UNAVAILABLE' || err.code === 'COYOTE_TIMEOUT') return 503;
+  return 500;
 }
 
 router.get('/library/browse', requireAdmin, async (req, res) => {
@@ -674,6 +683,42 @@ router.post('/library/reconcile', requireAdmin, (req, res) => {
   res.json({ ok: true, tagger });
 });
 
+// Refresh exactly one Navidrome row and mirror its durable editorial MOOD
+// from Coyote. Recovery/external-change path only: normal GUI edits call Coyote
+// directly before updating this runtime cache.
+router.post('/library/reconcile-track', requireAdmin, async (req, res) => {
+  const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  if (tagger.running) return res.status(409).json({ error: 'a tagger/analyzer run is already active', tagger });
+  const started = Date.now();
+  try {
+    await library.load();
+    const song = await subsonic.getSong(id);
+    if (!song) return res.status(404).json({ error: `Navidrome track not found: ${id}` });
+    const durable = await coyote.readMood(coyote.locatorFromSong(song));
+    const before = db.getTrack(id);
+    db.upsertTrackMeta(id, {
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      albumId: song.albumId ?? null,
+      artistId: song.artistId ?? null,
+      year: song.year,
+      genres: subsonic.songGenres(song),
+      duration: song.duration,
+    });
+    db.setTrackEditorialMoods(id, durable.moods);
+    const after = db.getTrack(id);
+    const fields = ['title', 'artist', 'album', 'albumId', 'artistId', 'year', 'genres', 'durationSec'] as const;
+    const metadataChanged = fields.some((field) => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
+    const durableMoodChanged = JSON.stringify(before?.moods ?? []) !== JSON.stringify(durable.moods);
+    res.json({ ok: true, id, metadataChanged, durableMoodChanged, moods: durable.moods, coyoteTrackId: durable.coyoteTrackId, durationMs: Date.now() - started });
+  } catch (err) {
+    queue.log('error', `/library/reconcile-track failed: ${(err as Error).message}`);
+    res.status(coyoteHttpStatus(err)).json({ error: (err as Error).message, code: err instanceof coyote.CoyoteError ? err.code : undefined });
+  }
+});
+
 // Delete library.db entirely and reopen an empty one; coverage's Navidrome
 // `total` is untouched. Refused while a run holds the single-flight slot,
 // since deleting the file under the child would corrupt it.
@@ -691,15 +736,21 @@ router.post('/library/reset', requireAdmin, async (_req, res) => {
   }
 });
 
-// Single-track refresh through the bulk pipeline: resolve metadata (body wins)
-// → refresh enrichment → re-embed → tagBatch([song]). Always the LLM, never
-// propagation; the enrichment/embedding steps are best-effort.
+// Single-track refresh: resolve metadata → refresh SubWave runtime enrichment →
+// re-embed → ask Coyote for the frozen semantic decision and durable MOOD write.
+// Enrichment/embedding remain best-effort runtime work.
 router.post('/library/retag', requireAdmin, async (req, res) => {
   const id = req.body?.id;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
   try {
     await library.load();
     let song = req.body || {};
+    // The GUI row is presentation data and may omit Navidrome's path/MBID.
+    // Fetch exactly this song once so Coyote receives identity hints from the
+    // media server rather than treating browser metadata as file authority.
+    let navSong: LibrarySong | null = null;
+    try { navSong = await subsonic.getSong(id); } catch {}
+    if (navSong) song = { ...navSong, ...song, id };
     if (!song.title || !song.artist) {
       const found = await subsonic.search(`${song.title || ''} ${song.artist || ''}`.trim() || id, { songCount: 25 });
       const hit = (found || []).find((s) => s.id === id);
@@ -806,7 +857,21 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
       }
     }
 
-    const [{ moods, energy }] = await tagBatch([song]);
+    // Coyote owns the durable semantic decision + file write. SubWave keeps
+    // its runtime-only energy and mirrors durable moods only after commit.
+    const semantic = await coyote.semanticRetag(coyote.locatorFromSong(navSong ?? song));
+    if (!semantic.applied) {
+      const status = ['SUBWAVE_UNAVAILABLE', 'PROVIDER_AUTH_FAILURE', 'SEMANTIC_PROCESSING_FAILURE'].includes(semantic.outcome) ? 503 : 422;
+      return res.status(status).json({
+        error: `semantic retag produced ${semantic.outcome}; durable MOOD was not changed`,
+        outcome: semantic.outcome,
+        moods: semantic.moods,
+        resultId: semantic.resultId,
+        reused: semantic.reused,
+      });
+    }
+    const moods = semantic.moods;
+    const energy = db.getTrack(id)?.energy ?? null;
     library.set(id, {
       title: song.title,
       artist: song.artist,
@@ -816,15 +881,15 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
       moods,
       energy,
       source: 'llm',
-      promptHash: promptVocabHash(TAGGER_CONTRACT_VERSION),
-      model: activeModelLabel(),
+      promptHash: semantic.metadata?.prompt_static_sha256 || undefined,
+      model: semantic.metadata?.actual_model || semantic.metadata?.model || 'coyote-semantic-v1',
     });
     await library.save();
     const tagged = library.get(id);
-    res.json({ id, moods, energy, taggedAt: tagged?.taggedAt });
+    res.json({ id, moods, energy, taggedAt: tagged?.taggedAt, outcome: semantic.outcome, resultId: semantic.resultId, proposalId: semantic.proposalId, reused: semantic.reused });
   } catch (err) {
-    queue.log('error', `/library/retag failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    queue.log('error', `/library/retag failed: ${(err as Error).message}`);
+    res.status(coyoteHttpStatus(err)).json({ error: (err as Error).message, code: err instanceof coyote.CoyoteError ? err.code : undefined });
   }
 });
 
@@ -862,6 +927,10 @@ router.post(
         if (!targets.length) return res.status(404).json({ error: 'album has no tracks' });
       }
 
+      // Coyote is the durable backend. It resolves + preflights the entire batch,
+      // journals the operation, writes MOOD safely, and rolls back partial writes.
+      const durable = await coyote.manualSetMoods(targets.map(coyote.locatorFromSong), moods);
+
       for (const t of targets) {
         // An album sibling may be new to library-db; the row has to exist first.
         db.upsertTrackMeta(t.id, {
@@ -893,6 +962,8 @@ router.post(
       res.json({
         ok: true,
         updated: targets.length,
+        coyoteUpdated: durable.updated,
+        coyoteJobId: durable.jobId,
         cleared: clearing,
         album: applyToAlbum ? (song.album ?? null) : null,
         tracks: targets.map(t => ({
@@ -904,8 +975,8 @@ router.post(
         })),
       });
     } catch (err) {
-      queue.log('error', `/library/manual-tag failed: ${err.message}`);
-      res.status(500).json({ error: err.message });
+      queue.log('error', `/library/manual-tag failed: ${(err as Error).message}`);
+      res.status(coyoteHttpStatus(err)).json({ error: (err as Error).message, code: err instanceof coyote.CoyoteError ? err.code : undefined });
     }
   },
 );

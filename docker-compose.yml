@@ -128,6 +128,7 @@ services:
       - TZ=${TZ:-Europe/London}
       - STATE_DIR=/var/sub-wave
       - SOUNDS_DIR=/sounds
+      - COYOTE_SOCKET_PATH=/coyote-ipc/coyote.sock
       # Container path of the STEMS_DIR bind mount above — empty when the
       # operator did not relocate, which keeps the cache under the state dir
       # exactly as before. Named apart from STEMS_DIR on purpose: that one is a
@@ -151,6 +152,7 @@ services:
     volumes:
       - *state-mount
       - *stems-mount
+      - ${COYOTE_IPC_HOST_PATH:-/mnt/California/Discoteca/Coyote/state/ipc}:/coyote-ipc:ro
     # curl is in the controller image; /health is served at the router root.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:7701/health > /dev/null"]

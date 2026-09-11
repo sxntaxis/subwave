@@ -19,6 +19,7 @@ export const STATE_DIR = resolveActiveStationDir(STATE_ROOT);
 // HOST path and means nothing in here). Empty = no relocation; music/stem-cache.ts
 // then resolves the cache under STATE_DIR.
 export const STEMS_DIR = envStr('SUBWAVE_STEMS_DIR', '');
+export const COYOTE_SOCKET_PATH = envStr('COYOTE_SOCKET_PATH', '/coyote-ipc/coyote.sock');
 
 // Repo-bundled static audio (studio bed, emergency clip, default SFX). Compose
 // passes SOUNDS_DIR=/sounds; native dev falls back to the repo-local sounds/ dir.
@@ -41,6 +42,10 @@ export const config = {
   stateRoot: STATE_ROOT,
   // Container path of a relocated stem cache; '' = under stateDir.
   stemsDir: STEMS_DIR,
+  coyote: {
+    socketPath: COYOTE_SOCKET_PATH,
+    timeoutMs: envInt('COYOTE_TIMEOUT_MS', 150_000),
+  },
   soundsDir: SOUNDS_DIR,
   navidrome: {
     url: envUrl('NAVIDROME_URL', 'http://navidrome:4533'),

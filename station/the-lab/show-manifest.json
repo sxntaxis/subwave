@@ -1,0 +1,1832 @@
+{
+  "schema_version": 3,
+  "source": {
+    "show_baseline": "THE-LAB-SHOW-CONFIG-V1-DRAFT.json",
+    "schedule": "THE-LAB-SCHEDULE-V5.1-ID-PAYLOAD.json",
+    "crate_audit": "THE-LAB-SHOW-CRATES-R1.tar.gz",
+    "genre_envelope_audit": "SHOW-GENRE-ENVELOPE-R1.tar.gz",
+    "smart_crate_proof": "THE-LAB-SMART-CRATE-FINAL-CANARY-R5.1.tar.gz"
+  },
+  "shows": [
+    {
+      "id": "s_atmospheres",
+      "name": "Atmospheres",
+      "topic": "Ambient, downtempo and drone as patient deep-night listening. Prioritise space, texture, sustained development and low-friction sequencing; rotate between beatless and gently rhythmic material without drifting into ordinary club music.",
+      "genres": [
+        "Ambient",
+        "Downtempo",
+        "Drone"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Atmospheres",
+        "slug": "s_atmospheres",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Ambient",
+            "Downtempo",
+            "Drone"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 14
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_movements",
+      "name": "Movements",
+      "topic": "Contemporary, neo-classical and modern-classical composition with score-adjacent work. Favour compositional continuity, chamber/piano/electroacoustic detail and modern form; avoid collapsing the show into generic cinematic bombast.",
+      "genres": [
+        "Contemporary",
+        "Neo-Classical",
+        "Modern Classical",
+        "Score"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Movements",
+        "slug": "s_movements",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Contemporary",
+            "Neo-Classical",
+            "Modern Classical",
+            "Score"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_signals",
+      "name": "Signals",
+      "topic": "IDM, glitch, abstract and leftfield electronics. Keep the hour exploratory, detailed and non-obvious, moving through rhythmic and textural abstraction without turning into generic EDM or straight club techno.",
+      "genres": [
+        "IDM",
+        "Glitch",
+        "Abstract",
+        "Leftfield"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Signals",
+        "slug": "s_signals",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "IDM",
+            "Glitch",
+            "Abstract",
+            "Leftfield"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 4
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_absolute_cinema",
+      "name": "Absolute Cinema!",
+      "topic": "Screen-rooted music: soundtrack, score, theme and modern-classical composition. Favour pieces whose musical identity feels genuinely cinematic or thematic, balancing orchestral, electronic and hybrid work rather than treating any pop song from a soundtrack as equivalent.",
+      "genres": [
+        "Soundtrack",
+        "Score",
+        "Theme",
+        "Modern Classical"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Absolute Cinema!",
+        "slug": "s_absolute_cinema",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Soundtrack",
+            "Score",
+            "Theme",
+            "Modern Classical"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_housebrew",
+      "name": "Housebrew",
+      "topic": "House through its identifiable substyles: deep, tech, acid, garage, ghetto and tribal house. Keep the groove continuous while rotating substyles and eras; do not broaden into generic House or Techno when a more specific tagged choice is available.",
+      "genres": [
+        "Deep House",
+        "Tech House",
+        "Acid House",
+        "Garage House",
+        "Ghetto House",
+        "Tribal House"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Housebrew",
+        "slug": "s_housebrew",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Deep House",
+            "Tech House",
+            "Acid House",
+            "Garage House",
+            "Ghetto House",
+            "Tribal House"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 9
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_softsynth",
+      "name": "Softsynth",
+      "topic": "Melodic electronic pop across synth-pop, nu-disco and chillwave. Favour strong melody, synthetic texture and polished groove, moving naturally between glossy, dreamy and danceable material without turning into generic pop.",
+      "genres": [
+        "Synth-pop",
+        "Nu-Disco",
+        "Chillwave"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Softsynth",
+        "slug": "s_softsynth",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Synth-pop",
+            "Nu-Disco",
+            "Chillwave"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 9
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_ufos",
+      "name": "UFOs",
+      "topic": "Deep, minimal and dub techno. Make the space, repetition and hypnosis the point: patient low-slung progression, textural detail and subtle pressure rather than peak-time techno or maximal festival energy.",
+      "genres": [
+        "Deep Techno",
+        "Minimal Techno",
+        "Dub Techno"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — UFOs",
+        "slug": "s_ufos",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Deep Techno",
+            "Minimal Techno",
+            "Dub Techno"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_garageware",
+      "name": "Garageware",
+      "topic": "The UK bass continuum through UK garage, bassline, grime and dubstep. Prioritise syncopation, bass pressure and rhythmic mutation; move across the lineage without flattening it into generic electronic dance music.",
+      "genres": [
+        "UK Garage",
+        "Bassline",
+        "Grime",
+        "Dubstep"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Garageware",
+        "slug": "s_garageware",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "UK Garage",
+            "Bassline",
+            "Grime",
+            "Dubstep"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 7
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_offbrand",
+      "name": "Offbrand",
+      "topic": "Alternative, indie and pop-rock continuum. Keep guitar-based alternative pop broad and human, moving between rougher indie, melodic alternative and pop-rock without letting the hour collapse into one artist, one decade or stadium-rock obviousness.",
+      "genres": [
+        "Alternative Rock",
+        "Indie Rock",
+        "Pop Rock"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Offbrand",
+        "slug": "s_offbrand",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Alternative Rock",
+            "Indie Rock",
+            "Pop Rock"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 11
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_hazey",
+      "name": "Hazey",
+      "topic": "Dream pop, shoegaze, ethereal and psychedelic rock. Favour haze, texture, suspended melody and immersive atmosphere, with enough rhythmic variation to keep motion without breaking the dreamlike character.",
+      "genres": [
+        "Dream Pop",
+        "Shoegaze",
+        "Ethereal",
+        "Psychedelic Rock"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Hazey",
+        "slug": "s_hazey",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Dream Pop",
+            "Shoegaze",
+            "Ethereal",
+            "Psychedelic Rock"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 8
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_postwave",
+      "name": "Postwave",
+      "topic": "Post-punk, new wave, coldwave and goth-rock lineage. Keep it taut, angular and nocturnal, balancing pop-facing new wave with darker and more skeletal descendants rather than reducing the show to a single goth or synth aesthetic.",
+      "genres": [
+        "Post-Punk",
+        "New Wave",
+        "Coldwave",
+        "Goth Rock"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Postwave",
+        "slug": "s_postwave",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Post-Punk",
+            "New Wave",
+            "Coldwave",
+            "Goth Rock"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_distorted",
+      "name": "Distorted",
+      "topic": "Punk, hardcore, post-hardcore, noise, grind and related extreme branches. Preserve abrasion, urgency and the full range from concise blasts to harsher experiments; rotate substyles and do not sanitise short, strange or confrontational material.",
+      "genres": [
+        "Punk",
+        "Hardcore",
+        "Post-Hardcore",
+        "Noise",
+        "Grindcore",
+        "Crust",
+        "Noisecore",
+        "Goregrind",
+        "Pornogrind",
+        "Power Violence"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Distorted",
+        "slug": "s_distorted",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Punk",
+            "Hardcore",
+            "Post-Hardcore",
+            "Noise",
+            "Grindcore",
+            "Crust",
+            "Noisecore",
+            "Goregrind",
+            "Pornogrind",
+            "Power Violence"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_funkplay",
+      "name": "Funkplay",
+      "topic": "Soul to funk to disco to boogie as one groove-centred continuum. Prioritise pocket, feel, musicianship and dance-floor lineage, moving across eras without reducing the show to only disco or only classic soul.",
+      "genres": [
+        "Soul",
+        "Funk",
+        "Disco",
+        "Boogie"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Funkplay",
+        "slug": "s_funkplay",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Soul",
+            "Funk",
+            "Disco",
+            "Boogie"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 6
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_lowkey",
+      "name": "Lowkey",
+      "topic": "Neo-soul and contemporary R&B. Keep it intimate, modern and detail-rich, favouring expressive vocals, groove and production nuance while avoiding generic mainstream pop that only brushes the edges of the style.",
+      "genres": [
+        "Neo Soul",
+        "Contemporary R&B"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Lowkey",
+        "slug": "s_lowkey",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Neo Soul",
+            "Contemporary R&B"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 7
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_afrodisiac",
+      "name": "Afrodisiac",
+      "topic": "Afrobeat, highlife and soukous as distinct but connected West/Central African band and dance traditions. Prioritise rhythmic interplay, guitars, horns and ensemble motion; do not broaden into generic Funk merely because the groove is adjacent.",
+      "genres": [
+        "Afrobeat",
+        "Highlife",
+        "Soukous"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Afrodisiac",
+        "slug": "s_afrodisiac",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Afrobeat",
+            "Highlife",
+            "Soukous"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_natural_mystic",
+      "name": "Natural Mystic",
+      "topic": "Reggae, roots reggae and dub. Keep the roots/dub axis central, moving between songcraft, sound-system space and studio experimentation; Dancehall belongs elsewhere and should not become the show's default direction.",
+      "genres": [
+        "Reggae",
+        "Roots Reggae",
+        "Dub"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Natural Mystic",
+        "slug": "s_natural_mystic",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Reggae",
+            "Roots Reggae",
+            "Dub"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_skrrt",
+      "name": "skrrt",
+      "topic": "Cloud rap, trap and pop rap. Favour modern melodic and production-forward rap, balancing haze, bounce and hooks without drifting into boom-bap or older hardcore hip-hop unless the tagged track genuinely belongs here.",
+      "genres": [
+        "Cloud Rap",
+        "Trap",
+        "Pop Rap"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — skrrt",
+        "slug": "s_skrrt",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Cloud Rap",
+            "Trap",
+            "Pop Rap"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 9
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_lowriders",
+      "name": "Lowriders",
+      "topic": "Boom-bap, conscious, jazzy and instrumental hip-hop. Favour head-nod rhythm, sampling, lyricism and instrumental beat craft; keep the lineage grounded and avoid turning the hour into trap or generic pop rap.",
+      "genres": [
+        "Boom Bap",
+        "Conscious",
+        "Jazzy Hip-Hop",
+        "Instrumental"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Lowriders",
+        "slug": "s_lowriders",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Boom Bap",
+            "Conscious",
+            "Jazzy Hip-Hop",
+            "Instrumental"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 4
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_hyperbeats",
+      "name": "Hyperbeats",
+      "topic": "Drum and bass, jungle, juke and breakcore as a high-velocity breakbeat continuum. Keep kinetic momentum while rotating rhythmic languages and densities; speed is not the only goal, and the show should still breathe between peaks.",
+      "genres": [
+        "Drum n Bass",
+        "Jungle",
+        "Juke",
+        "Breakcore"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Hyperbeats",
+        "slug": "s_hyperbeats",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Drum n Bass",
+            "Jungle",
+            "Juke",
+            "Breakcore"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_hustlas",
+      "name": "Hustlas",
+      "topic": "Harder lineage-heavy hip-hop through boom-bap, G-funk, gangsta and hardcore rap. Prioritise weight, attitude, regional character and classic rap architecture; avoid drifting into cloud rap, trap or pop-rap merely because they are adjacent.",
+      "genres": [
+        "Boom Bap",
+        "G-Funk",
+        "Gangsta",
+        "Hardcore Hip-Hop"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Hustlas",
+        "slug": "s_hustlas",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Boom Bap",
+            "G-Funk",
+            "Gangsta",
+            "Hardcore Hip-Hop"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_tropicalia",
+      "name": "Tropicalia",
+      "topic": "Brazilian popular music around MPB, bossa nova and samba. Keep Brazilian songcraft, rhythm and harmonic colour central, moving between intimate and extroverted material without treating the show as a generic Latin bucket.",
+      "genres": [
+        "MPB",
+        "Bossanova",
+        "Bossa Nova",
+        "Samba"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Tropicalia",
+        "slug": "s_tropicalia",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "MPB",
+            "Bossanova",
+            "Bossa Nova",
+            "Samba"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 4
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_tumbao",
+      "name": "Tumbao",
+      "topic": "Salsa, son, mambo, boogaloo and descarga as an Afro-Caribbean dance-band lineage. Prioritise ensemble drive, percussion, horns and rhythmic dialogue, moving naturally between classic forms and hotter descarga/boogaloo energy.",
+      "genres": [
+        "Salsa",
+        "Son",
+        "Mambo",
+        "Boogaloo",
+        "Descarga"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Tumbao",
+        "slug": "s_tumbao",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Salsa",
+            "Son",
+            "Mambo",
+            "Boogaloo",
+            "Descarga"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_parranda",
+      "name": "Parranda",
+      "topic": "Cumbia, vallenato and porro along the Colombian/Caribbean folk-dance axis. Favour recognisable rhythmic and regional character, balancing festive and roots-oriented material without widening into generic Latin pop.",
+      "genres": [
+        "Cumbia",
+        "Vallenato",
+        "Porro"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Parranda",
+        "slug": "s_parranda",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Cumbia",
+            "Vallenato",
+            "Porro"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_riddim",
+      "name": "Riddim",
+      "topic": "Dancehall, ragga, soca and zouk: Caribbean club and dance music outside the roots-reggae lane. Keep rhythm, bass and vocal energy central while rotating islands and eras; do not let roots reggae take over the hour.",
+      "genres": [
+        "Dancehall",
+        "Ragga",
+        "Soca",
+        "Zouk"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Riddim",
+        "slug": "s_riddim",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Dancehall",
+            "Ragga",
+            "Soca",
+            "Zouk"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_chingoteo",
+      "name": "Chingoteo",
+      "topic": "Reggaeton proper, deliberately narrow. Explore different eras, production styles and tempos inside reggaeton while resisting the pull toward generic Latin urban, trap or pop tracks that are not actually tagged for the show.",
+      "genres": [
+        "Reggaeton"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Chingoteo",
+        "slug": "s_chingoteo",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Reggaeton"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_swingtime",
+      "name": "Swingtime",
+      "topic": "Ragtime into Dixieland and swing: the earliest jazz constellation. Keep the rhythmic lift, ensemble interplay and period character alive, moving through the lineage without jumping forward into bop or modern jazz language.",
+      "genres": [
+        "Ragtime",
+        "Dixieland",
+        "Swing"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Swingtime",
+        "slug": "s_swingtime",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Ragtime",
+            "Dixieland",
+            "Swing"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_standards",
+      "name": "Standards",
+      "topic": "Bop, hard bop, cool jazz, modal and post-bop as the central modern-jazz language. Balance canonical vocabulary with less-obvious recordings, vary ensemble size and intensity, and avoid turning the hour into either smooth background jazz or free improvisation.",
+      "genres": [
+        "Bop",
+        "Hard Bop",
+        "Cool Jazz",
+        "Modal",
+        "Post Bop"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Standards",
+        "slug": "s_standards",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Bop",
+            "Hard Bop",
+            "Cool Jazz",
+            "Modal",
+            "Post Bop"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_neobop",
+      "name": "Neobop",
+      "topic": "Contemporary jazz, fusion, avant-garde jazz, free jazz and free improvisation. Favour modern, exploratory and open-ended playing, balancing groove, abstraction and improvisational risk without sliding back into a conventional standards hour.",
+      "genres": [
+        "Contemporary Jazz",
+        "Fusion",
+        "Avant-garde Jazz",
+        "Free Jazz",
+        "Free Improvisation"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Neobop",
+        "slug": "s_neobop",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Contemporary Jazz",
+            "Fusion",
+            "Avant-garde Jazz",
+            "Free Jazz",
+            "Free Improvisation"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_crossroads",
+      "name": "Crossroads",
+      "topic": "Country, Delta and piano blues: acoustic and pre-electric blues traditions. Favour direct performance, regional character and foundational forms, with enough variation in instrumentation and pace to avoid a museum-like monotony.",
+      "genres": [
+        "Country Blues",
+        "Delta Blues",
+        "Piano Blues"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Crossroads",
+        "slug": "s_crossroads",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Country Blues",
+            "Delta Blues",
+            "Piano Blues"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_amplified",
+      "name": "Amplified",
+      "topic": "Chicago, electric, modern electric, Texas and Louisiana blues. Keep amplified tone, band interplay and regional groove central, moving from classic electric blues to modern descendants without collapsing into generic blues-rock.",
+      "genres": [
+        "Chicago Blues",
+        "Electric Blues",
+        "Modern Electric Blues",
+        "Texas Blues",
+        "Louisiana Blues"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Amplified",
+        "slug": "s_amplified",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Chicago Blues",
+            "Electric Blues",
+            "Modern Electric Blues",
+            "Texas Blues",
+            "Louisiana Blues"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_hellfire",
+      "name": "Hellfire",
+      "topic": "A broad heavy-metal constellation from traditional, power and speed metal through thrash, death, black, doom, sludge and post-metal. Rotate branches deliberately so one extreme style does not monopolise the hour; preserve weight, contrast and lineage.",
+      "genres": [
+        "Heavy Metal",
+        "Power Metal",
+        "Speed Metal",
+        "Thrash",
+        "Death Metal",
+        "Black Metal",
+        "Doom Metal",
+        "Sludge Metal",
+        "Post-Metal"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Hellfire",
+        "slug": "s_hellfire",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Heavy Metal",
+            "Power Metal",
+            "Speed Metal",
+            "Thrash",
+            "Death Metal",
+            "Black Metal",
+            "Doom Metal",
+            "Sludge Metal",
+            "Post-Metal"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 2
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_folkside",
+      "name": "Folkside",
+      "topic": "Folk and neofolk as a broad continuum. Favour songcraft, acoustic or roots-derived texture and intimate performance while allowing modern, darker and more experimental folk forms to appear naturally.",
+      "genres": [
+        "Folk",
+        "Neofolk"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Folkside",
+        "slug": "s_folkside",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Folk",
+            "Neofolk"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 4
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2: crate binding is authoritative because native refinement materially over-expands the exact crate."
+    },
+    {
+      "id": "s_rustbound",
+      "name": "Rustbound",
+      "topic": "Bluegrass and honky-tonk as a rural string-band/country specialist lane. Prioritise instrumental snap, vocal character, dance-floor swing and roots detail without broadening into generic contemporary country.",
+      "genres": [
+        "Bluegrass",
+        "Honky Tonk"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Rustbound",
+        "slug": "s_rustbound",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Bluegrass",
+            "Honky Tonk"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_blue_suede",
+      "name": "Blue Suede",
+      "topic": "Doo-wop and rockabilly around the first-wave rock-and-roll orbit. Keep early vocal-group, rhythm-and-blues and rockabilly energy central; do not broaden into generic later Rock & Roll or modern rock.",
+      "genres": [
+        "Doo Wop",
+        "Rockabilly"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Blue Suede",
+        "slug": "s_blue_suede",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Doo Wop",
+            "Rockabilly"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_palenque",
+      "name": "Palenque",
+      "topic": "Mariachi, ranchera and norteño as a Mexican popular/traditional constellation. Preserve distinct instrumentation, vocal styles and regional character across the three branches rather than flattening them into generic Latin music.",
+      "genres": [
+        "Mariachi",
+        "Ranchera",
+        "Norteño"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — Palenque",
+        "slug": "s_palenque",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "Mariachi",
+            "Ranchera",
+            "Norteño"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 1
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2 correction: native strict contracts the exact crate (recall=0.655894); crate binding is authoritative."
+    },
+    {
+      "id": "s_hallyu",
+      "name": "한류",
+      "topic": "K-pop within the tagged library pool. Favour coherent Korean-pop programming across generations and production styles, but do not infer nationality or cultural identity from an artist name alone; trust the library tag and the music evidence.",
+      "genres": [
+        "K-pop"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — 한류",
+        "slug": "s_hallyu",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "K-pop"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "NATIVE_GENRE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 6
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied."
+    },
+    {
+      "id": "s_tokai_no_uta",
+      "name": "都会の歌",
+      "topic": "Japanese popular-song lineage across J-pop, City Pop and Kayōkyoku. Keep the full lineage visible instead of turning the hour into only City Pop, balancing eras, production styles and song forms while staying inside the tagged Japanese-pop pool.",
+      "genres": [
+        "J-pop",
+        "City Pop",
+        "Kayōkyoku"
+      ],
+      "crate": {
+        "enabled": true,
+        "kind": "EXACT_GENRE_SMART",
+        "displayName": "The Lab — 都会の歌",
+        "slug": "s_tokai_no_uta",
+        "owner": "radio",
+        "public": true,
+        "ruleSummary": "Any exact-normalized frozen genre label; no refinement matching",
+        "publicationState": "READY",
+        "transport": "NAVIDROME_NATIVE_API_SMART",
+        "apiCreate": "POST /api/playlist",
+        "ruleSemantics": {
+          "operator": "any",
+          "field": "genre",
+          "comparison": "is",
+          "canonicalValues": [
+            "J-pop",
+            "City Pop",
+            "Kayōkyoku"
+          ],
+          "liveValueResolution": "normalized equality to current Navidrome modern multi-value genre vocabulary; emit exact stored live strings"
+        },
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "CRATE_STRICT",
+        "filtersStrict": true,
+        "playlistStrict": true,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 3
+      },
+      "notes": "Crate definition is generated from the frozen exact-label repertoire; runtime binding is proposed, not applied. R2 correction: native strict contracts the exact crate (recall=0.931437); crate binding is authoritative."
+    },
+    {
+      "id": "s_freeform",
+      "name": "Freeform",
+      "topic": "Whole-library wildcard. Let the current Moment and the preceding track guide direction, but keep opening the field instead of camping in one scene. Prefer coherent discoveries and breadth across the catalogue; surprising turns are welcome when the transition earns them.",
+      "genres": [],
+      "crate": {
+        "enabled": false,
+        "kind": "WHOLE_LIBRARY_SMART",
+        "displayName": "The Lab — Freeform",
+        "slug": "s_freeform",
+        "owner": "radio",
+        "public": false,
+        "ruleSummary": "All tracks via gt playCount -1; 28k-track public smart playlist is technically expressible but not recommended for large libraries.",
+        "publicationState": "DEFERRED_WHOLE_LIBRARY_UX",
+        "transport": null,
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "STRUCTURAL_DYNAMIC",
+        "filtersStrict": false,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 5
+      },
+      "notes": "Freeform remains whole-library on air. A whole-library smart playlist is technically honest but is deferred rather than forcing a 28k-track listener playlist solely for symmetry."
+    },
+    {
+      "id": "s_b_sides",
+      "name": "B-Sides",
+      "topic": "Deep-library discovery across the whole catalogue. Prefer unaired, rarely aired, less-obvious album cuts and overlooked artists over familiar staples when both fit the transition. Keep it musical rather than random: depth first, but never at the expense of a plausible handoff.",
+      "genres": [],
+      "crate": {
+        "enabled": false,
+        "kind": "STATION_HISTORY_SMART",
+        "displayName": "The Lab — B-Sides",
+        "slug": "s_b_sides",
+        "owner": "radio",
+        "public": false,
+        "ruleSummary": "Candidate station-account rules evaluated in B-SIDES-HISTORY-POLICIES.csv; history is immature for a definitive deep-cut crate.",
+        "publicationState": "DEFERRED_STATION_HISTORY",
+        "transport": null,
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "STRUCTURAL_DYNAMIC",
+        "filtersStrict": false,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 4
+      },
+      "notes": "B-Sides remains on air using its current structural/discovery brief. Its station-history crate is deferred until the radio account has enough history to distinguish neglected repertoire."
+    },
+    {
+      "id": "s_after_hours",
+      "name": "After Hours",
+      "topic": "Late-night cross-genre decompression. Favour spacious, intimate, reflective and low-friction choices while letting the current Moment steer the exact feeling. Avoid abrupt escalation or obvious daytime bangers; strange, dreamy and quietly adventurous choices are welcome.",
+      "genres": [],
+      "crate": {
+        "enabled": false,
+        "kind": "UNRESOLVED_STRUCTURAL",
+        "displayName": "The Lab — After Hours",
+        "slug": "s_after_hours",
+        "owner": "radio",
+        "public": false,
+        "ruleSummary": "Current audio/CLAP moods live in SubWave library.db, not Navidrome-visible metadata; no honest exact smart rule.",
+        "publicationState": "DEFERRED_SIGNAL_VISIBILITY",
+        "transport": null,
+        "backingFile": null
+      },
+      "runtime": {
+        "binding": "STRUCTURAL_DYNAMIC",
+        "filtersStrict": false,
+        "playlistStrict": false,
+        "playlistExhaust": false
+      },
+      "schedule": {
+        "weeklyHours": 10
+      },
+      "notes": "After Hours remains on air using SubWave Moment/mood steering. Navidrome cannot currently query the authoritative CLAP/audio mood layer, so no proxy crate is fabricated."
+    }
+  ],
+  "crate_policy": {
+    "target": "Every repertoire-defined show has a listener-facing public Navidrome smart-playlist crate.",
+    "genre_crates_ready": 37,
+    "structural_crates_deferred": 3,
+    "non_show_playlists": "DEFERRED",
+    "runtime_binding_is_independent_from_publication": true,
+    "native_genre_strict_count": 29,
+    "crate_strict_count": 8,
+    "structural_dynamic_count": 3,
+    "crate_strict_shows": [
+      "Distorted",
+      "Folkside",
+      "Funkplay",
+      "Movements",
+      "Natural Mystic",
+      "Palenque",
+      "Riddim",
+      "都会の歌"
+    ],
+    "correction_from_R1": "R1's 31/6 runtime classification thresholded expansion but did not treat contraction as unsafe. Palenque native recall=0.655894 and 都会の歌 native recall=0.931437, so both are corrected to CRATE_STRICT.",
+    "transport": "NAVIDROME_NATIVE_API_SMART",
+    "transport_proof": {
+      "navidrome_version": "0.63.2",
+      "navidrome_build": "be10f89c",
+      "canary": "PASS_THE_LAB_SMART_CRATE_FINAL_CANARY_R5_1",
+      "reference_tracks": 2049,
+      "native_tracks": 2049,
+      "reference_vs_native_missing": 0,
+      "reference_vs_native_unexpected": 0,
+      "subsonic_missing_due_to_media_missing_flag": 2,
+      "refinement_leaks": 0,
+      "scan_triggered": false,
+      "database_lock_errors": false,
+      "owner": "radio",
+      "public": true,
+      "update_in_place": true,
+      "delete_by_radio": true
+    },
+    "obsolete_transport": "NSP_FILE_IMPORT_SCAN",
+    "native_api_contract": {
+      "create": "POST /api/playlist",
+      "update": "PUT /api/playlist/:id",
+      "delete": "DELETE /api/playlist/:id",
+      "version_guard": "Navidrome 0.63.2 (be10f89c)",
+      "note": "Undocumented native API; production sync must fail closed on contract drift."
+    },
+    "runtime_binding_counts": {
+      "NATIVE_GENRE_STRICT": 29,
+      "CRATE_STRICT": 8,
+      "STRUCTURAL_DYNAMIC": 3
+    }
+  }
+}

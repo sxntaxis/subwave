@@ -1,0 +1,410 @@
+{
+  "Abstract": [
+    "Abstract"
+  ],
+  "Acid House": [
+    "Acid House"
+  ],
+  "Afrobeat": [
+    "Afrobeat"
+  ],
+  "Alternative Rock": [
+    "Alternative Rock"
+  ],
+  "Ambient": [
+    "Ambient"
+  ],
+  "Avant-garde Jazz": [
+    "Avant-garde Jazz"
+  ],
+  "Bassline": [
+    "Bassline"
+  ],
+  "Black Metal": [
+    "Black Metal"
+  ],
+  "Bluegrass": [
+    "Bluegrass"
+  ],
+  "Boogaloo": [
+    "Boogaloo"
+  ],
+  "Boogie": [
+    "Boogie"
+  ],
+  "Boom Bap": [
+    "Boom Bap"
+  ],
+  "Bop": [
+    "Bop"
+  ],
+  "Bossa Nova": [
+    "Bossa Nova"
+  ],
+  "Bossanova": [
+    "Bossanova"
+  ],
+  "Breakcore": [
+    "Breakcore"
+  ],
+  "Chicago Blues": [
+    "Chicago Blues"
+  ],
+  "Chillwave": [
+    "Chillwave"
+  ],
+  "City Pop": [
+    "City Pop"
+  ],
+  "Cloud Rap": [
+    "Cloud Rap"
+  ],
+  "Coldwave": [
+    "Coldwave"
+  ],
+  "Conscious": [
+    "Conscious"
+  ],
+  "Contemporary": [
+    "Contemporary"
+  ],
+  "Contemporary Jazz": [
+    "Contemporary Jazz"
+  ],
+  "Contemporary R&B": [
+    "Contemporary R&B"
+  ],
+  "Cool Jazz": [
+    "Cool Jazz"
+  ],
+  "Country Blues": [
+    "Country Blues"
+  ],
+  "Crust": [
+    "Crust"
+  ],
+  "Cumbia": [
+    "Cumbia"
+  ],
+  "Dancehall": [
+    "Dancehall"
+  ],
+  "Death Metal": [
+    "Death Metal"
+  ],
+  "Deep House": [
+    "Deep House"
+  ],
+  "Deep Techno": [
+    "Deep Techno"
+  ],
+  "Delta Blues": [
+    "Delta Blues"
+  ],
+  "Descarga": [
+    "Descarga"
+  ],
+  "Disco": [
+    "Disco"
+  ],
+  "Dixieland": [
+    "Dixieland"
+  ],
+  "Doo Wop": [
+    "Doo Wop"
+  ],
+  "Doom Metal": [
+    "Doom Metal"
+  ],
+  "Downtempo": [
+    "Downtempo"
+  ],
+  "Dream Pop": [
+    "Dream Pop"
+  ],
+  "Drone": [
+    "Drone"
+  ],
+  "Drum n Bass": [
+    "Drum n Bass"
+  ],
+  "Dub": [
+    "Dub"
+  ],
+  "Dub Techno": [
+    "Dub Techno"
+  ],
+  "Dubstep": [
+    "Dubstep"
+  ],
+  "Electric Blues": [
+    "Electric Blues"
+  ],
+  "Ethereal": [
+    "Ethereal"
+  ],
+  "Folk": [
+    "Folk"
+  ],
+  "Free Improvisation": [
+    "Free Improvisation"
+  ],
+  "Free Jazz": [
+    "Free Jazz"
+  ],
+  "Funk": [
+    "Funk"
+  ],
+  "Fusion": [
+    "Fusion"
+  ],
+  "G-Funk": [
+    "G-Funk"
+  ],
+  "Gangsta": [
+    "Gangsta"
+  ],
+  "Garage House": [
+    "Garage House"
+  ],
+  "Ghetto House": [
+    "Ghetto House"
+  ],
+  "Glitch": [
+    "Glitch"
+  ],
+  "Goregrind": [
+    "Goregrind"
+  ],
+  "Goth Rock": [
+    "Goth Rock"
+  ],
+  "Grime": [
+    "Grime"
+  ],
+  "Grindcore": [
+    "Grindcore"
+  ],
+  "Hard Bop": [
+    "Hard Bop"
+  ],
+  "Hardcore": [
+    "Hardcore"
+  ],
+  "Hardcore Hip-Hop": [
+    "Hardcore Hip-Hop"
+  ],
+  "Heavy Metal": [
+    "Heavy Metal"
+  ],
+  "Highlife": [
+    "Highlife"
+  ],
+  "Honky Tonk": [
+    "Honky Tonk"
+  ],
+  "IDM": [
+    "IDM"
+  ],
+  "Indie Rock": [
+    "Indie Rock"
+  ],
+  "Instrumental": [
+    "Instrumental"
+  ],
+  "J-pop": [
+    "J-pop"
+  ],
+  "Jazzy Hip-Hop": [
+    "Jazzy Hip-Hop"
+  ],
+  "Juke": [
+    "Juke"
+  ],
+  "Jungle": [
+    "Jungle"
+  ],
+  "K-pop": [
+    "K-pop"
+  ],
+  "Kayōkyoku": [
+    "Kayōkyoku"
+  ],
+  "Leftfield": [
+    "Leftfield"
+  ],
+  "Louisiana Blues": [
+    "Louisiana Blues"
+  ],
+  "MPB": [
+    "MPB"
+  ],
+  "Mambo": [
+    "Mambo"
+  ],
+  "Mariachi": [
+    "Mariachi"
+  ],
+  "Minimal Techno": [
+    "Minimal Techno"
+  ],
+  "Modal": [
+    "Modal"
+  ],
+  "Modern Classical": [
+    "Modern Classical"
+  ],
+  "Modern Electric Blues": [
+    "Modern Electric Blues"
+  ],
+  "Neo Soul": [
+    "Neo Soul"
+  ],
+  "Neo-Classical": [
+    "Neo-Classical"
+  ],
+  "Neofolk": [
+    "Neofolk"
+  ],
+  "New Wave": [
+    "New Wave"
+  ],
+  "Noise": [
+    "Noise"
+  ],
+  "Noisecore": [
+    "Noisecore"
+  ],
+  "Norteño": [
+    "Norteño"
+  ],
+  "Nu-Disco": [
+    "Nu-Disco"
+  ],
+  "Piano Blues": [
+    "Piano Blues"
+  ],
+  "Pop Rap": [
+    "Pop Rap"
+  ],
+  "Pop Rock": [
+    "Pop Rock"
+  ],
+  "Pornogrind": [
+    "Pornogrind"
+  ],
+  "Porro": [
+    "Porro"
+  ],
+  "Post Bop": [
+    "Post Bop"
+  ],
+  "Post-Hardcore": [
+    "Post-Hardcore"
+  ],
+  "Post-Metal": [
+    "Post-Metal"
+  ],
+  "Post-Punk": [
+    "Post-Punk"
+  ],
+  "Power Metal": [
+    "Power Metal"
+  ],
+  "Power Violence": [
+    "Power Violence"
+  ],
+  "Psychedelic Rock": [
+    "Psychedelic Rock"
+  ],
+  "Punk": [
+    "Punk"
+  ],
+  "Ragga": [
+    "Ragga"
+  ],
+  "Ragtime": [
+    "Ragtime"
+  ],
+  "Ranchera": [
+    "Ranchera"
+  ],
+  "Reggae": [
+    "Reggae"
+  ],
+  "Reggaeton": [
+    "Reggaeton"
+  ],
+  "Rockabilly": [
+    "Rockabilly"
+  ],
+  "Roots Reggae": [
+    "Roots Reggae"
+  ],
+  "Salsa": [
+    "Salsa"
+  ],
+  "Samba": [
+    "Samba"
+  ],
+  "Score": [
+    "Score"
+  ],
+  "Shoegaze": [
+    "Shoegaze"
+  ],
+  "Sludge Metal": [
+    "Sludge Metal"
+  ],
+  "Soca": [
+    "Soca"
+  ],
+  "Son": [
+    "Son"
+  ],
+  "Soukous": [
+    "Soukous"
+  ],
+  "Soul": [
+    "Soul"
+  ],
+  "Soundtrack": [
+    "Soundtrack"
+  ],
+  "Speed Metal": [
+    "Speed Metal"
+  ],
+  "Swing": [
+    "Swing"
+  ],
+  "Synth-pop": [
+    "Synth-pop"
+  ],
+  "Tech House": [
+    "Tech House"
+  ],
+  "Texas Blues": [
+    "Texas Blues"
+  ],
+  "Theme": [
+    "Theme"
+  ],
+  "Thrash": [
+    "Thrash"
+  ],
+  "Trap": [
+    "Trap"
+  ],
+  "Tribal House": [
+    "Tribal House"
+  ],
+  "UK Garage": [
+    "UK Garage"
+  ],
+  "Vallenato": [
+    "Vallenato"
+  ],
+  "Zouk": [
+    "Zouk"
+  ]
+}

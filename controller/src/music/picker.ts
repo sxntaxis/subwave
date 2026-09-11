@@ -500,7 +500,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   let playlistInfo: { names: string[]; matched: number; total: number } | null = null;
   if (strictPlaylist) {
     const inPl = pool.filter((t) => t?.id && playlistPool!.ids.has(t.id));
-    if (inPl.length) selectionPool = inPl;
+    selectionPool = inPl;
   }
 
   // Strict filters re-applied to the FINAL merged pool: lean() never-starves per
@@ -513,7 +513,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       moods: showFilter!.moods,
       energies: showFilter!.energies,
       vocals: showFilter!.vocals,
-    }, { starve: false });
+    }, { starve: false, skipGenres: strictPlaylist });
   }
 
   // Cap per artist; a strict playlist anchor is intentionally single-artist.
@@ -653,6 +653,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
       excludedIds,
       resolvedGenres: strictGenreResolution.genres,
       minTrackSec,
+      playlistGenreAuthoritative: playlistStrict && !!playlistPool?.tracks?.length,
     },
   );
   const effN = noRepeat.window;

@@ -11,7 +11,7 @@ import {
   normGenre, genreMatches, genreResolutionWarning, preferGenre,
   hasEraBound, eraSpan, inYearRange, preferEra,
   resolveEraYear, trackEraYear,
-  preferEnergy, preferEnergyStrict, preferMood,
+  trackGenres, preferEnergy, preferEnergyStrict, preferMood,
   onlyGenre, onlyMood, onlyEnergy, applyStrictLocks,
 } from '../src/music/show-filter.js';
 
@@ -29,6 +29,21 @@ async function test(name: string, fn: () => void | Promise<void>) {
 const t = (over: Record<string, unknown>) => ({ id: 'x', title: 't', artist: 'a', ...over });
 
 console.log('genre (any-of, never-starve):');
+await test('trackGenres normalizes string and OpenSubsonic object arrays', () => {
+  assert.deepEqual(trackGenres(t({ genres: ['Mariachi'] })), ['Mariachi']);
+  assert.deepEqual(trackGenres(t({ genres: [{ name: 'Mariachi' }] })), ['Mariachi']);
+  assert.deepEqual(trackGenres(t({ genres: ['Mariachi', { name: 'Ranchera' }] })), ['Mariachi', 'Ranchera']);
+});
+await test('trackGenres ignores blank or malformed entries and falls back to scalar genre', () => {
+  assert.deepEqual(trackGenres(t({ genres: [{ name: '' }, { name: null }, null, 4], genre: 'Mariachi' })), ['Mariachi']);
+});
+await test('trackGenres keeps an unusable direct array eligible for library fallback', () => {
+  assert.deepEqual(trackGenres(t({ id: 'unknown-test-track', genres: [{ name: '' }] })), []);
+});
+await test('genreMatches treats OpenSubsonic genre objects like strings', () => {
+  assert.equal(genreMatches(t({ genres: [{ name: 'Mariachi' }] }), [normGenre('Mariachi')]), true);
+  assert.equal(genreMatches(t({ genres: [{ name: 'Punk Rock' }] }), [normGenre('Punk')]), true);
+});
 await test('genreMatches matches ANY normalised target', () => {
   assert.equal(genreMatches(t({ genre: 'Hip Hop' }), [normGenre('Hip-Hop')]), true);
   assert.equal(genreMatches(t({ genre: 'Jazz' }), [normGenre('Rock'), normGenre('Jazz')]), true);

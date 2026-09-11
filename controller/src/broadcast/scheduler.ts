@@ -389,7 +389,7 @@ async function refreshAutoPlaylistInner() {
       moods: showMoods,
       energies: showEnergies,
       vocals: showVocals,
-    }, { starve: false });
+    }, { starve: false, skipGenres: strictPlaylist });
     replacePool(filtered);
   }
 

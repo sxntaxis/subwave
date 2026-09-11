@@ -210,6 +210,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       excludedIds,
       resolvedGenres: genreLock ?? [],
       minTrackSec,
+      playlistGenreAuthoritative: !!activeShow?.playlistStrict && !!playlistPool?.tracks?.length,
     },
   ).window;
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);

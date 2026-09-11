@@ -42,7 +42,10 @@ export function buildShowCandidateDiagnostic({ show, libraryRows, playlistRows, 
   const libraryPool = applyTrackFloor(libraryRows, minTrackSec, { starve: true });
   const playlistPool = playlistRows ? applyTrackFloor(playlistRows, minTrackSec, { starve: true }) : null;
   const libraryFiltered = filtered(libraryPool, locks);
-  const playlistFiltered = playlistPool ? filtered(playlistPool, locks) : null;
+  const resolvedStrictPlaylist = show?.playlistStrict === true && !!playlistPool?.length;
+  const playlistFiltered = playlistPool
+    ? applyStrictLocks(playlistPool, locks, { starve: true, skipGenres: resolvedStrictPlaylist })
+    : null;
   const libraryEffective = exclude(strict ? libraryFiltered : libraryPool, excludedIds);
   const playlistEffective = playlistFiltered == null ? null : exclude(strict ? playlistFiltered : playlistPool!, excludedIds);
   const playlistStrict = !!(show?.playlistStrict && playlistRows);

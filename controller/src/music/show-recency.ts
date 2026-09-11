@@ -42,6 +42,7 @@ export function showNoRepeatGuard(
     excludedIds,
     resolvedGenres,
     minTrackSec,
+    playlistGenreAuthoritative = false,
   }: {
     show: RecencyShow;
     playlistTracks: ShowTrack[] | null;
@@ -52,6 +53,7 @@ export function showNoRepeatGuard(
     // settings.effectiveMinTrackSec (#1573). Counted HARD: a track that will
     // never air must not size the window.
     minTrackSec?: number | null;
+    playlistGenreAuthoritative?: boolean;
   },
 ): ShowNoRepeatGuard {
   // A soft anchor can leave the playlist, and an unresolved strict anchor has
@@ -69,7 +71,7 @@ export function showNoRepeatGuard(
         vocals: (show.vocals === 'instrumental' || show.vocals === 'vocal'
           ? show.vocals
           : '') as VocalMode,
-      }, { starve: false })
+      }, { starve: false, skipGenres: playlistGenreAuthoritative })
     : playlistTracks;
   // Hard, unlike the pool picker's never-starve use of the same floor: a count of
   // what can air, not a pool that must not empty. Nothing left = zero window.

@@ -1,0 +1,26 @@
+{
+  "contract_version": "semantic-output-v1",
+  "authority": "Coyote/coyote_pipeline/contracts/semantic-output-v1.json",
+  "moods": ["Serene", "Warm", "Bright", "Playful", "Bittersweet", "Melancholic", "Dark", "Tense", "Wonder"],
+  "judgments": {
+    "N": ["N"],
+    "U": ["U"],
+    "Y": ["Y", "S|M|W"]
+  },
+  "structure": {
+    "object_keys": ["id", "e", "m", "b"],
+    "id": "non_empty_string",
+    "e": ["S", "I"],
+    "m": "exactly_one_judgment_per_mood",
+    "b": {"length": 3, "values": ["Y", "N", "U"]},
+    "max_positive_labels": 3
+  },
+  "semantic_gates": [
+    {
+      "id": "bittersweet-all-three-gates",
+      "when": {"path": "m.Bittersweet[0]", "equals": "Y"},
+      "require": {"path": "b", "equals": ["Y", "Y", "Y"]},
+      "failure_code": "SEMANTIC_CONTRACT_BITTERSWEET_GATE"
+    }
+  ]
+}

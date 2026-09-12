@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "schedule_version": "V6-R2",
+  "slot_duration_hours": 1,
+  "schedule": {
+    "0": ["s_atmospheres", "s_atmospheres", "s_atmospheres", "s_atmospheres", "s_freeform", "s_swingtime", "s_standards", "s_neobop", "s_freeform", "s_softsynth", "s_softsynth", "s_lowkey", "s_lowkey", "s_lowriders", "s_lowriders", "s_freeform", "s_hazey", "s_hazey", "s_offbrand", "s_offbrand", "s_freeform", "s_signals", "s_hyperbeats", "s_garageware"],
+    "1": ["s_after_hours", "s_after_hours", "s_after_hours", "s_freeform", "s_rustbound", "s_folkside", "s_folkside", "s_freeform", "s_tokai_no_uta", "s_softsynth", "s_lowkey", "s_lowkey", "s_lowriders", "s_hustlas", "s_freeform", "s_freeform", "s_hazey", "s_offbrand", "s_offbrand", "s_offbrand", "s_freeform", "s_housebrew", "s_housebrew", "s_ufos"],
+    "2": ["s_atmospheres", "s_atmospheres", "s_atmospheres", "s_movements", "s_freeform", "s_standards", "s_neobop", "s_neobop", "s_freeform", "s_softsynth", "s_softsynth", "s_funkplay", "s_lowkey", "s_lowriders", "s_hustlas", "s_offbrand", "s_postwave", "s_distorted", "s_distorted", "s_freeform", "s_garageware", "s_garageware", "s_housebrew", "s_housebrew"],
+    "3": ["s_after_hours", "s_after_hours", "s_atmospheres", "s_atmospheres", "s_freeform", "s_folkside", "s_crossroads", "s_freeform", "s_tokai_no_uta", "s_softsynth", "s_afrodisiac", "s_funkplay", "s_funkplay", "s_funkplay", "s_freeform", "s_hazey", "s_hazey", "s_offbrand", "s_offbrand", "s_freeform", "s_signals", "s_hyperbeats", "s_garageware", "s_garageware"],
+    "4": ["s_atmospheres", "s_atmospheres", "s_atmospheres", "s_atmospheres", "s_freeform", "s_folkside", "s_amplified", "s_blue_suede", "s_freeform", "s_softsynth", "s_softsynth", "s_tokai_no_uta", "s_funkplay", "s_lowkey", "s_postwave", "s_distorted", "s_hellfire", "s_hellfire", "s_freeform", "s_housebrew", "s_housebrew", "s_housebrew", "s_ufos", "s_ufos"],
+    "5": ["s_movements", "s_movements", "s_absolute_cinema", "s_absolute_cinema", "s_atmospheres", "s_softsynth", "s_hallyu", "s_freeform", "s_tumbao", "s_parranda", "s_palenque", "s_tropicalia", "s_natural_mystic", "s_riddim", "s_chingoteo", "s_skrrt", "s_hustlas", "s_hazey", "s_offbrand", "s_freeform", "s_signals", "s_signals", "s_hyperbeats", "s_garageware"],
+    "6": ["s_after_hours", "s_after_hours", "s_after_hours", "s_after_hours", "s_after_hours", "s_swingtime", "s_swingtime", "s_lowkey", "s_funkplay", "s_afrodisiac", "s_riddim", "s_natural_mystic", "s_natural_mystic", "s_tropicalia", "s_tropicalia", "s_tropicalia", "s_hazey", "s_hazey", "s_offbrand", "s_offbrand", "s_freeform", "s_garageware", "s_housebrew", "s_housebrew"]
+  }
+}

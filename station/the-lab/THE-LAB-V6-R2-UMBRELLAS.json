@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "architecture": "THE LAB -> FREEFORM / STATION FLOW + UMBRELLAS -> SUBSHOWS",
+  "umbrella_ids": [
+    "u_nocturne",
+    "u_club",
+    "u_neon",
+    "u_rock",
+    "u_groove",
+    "u_latina",
+    "u_jazz",
+    "u_americana"
+  ],
+  "umbrellas": [
+    {
+      "id": "u_nocturne",
+      "name": "Nocturne",
+      "subshow_ids": ["s_after_hours", "s_atmospheres", "s_movements", "s_absolute_cinema"]
+    },
+    {
+      "id": "u_club",
+      "name": "Club",
+      "subshow_ids": ["s_signals", "s_housebrew", "s_ufos", "s_garageware", "s_hyperbeats"]
+    },
+    {
+      "id": "u_neon",
+      "name": "Neon",
+      "subshow_ids": ["s_softsynth", "s_hallyu", "s_tokai_no_uta"]
+    },
+    {
+      "id": "u_rock",
+      "name": "Rock",
+      "subshow_ids": ["s_hazey", "s_offbrand", "s_postwave", "s_distorted", "s_hellfire"]
+    },
+    {
+      "id": "u_groove",
+      "name": "Groove",
+      "subshow_ids": ["s_afrodisiac", "s_funkplay", "s_lowkey", "s_lowriders", "s_hustlas", "s_skrrt"]
+    },
+    {
+      "id": "u_latina",
+      "name": "Latina",
+      "subshow_ids": ["s_natural_mystic", "s_tropicalia", "s_tumbao", "s_parranda", "s_riddim", "s_chingoteo", "s_palenque"]
+    },
+    {
+      "id": "u_jazz",
+      "name": "Jazz",
+      "subshow_ids": ["s_swingtime", "s_standards", "s_neobop"]
+    },
+    {
+      "id": "u_americana",
+      "name": "Americana",
+      "subshow_ids": ["s_crossroads", "s_amplified", "s_folkside", "s_rustbound", "s_blue_suede"]
+    }
+  ],
+  "subshow_to_umbrella": {
+    "s_after_hours": "u_nocturne",
+    "s_atmospheres": "u_nocturne",
+    "s_movements": "u_nocturne",
+    "s_absolute_cinema": "u_nocturne",
+    "s_signals": "u_club",
+    "s_housebrew": "u_club",
+    "s_ufos": "u_club",
+    "s_garageware": "u_club",
+    "s_hyperbeats": "u_club",
+    "s_softsynth": "u_neon",
+    "s_hallyu": "u_neon",
+    "s_tokai_no_uta": "u_neon",
+    "s_hazey": "u_rock",
+    "s_offbrand": "u_rock",
+    "s_postwave": "u_rock",
+    "s_distorted": "u_rock",
+    "s_hellfire": "u_rock",
+    "s_afrodisiac": "u_groove",
+    "s_funkplay": "u_groove",
+    "s_lowkey": "u_groove",
+    "s_lowriders": "u_groove",
+    "s_hustlas": "u_groove",
+    "s_skrrt": "u_groove",
+    "s_natural_mystic": "u_latina",
+    "s_tropicalia": "u_latina",
+    "s_tumbao": "u_latina",
+    "s_parranda": "u_latina",
+    "s_riddim": "u_latina",
+    "s_chingoteo": "u_latina",
+    "s_palenque": "u_latina",
+    "s_swingtime": "u_jazz",
+    "s_standards": "u_jazz",
+    "s_neobop": "u_jazz",
+    "s_crossroads": "u_americana",
+    "s_amplified": "u_americana",
+    "s_folkside": "u_americana",
+    "s_rustbound": "u_americana",
+    "s_blue_suede": "u_americana"
+  },
+  "station_flow_show_ids": ["s_freeform"],
+  "unscheduled_show_ids": ["s_b_sides"]
+}

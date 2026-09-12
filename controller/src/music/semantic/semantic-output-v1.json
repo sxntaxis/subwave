@@ -12,7 +12,16 @@
     "id": "non_empty_string",
     "e": ["S", "I"],
     "m": "exactly_one_judgment_per_mood",
-    "b": {"length": 3, "values": ["Y", "N", "U"]},
+    "b": {
+      "description": "Ordered 3-element JSON array, never an object. Position 0 is WARMTH_AFFILIATION (positive / affiliative warmth); position 1 is MELANCHOLY_LONGING (melancholy / longing); position 2 is MIXED_VALENCE_COEXISTENCE (salient simultaneous coexistence of positive and negative valence). Preserve this order. Each position must be exactly Y, N, or U. Object-form b is invalid.",
+      "length": 3,
+      "values": ["Y", "N", "U"],
+      "positions": [
+        {"index": 0, "name": "WARMTH_AFFILIATION", "meaning": "positive / affiliative warmth"},
+        {"index": 1, "name": "MELANCHOLY_LONGING", "meaning": "melancholy / longing"},
+        {"index": 2, "name": "MIXED_VALENCE_COEXISTENCE", "meaning": "salient simultaneous coexistence of positive and negative valence"}
+      ]
+    },
     "max_positive_labels": 3
   },
   "semantic_gates": [

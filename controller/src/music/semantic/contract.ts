@@ -6,7 +6,7 @@ export const CONTRACT_VERSION = "the-lab-moods-v1" as const;
 export const SCHEMA_VERSION = "semantic-output-v1" as const;
 export const RENDERER_VERSION = "semantic-evidence-renderer-2.0.0" as const;
 export const DECODER_VERSION = "semantic-decoder-v1" as const;
-export const SEMANTIC_EXPERIMENT_VERSION = 'v1.14' as const;
+export const SEMANTIC_EXPERIMENT_VERSION = 'v1.15R1' as const;
 
 export const FROZEN_PROVIDER = 'openrouter' as const;
 export const FROZEN_MODEL = 'deepseek/deepseek-v4-flash-0731' as const;
@@ -39,6 +39,9 @@ const JudgmentSchema = z.union([
   z.tuple([z.literal('Y'), z.enum(['S', 'M', 'W'])]),
 ]);
 
+const B_VALUE_SCHEMA = z.enum(['Y', 'N', 'U']).describe('Exactly one of "Y", "N", or "U".');
+const B_SCHEMA_DESCRIPTION = 'Ordered JSON array, never an object, with exactly 3 elements: position 0 = WARMTH_AFFILIATION (positive / affiliative warmth); position 1 = MELANCHOLY_LONGING (melancholy / longing); position 2 = MIXED_VALENCE_COEXISTENCE (salient simultaneous coexistence of positive and negative valence). Preserve this exact order. Each element must be exactly "Y", "N", or "U"; object-form b is invalid.';
+
 export const SemanticTrackResultSchema = z.object({
   id: z.string().min(1),
   e: z.enum(['S', 'I']),
@@ -53,11 +56,10 @@ export const SemanticTrackResultSchema = z.object({
     Tense: JudgmentSchema,
     Wonder: JudgmentSchema,
   }).strict(),
-  b: z.tuple([
-    z.enum(['Y', 'N', 'U']),
-    z.enum(['Y', 'N', 'U']),
-    z.enum(['Y', 'N', 'U']),
-  ]),
+  b: z.tuple([B_VALUE_SCHEMA, B_VALUE_SCHEMA, B_VALUE_SCHEMA])
+     .rest(z.never())
+     .describe(B_SCHEMA_DESCRIPTION)
+     .meta({ title: B_SCHEMA_DESCRIPTION }),
 }).strict();
 
 export const SemanticInputTrackSchema = z.object({

@@ -5,8 +5,6 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { generateText } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import {
   CONTRACT_VERSION,
   DECODER_VERSION,
@@ -14,21 +12,20 @@ import {
   EXPECTED_PROMPT_STATIC_SHA256,
   EXPECTED_RENDERER_SHA256,
   EXPECTED_SCHEMA_SHA256,
-  FROZEN_MODEL,
   FROZEN_REASONING,
   FROZEN_TEMPERATURE,
   PROTOCOL_VERSION,
   RENDERER_VERSION,
   SCHEMA_VERSION,
   SEMANTIC_EXPERIMENT_VERSION,
-  SEMANTIC_MOODS,
+  SemanticTrackResultSchema,
   SemanticRequestSchema,
   semanticInputSha256,
   semanticRunFingerprint,
   validateFrozenRequest,
 } from '../src/music/semantic/contract.js';
 import { PROMPT_STATIC } from '../src/music/semantic/prompt.js';
-import { buildSemanticGenerationOptions, decodeGeneratedSemanticResult } from '../src/music/semantic/classify.js';
+import { buildSemanticGenerationOptions } from '../src/music/semantic/classify.js';
 import { validateSemanticContract } from '../src/music/semantic/canonical-contract.js';
 import canonicalSpec from '../src/music/semantic/semantic-output-v1.json' with { type: 'json' };
 import conformance from '../src/music/semantic/semantic-output-v1.conformance.json' with { type: 'json' };
@@ -134,40 +131,20 @@ test('canonical semantic contract conformance matches the vendored corpus', () =
   }
 });
 
-test('V1.12 stock request carries no custom OpenRouter routing or session controls', () => {
-  const options = buildSemanticGenerationOptions({}, track);
+test('V1.14 semantic seam uses the authority djObject transport with no request controls', () => {
+  const options = buildSemanticGenerationOptions(track);
   assert.equal('providerOptions' in options, false);
   assert.equal('headers' in options, false);
+  assert.equal('model' in options, false);
+  assert.equal('session_id' in options, false);
   assert.equal(options.temperature, FROZEN_TEMPERATURE);
   assert.equal(options.maxOutputTokens, 2048);
-  assert.equal(options.instructions, PROMPT_STATIC);
-  assert.ok(options.output, 'strict structured output remains configured');
-});
-
-test('V1.12 stock request serializes no custom OpenRouter routing or session fields', async () => {
-  let captured: { body: any; headers: Headers } | undefined;
-  const moods = Object.fromEntries(SEMANTIC_MOODS.map((mood) => [mood, ['N']]));
-  const model = createOpenRouter({
-    apiKey: 'synthetic-only',
-    fetch: async (_url, init) => {
-      captured = { body: JSON.parse(init?.body as string), headers: new Headers(init?.headers) };
-      return new Response(JSON.stringify({
-        id: 'synthetic-stock',
-        model: FROZEN_MODEL,
-        choices: [{ message: { role: 'assistant', content: JSON.stringify({ id: track.id, e: 'I', m: moods, b: ['N', 'N', 'N'] }) }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }), { headers: { 'content-type': 'application/json' } });
-    },
-  })(FROZEN_MODEL, { reasoning: { enabled: false } });
-  await generateText(buildSemanticGenerationOptions(model, track));
-  assert.equal(captured?.body.model, FROZEN_MODEL);
-  assert.equal(captured?.body.provider, undefined);
-  assert.equal(captured?.body.session_id, undefined);
-  assert.equal(captured?.headers.has('x-session-id'), false);
-  assert.equal(captured?.body.response_format.json_schema.strict, true);
-  assert.equal(captured?.body.temperature, FROZEN_TEMPERATURE);
-  assert.equal(captured?.body.max_tokens, 2048);
-  assert.equal(captured?.body.reasoning.enabled, false);
+  assert.equal(options.system, PROMPT_STATIC);
+  assert.equal(options.schema, SemanticTrackResultSchema);
+  assert.equal(
+    createHash('sha256').update(readFileSync(join(here, '../src/llm/internal/strategy/object.ts'))).digest('hex'),
+    '7ed6c6d290c0daf4565825ee128f2cc44e4a9db055a1dac0fda3a895815b903f',
+  );
 });
 
 test('semantic request validation accepts the frozen mock fingerprint and rejects model drift', () => {
@@ -221,7 +198,7 @@ test('semantic CLI mock is strict stdout JSON and performs no provider call', ()
   }]);
 });
 
-test('semantic no-output compatibility recovers only from the same call and stays strict', () => {
+test('semantic canonical validation remains a post-stock structural step', () => {
   const expected = {
     id: 'track-1',
     e: 'S',
@@ -239,35 +216,11 @@ test('semantic no-output compatibility recovers only from the same call and stay
     b: ['N', 'N', 'N'],
   };
 
-  assert.deepEqual(decodeGeneratedSemanticResult({ output: expected }), expected);
-
-  const recovered = decodeGeneratedSemanticResult({
-    get output() { throw new Error('No output generated.'); },
-    text: `\n\`\`\`json\n${JSON.stringify(expected)}\n\`\`\`\n`,
-    finishReason: 'other',
-    rawFinishReason: 'provider-specific-stop',
-  });
-  assert.deepEqual(recovered, expected);
-
-  assert.throws(
-    () => decodeGeneratedSemanticResult({
-      get output() { throw new Error('No output generated.'); },
-      text: JSON.stringify(expected),
-      finishReason: 'length',
-      rawFinishReason: 'length',
-    }),
-    /SEMANTIC_OUTPUT_TRUNCATED/,
-  );
-
-  assert.throws(
-    () => decodeGeneratedSemanticResult({
-      get output() { throw new Error('No output generated.'); },
-      text: '{not-json}',
-      finishReason: 'other',
-      rawFinishReason: 'unknown',
-    }),
-    /SCHEMA_FAILURE: same-call semantic text recovery failed/,
-  );
+  const structural = SemanticTrackResultSchema.parse(expected);
+  const verdict = validateSemanticContract(structural);
+  assert.equal(verdict.structuralValid, true);
+  assert.equal(verdict.semanticValid, true);
+  assert.equal(verdict.code, null);
 });
 
 test('semantic seam stays isolated from durable/editorial write paths', () => {
@@ -282,8 +235,7 @@ test('semantic seam stays isolated from durable/editorial write paths', () => {
   ]) {
     assert.equal(classify.includes(forbidden), false, `classify.ts must not import/use ${forbidden}`);
   }
-  assert.ok(classify.includes('settings.llmKeyFor(FROZEN_PROVIDER)'));
-  assert.ok(classify.includes('process.env.OPENROUTER_API_KEY'));
+  assert.ok(classify.includes('djObject(buildSemanticGenerationOptions(track))'));
   assert.ok(cliSource.includes('SUBWAVE_STATE_DIR'));
   assert.ok(cliSource.includes('SUBWAVE_ENV_FILE'));
   assert.ok(cliSource.includes('parseDotEnv'));

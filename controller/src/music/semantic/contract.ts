@@ -6,7 +6,7 @@ export const CONTRACT_VERSION = "the-lab-moods-v1" as const;
 export const SCHEMA_VERSION = "semantic-output-v1" as const;
 export const RENDERER_VERSION = "semantic-evidence-renderer-2.0.0" as const;
 export const DECODER_VERSION = "semantic-decoder-v1" as const;
-export const SEMANTIC_EXPERIMENT_VERSION = 'v1.12' as const;
+export const SEMANTIC_EXPERIMENT_VERSION = 'v1.14' as const;
 
 export const FROZEN_PROVIDER = 'openrouter' as const;
 export const FROZEN_MODEL = 'deepseek/deepseek-v4-flash-0731' as const;

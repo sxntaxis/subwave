@@ -23,8 +23,8 @@ import {
   type SemanticRequest,
   type SemanticResponse,
   type SemanticTrackResult,
-} from './contract.js';
-import { PROMPT_STATIC, assertFrozenPrompt } from './prompt.js';
+} from './contract-v2.js';
+import { PROMPT_STATIC, assertFrozenPrompt } from './prompt-v2.js';
 import { validateSemanticContract } from './canonical-contract.js';
 
 const MAX_OUTPUT_TOKENS = 2048;

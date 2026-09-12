@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { stderr, stdin, stdout } from 'node:process';
 import { parse as parseDotEnv } from 'dotenv';
-import { SemanticRequestSchema } from './contract.js';
+import { SemanticRequestSchema } from './contract-v2.js';
 
 // stdout is the machine protocol. Existing SubWave retry/provider helpers may
 // log transient diagnostics with console.log(), so route those to stderr here.

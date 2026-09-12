@@ -24,10 +24,11 @@ import {
   semanticInputSha256,
   semanticRunFingerprint,
   validateFrozenRequest,
-} from '../src/music/semantic/contract.js';
-import { PROMPT_STATIC } from '../src/music/semantic/prompt.js';
+} from '../src/music/semantic/contract-v2.js';
+import { PROMPT_STATIC } from '../src/music/semantic/prompt-v2.js';
 import { buildSemanticGenerationOptions } from '../src/music/semantic/classify.js';
 import { validateSemanticContract } from '../src/music/semantic/canonical-contract.js';
+import { validateSemanticContract as validateSemanticContractV1 } from '../src/music/semantic/canonical-contract-v1.js';
 import { schemaHint } from '../src/llm/internal/core/pure.js';
 import canonicalSpec from '../src/music/semantic/semantic-output-v1.json' with { type: 'json' };
 import conformance from '../src/music/semantic/semantic-output-v1.conformance.json' with { type: 'json' };
@@ -81,9 +82,9 @@ function mockRequest() {
 }
 
 test('semantic runtime static hashes match the frozen Coyote contract', () => {
-  assert.equal(EXPECTED_PROMPT_STATIC_SHA256, "0a4dea68e32b5c1358c9635a2a00ef55a0cdfc0126456c6d9f70a9a3f3949bfc");
-  assert.equal(EXPECTED_SCHEMA_SHA256, "0512f5223a0f29216f9877d9140bf53f44aef013e42ea324ad7f57f4c31b7660");
-  assert.equal(EXPECTED_CONTRACT_SHA256, "1a29d57f04f596b88cc592ca860494cb3601bb413b02e53d4bcdc7b8d074743b");
+  assert.equal(EXPECTED_PROMPT_STATIC_SHA256, "51cb3a5426bec242c5d58dcc40f894a5ea187ad5caba207faacaaaaeb5fd3a86");
+  assert.equal(EXPECTED_SCHEMA_SHA256, "83d7ec4f79b751806e026ca85d7d7da612b906b58d8a4ef1a721b445e23759ce");
+  assert.equal(EXPECTED_CONTRACT_SHA256, "698eaf98859a3d4d24136976b0b03db972fb572bd178740baf92ed364bbe534c");
   assert.equal(EXPECTED_RENDERER_SHA256, "05867072f05d7caeb524414fe818af692a5af703bb4e04741a74dc81c5936016");
   assert.equal(
     semanticInputSha256([track]),
@@ -126,7 +127,7 @@ test('canonical semantic contract conformance matches the vendored corpus', () =
   assert.equal(canonicalSpec.contract_version, 'semantic-output-v1');
   assert.equal(createHash('sha256').update(readFileSync(join(here, '../src/music/semantic/semantic-output-v1.json'))).digest('hex'), 'c371990c4baef3f72de8649152eed0feb460d94d3075bb143261f38a9b593aaa');
   for (const fixture of conformance.fixtures) {
-    const verdict = validateSemanticContract(fixture.result);
+    const verdict = validateSemanticContractV1(fixture.result);
     assert.equal(verdict.structuralValid, fixture.structural_valid, fixture.id);
     assert.equal(verdict.semanticValid, fixture.semantic_valid, fixture.id);
     assert.equal(verdict.code, fixture.failure_code ?? null, fixture.id);

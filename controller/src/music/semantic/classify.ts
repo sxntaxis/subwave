@@ -29,6 +29,10 @@ import { validateSemanticContract } from './canonical-contract.js';
 
 const MAX_OUTPUT_TOKENS = 2048;
 
+export type SemanticClassifyOptions = {
+  onRawResult?: (result: SemanticTrackResult) => void;
+};
+
 function mockResult(id: string): SemanticTrackResult {
   const m = Object.fromEntries(SEMANTIC_MOODS.map((mood) => [mood, ['N']]));
   m.Warm = ['Y', 'M'];
@@ -84,18 +88,24 @@ export function buildSemanticGenerationOptions(track: SemanticRequest['tracks'][
   };
 }
 
-export async function classifySemantic(request: SemanticRequest, mock: boolean): Promise<SemanticResponse> {
+export async function classifySemantic(
+  request: SemanticRequest,
+  mock: boolean,
+  options: SemanticClassifyOptions = {},
+): Promise<SemanticResponse> {
   assertFrozenPrompt();
   validateFrozenRequest(request, mock);
 
   const track = request.tracks[0];
   if (mock) {
+    const result = mockResult(track.id);
+    options.onRawResult?.(result);
     return {
       ...responseBase(request, 'mock', 'mock-semantic-v1'),
       structural_schema_valid: true,
       semantic_contract_valid: true,
       semantic_outcome: 'VALID',
-      results: [mockResult(track.id)],
+      results: [result],
     };
   }
 
@@ -105,6 +115,7 @@ export async function classifySemantic(request: SemanticRequest, mock: boolean):
     throw new Error(`PROVIDER_PINNING_UNAVAILABLE: expected ${FROZEN_PROVIDER}:${FROZEN_MODEL} reasoning=${FROZEN_REASONING}`);
   }
   const result = await djObject(buildSemanticGenerationOptions(track));
+  options.onRawResult?.(result);
   if (result.id !== track.id) {
     throw new Error('SCHEMA_FAILURE: track id');
   }

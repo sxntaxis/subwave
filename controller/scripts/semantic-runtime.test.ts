@@ -26,7 +26,8 @@ import {
   validateFrozenRequest,
 } from '../src/music/semantic/contract-v2.js';
 import { PROMPT_STATIC } from '../src/music/semantic/prompt-v2.js';
-import { buildSemanticGenerationOptions } from '../src/music/semantic/classify.js';
+import { buildSemanticGenerationOptions, classifySemantic } from '../src/music/semantic/classify.js';
+import { buildSemanticCaptureEnvelope } from '../src/music/semantic/capture-envelope.js';
 import { validateSemanticContract } from '../src/music/semantic/canonical-contract.js';
 import { validateSemanticContract as validateSemanticContractV1 } from '../src/music/semantic/canonical-contract-v1.js';
 import { schemaHint } from '../src/llm/internal/core/pure.js';
@@ -35,6 +36,7 @@ import conformance from '../src/music/semantic/semantic-output-v1.conformance.js
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '../src/music/semantic/cli.ts');
+const captureCli = join(here, '../src/music/semantic/capture-cli.ts');
 
 const track = {
   id: 'track-1',
@@ -199,6 +201,54 @@ test('semantic CLI mock is strict stdout JSON and performs no provider call', ()
     },
     b: ['N', 'N', 'N'],
   }]);
+});
+
+test('classify observer is optional and receives the exact mock result', async () => {
+  const withoutObserver = await classifySemantic(SemanticRequestSchema.parse(mockRequest()), true);
+  let observed: unknown;
+  const withObserver = await classifySemantic(SemanticRequestSchema.parse(mockRequest()), true, {
+    onRawResult: (result) => { observed = result; },
+  });
+  assert.deepEqual(withObserver, withoutObserver);
+  assert.strictEqual(observed, withObserver.results[0]);
+});
+
+test('capture envelope preserves a Bittersweet-invalid raw object', () => {
+  const raw = {
+    id: 'capture-test', e: 'S',
+    m: Object.fromEntries(SEMANTIC_MOODS.map((mood) => [mood, ['N']])),
+    b: ['N', 'N', 'N'],
+  };
+  raw.m.Warm = ['Y', 'M'];
+  raw.m.Melancholic = ['Y', 'M'];
+  raw.m.Bittersweet = ['Y', 'M'];
+  const envelope = buildSemanticCaptureEnvelope(null, raw, 'SEMANTIC_CONTRACT_FAILURE: code=SEMANTIC_CONTRACT_BITTERSWEET_GATE; semantic_contract_valid=false');
+  assert.strictEqual(envelope.raw_semantic_result, raw);
+  assert.equal(envelope.structural_schema_valid, true);
+  assert.equal(envelope.semantic_contract_valid, false);
+  assert.equal(envelope.semantic_failure_code, 'SEMANTIC_CONTRACT_BITTERSWEET_GATE');
+});
+
+test('capture envelope records null raw result without transforming protocol errors', () => {
+  const envelope = buildSemanticCaptureEnvelope(null, null, 'provider unavailable');
+  assert.equal(envelope.raw_semantic_result, null);
+  assert.equal(envelope.structural_schema_valid, null);
+  assert.equal(envelope.semantic_contract_valid, null);
+  assert.equal(envelope.error, 'provider unavailable');
+});
+
+test('diagnostic capture CLI emits the capture envelope on the mock path', () => {
+  const run = spawnSync(process.execPath, ['--import', 'tsx', captureCli], {
+    input: JSON.stringify(mockRequest()), encoding: 'utf8',
+    env: { ...process.env, SUBWAVE_SEMANTIC_MOCK: '1', OPENROUTER_API_KEY: '' },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const envelope = JSON.parse(run.stdout.trim());
+  assert.equal(envelope.capture_protocol_version, 1);
+  assert.equal(envelope.response.results.length, 1);
+  assert.deepEqual(envelope.raw_semantic_result, envelope.response.results[0]);
+  assert.equal(envelope.semantic_contract_valid, true);
+  assert.equal(envelope.error, null);
 });
 
 test('semantic canonical validation remains a post-stock structural step', () => {

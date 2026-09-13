@@ -32,3 +32,15 @@ test('bounded semantic workers stop dispatching after abort', async () => {
   }, controller.signal);
   assert.ok(seen.length <= 4);
 });
+
+test('bounded semantic workers stop taking new tracks at the provider cap', async () => {
+  const seen: number[] = [];
+  let completedCalls = 0;
+  await runBoundedWorkers(Array.from({ length: 20 }, (_, i) => i), 4, async (id) => {
+    seen.push(id);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    completedCalls += 1;
+  }, undefined, () => seen.length >= 4);
+  assert.equal(completedCalls, 4);
+  assert.equal(seen.length, 4);
+});

@@ -6,6 +6,8 @@ import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 import { config } from '../../config.js';
 
+export const SEMANTIC_PROVIDER_CALL_CAP = 110;
+
 export interface SemanticTagStats {
   total: number;
   processed: number;
@@ -27,11 +29,12 @@ export async function runBoundedWorkers<T>(
   concurrency: number,
   worker: (item: T, index: number) => Promise<void>,
   signal?: AbortSignal,
+  shouldStop?: () => boolean,
 ): Promise<void> {
   let cursor = 0;
   const run = async (): Promise<void> => {
     for (;;) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || shouldStop?.()) return;
       const index = cursor++;
       if (index >= items.length) return;
       await worker(items[index], index);
@@ -61,6 +64,7 @@ export async function semanticTagIds(
     throw new Error('SEMANTIC_DUPLICATE_TRACK: cohort contains duplicate track IDs');
   }
 
+  let providerCapLogged = false;
   await runBoundedWorkers(ids, config.semantic.concurrency, async (id) => {
     const song = songs.get(id);
     if (!song) {
@@ -126,6 +130,13 @@ export async function semanticTagIds(
         failures: stats.failures,
       },
     });
-  }, options.signal);
+  }, options.signal, () => {
+    if (stats.providerGenerations < SEMANTIC_PROVIDER_CALL_CAP) return false;
+    if (!providerCapLogged) {
+      providerCapLogged = true;
+      logEvent('warning', `Semantic provider call cap reached (${SEMANTIC_PROVIDER_CALL_CAP}); stopping new dispatch`);
+    }
+    return true;
+  });
   return stats;
 }

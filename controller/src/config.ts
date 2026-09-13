@@ -44,7 +44,9 @@ export const config = {
   stemsDir: STEMS_DIR,
   coyote: {
     socketPath: COYOTE_SOCKET_PATH,
-    timeoutMs: envInt('COYOTE_TIMEOUT_MS', 150_000),
+    operationTimeoutMs: envInt('COYOTE_SEMANTIC_OPERATION_TIMEOUT_MS', 155_000),
+    semanticTimeoutMs: envInt('SUBWAVE_SEMANTIC_IPC_TIMEOUT_MS', 180_000),
+    timeoutMs: envInt('COYOTE_TIMEOUT_MS', 30_000),
   },
   semantic: {
     concurrency: envInt('SEMANTIC_CONCURRENCY', 4, { min: 1, max: 8 }),
@@ -269,3 +271,7 @@ export const config = {
     cloudSpeed: envFloat('CLOUD_TTS_SPEED', TTS_SPEED, { min: 0.1 }),
   },
 };
+
+if (config.coyote.semanticTimeoutMs <= config.coyote.operationTimeoutMs) {
+  throw new Error('SEMANTIC_TIMEOUT_CONTRACT_INVALID: client timeout must exceed Coyote operation timeout');
+}

@@ -26,6 +26,7 @@ import {
 } from './contract-v2.js';
 import { PROMPT_STATIC, assertFrozenPrompt } from './prompt-v2.js';
 import { validateSemanticContract } from './canonical-contract.js';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const MAX_OUTPUT_TOKENS = 2048;
 
@@ -119,7 +120,13 @@ export async function classifySemantic(
     }
     const result = await djObject({
       ...buildSemanticGenerationOptions(track),
-      onProviderCall: () => { providerCalls += 1; },
+      onProviderCall: () => {
+        providerCalls += 1;
+        const accountingFile = process.env.COYOTE_PROVIDER_ACCOUNTING_FILE;
+        if (accountingFile) {
+          writeFileSync(accountingFile, `${providerCalls}\n`, { encoding: 'ascii', flag: 'w' });
+        }
+      },
     });
     options.onRawResult?.(result);
     if (result.id !== track.id) {

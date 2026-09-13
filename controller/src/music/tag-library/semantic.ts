@@ -65,7 +65,9 @@ export async function semanticTagIds(
   }
 
   let providerCapLogged = false;
+  let systemicTimeout = false;
   await runBoundedWorkers(ids, config.semantic.concurrency, async (id) => {
+    if (systemicTimeout) return;
     const song = songs.get(id);
     if (!song) {
       stats.failures += 1;
@@ -112,6 +114,10 @@ export async function semanticTagIds(
       } catch (err: unknown) {
         stats.failures += 1;
         const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof coyote.CoyoteError && err.code === 'COYOTE_TIMEOUT') {
+          systemicTimeout = true;
+          logEvent('error', `Semantic IPC timeout is systemic; stopping new dispatch after ${id}`);
+        }
         logEvent('warning', `Semantic mood tagging failed for ${id}: ${message}`);
       }
     stats.processed += 1;
@@ -131,6 +137,7 @@ export async function semanticTagIds(
       },
     });
   }, options.signal, () => {
+    if (systemicTimeout) return true;
     if (stats.providerGenerations < SEMANTIC_PROVIDER_CALL_CAP) return false;
     if (!providerCapLogged) {
       providerCapLogged = true;
@@ -138,5 +145,8 @@ export async function semanticTagIds(
     }
     return true;
   });
+  if (systemicTimeout) {
+    throw new Error('SEMANTIC_RUNTIME_TIMEOUT: all dispatched operations settled; no new semantic work dispatched');
+  }
   return stats;
 }

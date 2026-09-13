@@ -124,7 +124,7 @@ export function locatorFromSong(song: {
   };
 }
 
-function request<T>(op: string, payload: Record<string, unknown> = {}): Promise<T> {
+function request<T>(op: string, payload: Record<string, unknown> = {}, timeoutMs = config.coyote.timeoutMs): Promise<T> {
   const requestId = randomUUID();
   const body = JSON.stringify({ version: CONTRACT_VERSION, requestId, op, ...payload }) + '\n';
 
@@ -141,8 +141,8 @@ function request<T>(op: string, payload: Record<string, unknown> = {}): Promise<
     };
 
     const timer = setTimeout(() => {
-      finishReject(new CoyoteError('COYOTE_TIMEOUT', `Coyote did not answer within ${config.coyote.timeoutMs}ms`));
-    }, config.coyote.timeoutMs);
+       finishReject(new CoyoteError('COYOTE_TIMEOUT', `Coyote did not answer within ${timeoutMs}ms`));
+     }, timeoutMs);
 
     socket.once('connect', () => socket.write(body));
     socket.on('data', (chunk: Buffer) => {
@@ -208,7 +208,7 @@ export function manualSetMoods(tracks: CoyoteTrackLocator[], moods: string[]): P
 }
 
 export function semanticRetag(track: CoyoteTrackLocator): Promise<CoyoteSemanticRetagResult> {
-  return request('mood.semantic_retag', { track });
+  return request('mood.semantic_retag', { track }, config.coyote.semanticTimeoutMs);
 }
 
 export function semanticPrepare(track: CoyoteTrackLocator): Promise<CoyoteSemanticPrepareResult> {

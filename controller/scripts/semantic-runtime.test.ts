@@ -155,7 +155,9 @@ test('V1.14 semantic seam uses the authority djObject transport with no request 
   assert.equal(options.schema, SemanticTrackResultSchema);
   assert.equal(
     createHash('sha256').update(readFileSync(join(here, '../src/llm/internal/strategy/object.ts'))).digest('hex'),
-    '7ed6c6d290c0daf4565825ee128f2cc44e4a9db055a1dac0fda3a895815b903f',
+    // 169175f1 added provider-attempt accounting callbacks to the certified
+    // stock djObject transport without changing its semantic authority.
+    'e7aef804af82d295ae73f1cbd40139f47786f38cb46fe4eeac8f76fd133a10bb',
   );
 });
 
@@ -327,7 +329,8 @@ test('semantic seam stays isolated from durable/editorial write paths', () => {
   ]) {
     assert.equal(classify.includes(forbidden), false, `classify.ts must not import/use ${forbidden}`);
   }
-  assert.ok(classify.includes('djObject(buildSemanticGenerationOptions(track))'));
+  assert.match(classify, /await djObject\(\{\s*\.\.\.buildSemanticGenerationOptions\(track\),/);
+  assert.match(classify, /onProviderCall:\s*\(\)\s*=>/);
   assert.ok(cliSource.includes('SUBWAVE_STATE_DIR'));
   assert.ok(cliSource.includes('SUBWAVE_ENV_FILE'));
   assert.ok(cliSource.includes('parseDotEnv'));

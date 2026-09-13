@@ -12,6 +12,16 @@ import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 import { backfillOriginalYears, pendingOriginalYearIds } from './enrich.js';
 
+export interface WalkedSongLocator {
+  id: string;
+  path?: string | null;
+  musicBrainzId?: string | null;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  duration?: number | null;
+}
+
 function parseIntFlag(args: string[], name: string): number | null {
   const idx = args.indexOf(name);
   if (idx < 0) return null;
@@ -100,10 +110,11 @@ function informativeAlbumYear(song: {
 // Walk the whole Navidrome catalogue, upserting each song's metadata and
 // collecting the live id set. Shared by the full tagger run and
 // --reconcile-only. Metadata only: no embeddings, no LLM.
-export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<string> }> {
+export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<string>; songs: Map<string, WalkedSongLocator> }> {
   reportProgress({ phase: 'walk', label: 'Scanning Navidrome library', done: 0 });
   let walked = 0;
   const liveIds = new Set<string>();
+  const songs = new Map<string, WalkedSongLocator>();
   // Blast radius of the era gate, reported once at the end so an operator sees
   // it in the log rather than as a show that stopped picking (#1418).
   const eraReasons = new Map<string, number>();
@@ -132,6 +143,7 @@ export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<st
       duration: song.duration,
     });
     liveIds.add(song.id);
+    songs.set(song.id, song);
     if (song.albumEraUntrusted && song.albumEraReason) {
       eraReasons.set(song.albumEraReason, (eraReasons.get(song.albumEraReason) ?? 0) + 1);
     }
@@ -152,7 +164,7 @@ export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<st
       `${suspect.toLocaleString('en-GB')} tracks on era-suspect albums (${breakdown})` +
       ' — their release year is treated as the reissue\'s, and they are queued for an original-year lookup');
   }
-  return { walked, liveIds };
+  return { walked, liveIds, songs };
 }
 
 // Standalone reconcile: diff library-db against the live Navidrome catalogue and
@@ -210,4 +222,3 @@ export async function applyWizardOverlay() {
     console.error('[setup-config] load failed:', err.message);
   }
 }
-

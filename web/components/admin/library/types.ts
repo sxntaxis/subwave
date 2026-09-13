@@ -52,6 +52,7 @@ export interface BrowseResponse {
   rows: Track[];
   total: number;
   moodVocab: string[];
+  semanticMoodVocab: string[];
   stats: {
     total: number;
     byMood: Record<string, number>;

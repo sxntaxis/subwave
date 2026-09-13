@@ -156,6 +156,8 @@ export async function get() {
   if (analysisAvail == null) await refreshAnalysisAvail();
   else if (analysisAvailStale() && !analysisProbeInflight) refreshAnalysisAvail();
   const tagged = library.countTagged();
+  const semanticProcessed = db.semanticProcessedCount();
+  const semanticLabels = db.semanticLabelCount();
   const analysed = db.analysedCount();
   const audioEmbedded = db.audioVectorCount();
   const vocalAnalyzed = db.vocalAnalyzedCount();
@@ -206,6 +208,9 @@ export async function get() {
   });
   return {
     tagged,
+    semanticProcessed,
+    semanticLabels,
+    semanticRemaining: total != null ? Math.max(0, total - semanticProcessed) : null,
     analysed,
     audioEmbedded,
     vocalAnalyzed,

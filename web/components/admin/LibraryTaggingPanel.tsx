@@ -12,6 +12,9 @@ import SceneVocabSection from './library/SceneVocabSection';
 
 export interface Coverage {
   tagged: number;
+  semanticProcessed?: number;
+  semanticLabels?: number;
+  semanticRemaining?: number | null;
   analysed: number;
   // Tracks with a CLAP audio (sounds-like) embedding. Gated on ANALYZE_AUDIO_EMBEDDING.
   audioEmbedded?: number;
@@ -84,12 +87,20 @@ export interface AnalysisFailure {
 
 // Mirrors controller/src/music/tagger-progress.ts.
 export interface TaggerProgress {
-  phase: 'walk' | 'enrich' | 'embed' | 'seed' | 'propagate' | 'learn' | 'analyze' | 'done';
+  phase: 'walk' | 'enrich' | 'semantic' | 'embed' | 'seed' | 'propagate' | 'learn' | 'analyze' | 'done';
   label: string;
   done?: number;
   total?: number; // absent → indeterminate (e.g. the Navidrome walk)
   round?: number; // active-learn round
   errors?: number;
+  semantic?: {
+    labels: number;
+    none: number;
+    unresolved: number;
+    reused: number;
+    providerGenerations: number;
+    failures: number;
+  };
   llm?: { legs: Record<string, number> };
   // Cumulative ms per phase, attached to the terminal 'done' event.
   timings?: Record<string, number>;
@@ -215,6 +226,7 @@ interface TaggingPanelProps {
 const PHASE_HINT: Record<TaggerProgress['phase'], string> = {
   walk: 'Reading the track list from Navidrome.',
   enrich: 'Fetching Last.fm tags and lyrics that help the DJ understand each track.',
+  semantic: 'Applying the fixed V1.21 semantic mood analysis, reusing exact prior results.',
   embed: 'Computing similarity vectors so tags can spread between similar tracks.',
   seed: 'The DJ is deciding mood & energy for a representative set of tracks.',
   propagate: 'Spreading tags from tagged tracks to their closest sonic neighbours.',
@@ -228,6 +240,7 @@ const PHASE_LABEL: Record<string, string> = {
   setup: 'setup',
   walk: 'scan',
   enrich: 'enrich',
+  semantic: 'semantic-moods',
   embed: 'embed',
   seed: 'seed-tag',
   propagate: 'spread',
@@ -237,7 +250,7 @@ const PHASE_LABEL: Record<string, string> = {
 
 // Execution order, used to decide which phases are behind/ahead of the live one. Excludes 'done'.
 const PIPELINE: TaggerProgress['phase'][] = [
-  'walk', 'enrich', 'embed', 'seed', 'propagate', 'learn', 'analyze',
+  'walk', 'enrich', 'semantic', 'embed', 'seed', 'propagate', 'learn', 'analyze',
 ];
 
 // Only the phases a given run mode can reach.
@@ -310,6 +323,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const etaRef = useRef<{ phase: string; round: number | null; done: number; at: number } | null>(null);
 
   const tagged = p.coverage?.tagged ?? p.libStats?.total ?? null;
+  const semanticProcessed = p.coverage?.semanticProcessed ?? 0;
+  const semanticLabels = p.coverage?.semanticLabels ?? tagged ?? 0;
   const total = p.coverage?.total ?? null;
   const analysed = p.coverage?.analysed ?? null;
   const audioEmbedded = p.coverage?.audioEmbedded ?? null;
@@ -557,12 +572,12 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         <div className="p-4 sm:p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <span className="flex items-center gap-2 text-[11px] font-bold tracking-[0.16em] text-ink uppercase">
-              <Sparkles size={14} /> Mood &amp; energy tagged
+              <Sparkles size={14} /> Semantic moods
             </span>
             <span className="mono-num text-[13px] font-bold">{pct != null ? `${pct}%` : '—'}</span>
           </div>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-            <span className="lib-cov-big mono-num">{num(tagged)}</span>
+                <span className="lib-cov-big mono-num">{num(semanticLabels)}</span>
             <span className="text-[13px] text-muted">
               / {total != null ? num(total) : scanning ? 'counting…' : '—'} tracks
             </span>
@@ -582,7 +597,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           <div
             className="lib-bar mt-3"
             role="progressbar"
-            aria-label="Mood and energy tagging coverage"
+              aria-label="Semantic mood tagging coverage"
             aria-valuemin={0}
             aria-valuemax={100}
             {...(pct != null ? { 'aria-valuenow': Math.min(100, pct) } : {})}

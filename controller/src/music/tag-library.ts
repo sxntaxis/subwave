@@ -52,6 +52,7 @@ import {
 } from './tag-library/flags.js';
 import { llmTagInBatches, resolveTagConsumers } from './tag-library/tag.js';
 import { runPropagatedEnergyPass } from './propagated-energy.js';
+import { semanticTagIds, type SemanticTagStats } from './tag-library/semantic.js';
 
 
 // Close (TRUNCATE-checkpoints the WAL) on every exit path; this CLI bails via
@@ -90,11 +91,66 @@ async function main() {
 
   await applyWizardOverlay();
   await settings.load();
+  const plan = planRun(flags);
 
   // Reconcile is a pure catalogue diff — short-circuit before any embedding /
   // LLM setup so it runs even when embeddings are disabled or unconfigured.
   if (flags.reconcileOnly) {
     await reconcileOnly();
+    return;
+  }
+
+  // Canonical forward mood tagging is per-track V1.21 semantic analysis. It
+  // deliberately bypasses the legacy embedding/seed/propagation machinery;
+  // those features remain available to their independent consumers and the
+  // existing re-scan path below.
+  if (plan.forwardTag) {
+    await db.open({ embeddingDim: embeddings.resolveEmbeddingDim(), adoptStoredDim: true });
+    lap('setup');
+    console.log('[tag] walking Navidrome library for semantic mood tagging...');
+    const { walked, liveIds, songs } = await walkNavidrome();
+    if (!flags.noPrune && walked > 0) {
+      const pruned = db.pruneMissingTracks(liveIds);
+      if (pruned > 0) console.log(`[tag] pruned ${pruned} orphaned tracks no longer in Navidrome`);
+    }
+    lap('walk');
+
+    const allUntagged = db.untaggedIds();
+    const targetUntagged = flags.limit === Infinity
+      ? allUntagged
+      : allUntagged.slice(0, flags.limit);
+    if (plan.enrich) {
+      const enrichIds = selectEnrichIds({
+        reEnrich: flags.reEnrich,
+        rescan: false,
+        limit: flags.limit,
+        liveIds,
+        targetUntagged,
+      });
+      await phaseEnrich(enrichIds, flags.reEnrich);
+    } else {
+      console.log('[tag] --skip-enrich: not fetching Last.fm tags or lyrics');
+    }
+    lap('enrich');
+
+    const scope = db.semanticScopeIds(flags.limit === Infinity ? undefined : flags.limit);
+    logEvent('info', `${scope.length.toLocaleString('en-GB')} tracks selected for V1.21 semantic mood tagging`);
+    const semanticStats = await semanticTagIds(scope, songs);
+    lap('semantic');
+    if (plan.analyze) {
+      try {
+        await runAnalysisPass({
+          limit: flags.limit === Infinity ? undefined : flags.limit,
+          reAnalyze: flags.reAnalyze,
+          rescan: flags.rescan,
+          vocalBackfill: flags.vocal ? true : flags.noVocal ? false : undefined,
+        });
+      } catch (err: any) {
+        logEvent('warning', `Acoustic analysis phase failed (non-fatal): ${err?.message || err}`);
+      }
+    }
+    lap('analyze');
+    finish(startedAt, semanticStats.providerGenerations, semanticStats.labels, {}, timings, semanticStats);
     return;
   }
 
@@ -262,9 +318,6 @@ async function main() {
     }
   }
   lap('walk');
-
-  // Which phases run this pass (pure; pinned by rescan-scope.test.ts).
-  const plan = planRun(flags);
 
   // Forward scope: the untagged tracks this run discovers and tags, capped by
   // --limit. A re-scan's forward scope is empty — each re-* pass below redoes
@@ -565,12 +618,18 @@ function finish(
   llmTagged: number,
   byLeg: Record<string, number>,
   timings: Record<string, number> = {},
+  semantic: SemanticTagStats | null = null,
 ) {
   const elapsed = (Date.now() - startedAt) / 1000;
   logEvent(
     'success',
-    `Done in ${elapsed.toFixed(0)}s — ${llmTagged.toLocaleString('en-GB')} tracks tagged ` +
-      `(${llmCalls.toLocaleString('en-GB')} LLM calls)`,
+    semantic
+      ? `Done in ${elapsed.toFixed(0)}s — ${semantic.labels.toLocaleString('en-GB')} semantic labels, ` +
+        `${semantic.none.toLocaleString('en-GB')} none, ${semantic.unresolved.toLocaleString('en-GB')} unresolved ` +
+        `(${semantic.providerGenerations.toLocaleString('en-GB')} provider generations, ` +
+        `${semantic.reused.toLocaleString('en-GB')} reused)`
+      : `Done in ${elapsed.toFixed(0)}s — ${llmTagged.toLocaleString('en-GB')} tracks tagged ` +
+        `(${llmCalls.toLocaleString('en-GB')} LLM calls)`,
   );
   // Phase breakdown, slowest first.
   const timed = sortedPhaseTimings(timings);
@@ -582,6 +641,16 @@ function finish(
     done: llmTagged,
     llm: Object.keys(byLeg).length ? { legs: byLeg } : undefined,
     timings: timed.length ? Object.fromEntries(timed) : undefined,
+    semantic: semantic
+      ? {
+          labels: semantic.labels,
+          none: semantic.none,
+          unresolved: semantic.unresolved,
+          reused: semantic.reused,
+          providerGenerations: semantic.providerGenerations,
+          failures: semantic.failures,
+        }
+      : undefined,
   });
   const legs = Object.entries(byLeg);
   if (legs.length > 1) {

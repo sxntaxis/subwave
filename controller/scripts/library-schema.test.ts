@@ -30,7 +30,6 @@ const {
 } = await import('../src/schemas/blocklist.js');
 const {
   MANUAL_TAG_ENERGIES,
-  MANUAL_TAG_MOODS_MAX,
   manualTagSchema,
 } = await import('../src/schemas/library.js');
 const rules = await import('../src/music/blocklist-rules.js');
@@ -249,16 +248,13 @@ test('the entry body accepts both accepted forms and pins the type vocabulary', 
 const MOODS = ['calm', 'upbeat', 'melancholy', 'driving'];
 const tagBody = (o: Record<string, unknown> = {}) => ({ id: 't1', moods: ['calm'], ...o });
 
-test('a manual tag needs a real id and at most three known moods', () => {
+test('a manual tag needs a real id and accepts the full semantic mood set', () => {
   const schema = manualTagSchema({ moodNames: MOODS });
   assert.equal(schema.parse(tagBody()).id, 't1');
   assert.equal(schema.safeParse(tagBody({ id: '' })).success, false);
   assert.equal(schema.safeParse(tagBody({ id: 42 })).success, false);
   assert.match(schema.safeParse(tagBody({ id: '' })).error!.issues[0].message, /^id is required$/);
-  assert.equal(
-    schema.safeParse(tagBody({ moods: MOODS.slice(0, MANUAL_TAG_MOODS_MAX + 1) })).success,
-    false,
-  );
+  assert.equal(schema.safeParse(tagBody({ moods: MOODS })).success, true);
   assert.equal(schema.safeParse(tagBody({ moods: ['nonsense'] })).success, false);
   assert.match(
     schema.safeParse(tagBody({ moods: ['nonsense'] })).error!.issues[0].message,
@@ -278,8 +274,8 @@ test('an EMPTY moods array is a legal request — it clears the track', () => {
 test('moodNames: null validates SHAPE only — the browser posture', () => {
   const shapeOnly = manualTagSchema({ moodNames: null });
   assert.equal(shapeOnly.safeParse(tagBody({ moods: ['not-a-mood'] })).success, true);
-  // The caps and types still apply; only membership is skipped.
-  assert.equal(shapeOnly.safeParse(tagBody({ moods: ['a', 'b', 'c', 'd'] })).success, false);
+  // Only membership is skipped; the shape accepts the full semantic cardinality.
+  assert.equal(shapeOnly.safeParse(tagBody({ moods: ['a', 'b', 'c', 'd'] })).success, true);
 });
 
 test('energy accepts the three bands or null, and defaults to null', () => {

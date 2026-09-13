@@ -96,7 +96,7 @@ export function vote(
   const moods = [...moodWeights.entries()]
     .filter(([, w]) => w > 0 && w >= moodThreshold)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3) // mood vocab arrays cap at 3
+    .slice(0, 3) // Legacy propagation remains capped; canonical forward tagging bypasses it.
     .map(([m]) => m);
 
   // Weighted plurality. `voting` is in KNN order, so the strictly-greater test

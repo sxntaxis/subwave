@@ -26,6 +26,7 @@ import * as mapProjection from '../music/map-projection.js';
 import { validateBody, validateBodyAsync } from '../middleware/validate.js';
 import { blockEntrySchema, blockRuleSchema } from '../schemas/blocklist.js';
 import { manualTagSchema, originalYearSchema, sceneMergeSchema } from '../schemas/library.js';
+import { SEMANTIC_MOOD_IDS } from '../music/semantic/contract-v2.js';
 import type { z } from 'zod';
 
 type ManualTagBody = z.output<ReturnType<typeof manualTagSchema>>;
@@ -95,6 +96,7 @@ router.get('/library/browse', requireAdmin, async (req, res) => {
     res.json({
       ...result,
       moodVocab: settings.moodVocab(),
+      semanticMoodVocab: SEMANTIC_MOOD_IDS,
       stats: {
         total: stats.total,
         byMood: stats.byMood,
@@ -438,6 +440,7 @@ router.get('/library/observatory', requireAdmin, async (req, res) => {
       hardMax: OBSERVATORY_HARD_MAX,
       mapProjection: mapProjection.projectionStatus(),
       moodVocab: settings.moodVocab(),
+      semanticMoodVocab: SEMANTIC_MOOD_IDS,
       stats: {
         total: stats.total,
         distinctArtists: stats.distinctArtists,
@@ -899,9 +902,9 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
 router.post(
   '/library/manual-tag',
   requireAdmin,
-  // The mood vocabulary is operator-editable, so the schema cannot exist until
-  // the request does.
-  validateBodyAsync(() => manualTagSchema({ moodNames: settings.moodVocab() }), {
+  // Track editorial moods use the fixed V1.21 semantic namespace. The station
+  // steering vocabulary remains independent and operator-editable.
+  validateBodyAsync(() => manualTagSchema({ moodNames: [...SEMANTIC_MOOD_IDS] }), {
     messages: 'verbatim',
   }),
   async (req, res) => {

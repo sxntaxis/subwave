@@ -25,6 +25,12 @@ export const SEMANTIC_MOODS = [
   'Wonder',
 ] as const;
 
+// Fixed track-semantic ids. These are deliberately separate from the editable
+// station/audio steering vocabulary in settings.moods.
+export const SEMANTIC_MOOD_IDS = SEMANTIC_MOODS.map((mood) => mood.toLowerCase()) as [
+  'serene', 'warm', 'bright', 'playful', 'bittersweet', 'melancholic', 'dark', 'tense', 'wonder',
+];
+
 export const CONTRACT_MATERIAL = "the-lab-moods-v2|Serene,Warm,Bright,Playful,Bittersweet,Melancholic,Dark,Tense,Wonder|judgment=N,U,Y:S,M,W|bittersweet=positive_or_affiliative_warmth+melancholy_or_longing+mixed_valence_gestalt:all-Y|raw-multilabel|decoder=semantic-decoder-v2" as const;
 export const SCHEMA_MATERIAL = "semantic-output-v2|track.id:string|min=1|e:S,I|m:exact-nine-moods|judgment:[N]|[U]|[Y,S|M|W]|b:[Y,N,U]^3|raw-multilabel|strict" as const;
 
@@ -32,6 +38,10 @@ export const EXPECTED_PROMPT_STATIC_SHA256 = "51cb3a5426bec242c5d58dcc40f894a5ea
 export const EXPECTED_SCHEMA_SHA256 = "83d7ec4f79b751806e026ca85d7d7da612b906b58d8a4ef1a721b445e23759ce" as const;
 export const EXPECTED_CONTRACT_SHA256 = "698eaf98859a3d4d24136976b0b03db972fb572bd178740baf92ed364bbe534c" as const;
 export const EXPECTED_RENDERER_SHA256 = "8afdeb9b68c0a08bba28ff31b029122cdb4a41946c5445fc9fe39d5dad6308eb" as const;
+
+export const SEMANTIC_PROMPT_HASH = EXPECTED_PROMPT_STATIC_SHA256;
+export const SEMANTIC_MODEL = FROZEN_MODEL;
+export const SEMANTIC_SOURCE = 'semantic-v1.21' as const;
 
 const JudgmentSchema = z.union([
   z.tuple([z.literal('N')]),

@@ -396,7 +396,7 @@ function projectForLlm(pool: PoolTrack[]): any[] {
     t: t.title || '',
     a: t.artist || '',
     e: t.energy || undefined,
-    m: t.moods && t.moods.length ? t.moods.slice(0, 3) : undefined,
+    m: t.moods && t.moods.length ? t.moods : undefined,
     i: t.instrumental === true ? 1 : undefined,
     y: typeof t.year === 'number' ? t.year : undefined,
   }));

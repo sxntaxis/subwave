@@ -3,6 +3,7 @@
 import { SQL_HAS_MOODS, SQL_NO_MOODS, requireDb } from './handle.js';
 import type { EnergyValue, TrackRecord, TrackRow } from './types.js';
 import { rowToTrack, safeParseArray } from './rows.js';
+import { SEMANTIC_MODEL, SEMANTIC_PROMPT_HASH, SEMANTIC_SOURCE } from '../semantic/contract-v2.js';
 
 // Projected to exactly the fields blocklist-rules.ruleMatches reads. Not
 // rowToTrack: GET /library/blocklist runs this over the whole library per request.
@@ -110,6 +111,42 @@ export function untaggedIds(limit?: number): string[] {
   const stmt = requireDb().prepare(q);
   const rows = (limit ? stmt.all(limit) : stmt.all()) as Array<{ id: string }>;
   return rows.map(r => r.id);
+}
+
+// Currentness for the canonical semantic path is explicit. It intentionally
+// includes legacy non-manual rows with non-empty moods so old machine output is
+// reclassified, while manual rows remain operator ground truth.
+export function currentSemanticIds(): string[] {
+  const rows = requireDb().prepare(
+    `SELECT id FROM tracks
+       WHERE source = ? AND prompt_hash = ? AND model = ? AND tagged_at IS NOT NULL
+       ORDER BY id`,
+  ).all(SEMANTIC_SOURCE, SEMANTIC_PROMPT_HASH, SEMANTIC_MODEL) as Array<{ id: string }>;
+  return rows.map(r => r.id);
+}
+
+export function semanticScopeIds(limit?: number): string[] {
+  const sql =
+    `SELECT id FROM tracks
+       WHERE (source IS NULL OR source != 'manual')
+         AND NOT (source = ? AND prompt_hash = ? AND model = ? AND tagged_at IS NOT NULL)
+       ORDER BY id` + (limit && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : '');
+  const rows = requireDb().prepare(sql).all(SEMANTIC_SOURCE, SEMANTIC_PROMPT_HASH, SEMANTIC_MODEL) as Array<{ id: string }>;
+  return rows.map(r => r.id);
+}
+
+export function semanticProcessedCount(): number {
+  return (requireDb().prepare(
+    `SELECT COUNT(*) AS n FROM tracks WHERE source = ? AND prompt_hash = ? AND model = ? AND tagged_at IS NOT NULL`,
+  ).get(SEMANTIC_SOURCE, SEMANTIC_PROMPT_HASH, SEMANTIC_MODEL) as { n: number }).n;
+}
+
+export function semanticLabelCount(): number {
+  return (requireDb().prepare(
+    `SELECT COUNT(*) AS n FROM tracks
+       WHERE source = ? AND prompt_hash = ? AND model = ? AND tagged_at IS NOT NULL
+         AND ${SQL_HAS_MOODS}`,
+  ).get(SEMANTIC_SOURCE, SEMANTIC_PROMPT_HASH, SEMANTIC_MODEL) as { n: number }).n;
 }
 
 export function unembeddedIds(limit?: number): string[] {

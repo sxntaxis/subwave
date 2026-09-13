@@ -81,7 +81,7 @@ export default function BrowseTab({
   // The vocab only rides the browse response, so other tabs fetch a one-row
   // browse rather than hardcoding SHOW_MOODS.
   useEffect(() => {
-    if (browse?.moodVocab?.length) seedVocab(browse.moodVocab);
+    if (browse?.semanticMoodVocab?.length) seedVocab(browse.semanticMoodVocab);
   }, [browse, seedVocab]);
 
   const stats = browse?.stats;
@@ -99,7 +99,7 @@ export default function BrowseTab({
   return (
     <>
       <BrowseFilters
-        moodVocab={browse?.moodVocab || []}
+        moodVocab={browse?.semanticMoodVocab || []}
         moodCounts={moodCounts}
         energyCounts={energyCounts}
         genreList={genreList}

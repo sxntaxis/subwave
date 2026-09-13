@@ -19,6 +19,7 @@ import {
   SCHEMA_VERSION,
   SEMANTIC_EXPERIMENT_VERSION,
   SEMANTIC_MOODS,
+  SEMANTIC_MOOD_IDS,
   SemanticTrackResultSchema,
   SemanticRequestSchema,
   semanticInputSha256,
@@ -33,6 +34,7 @@ import { validateSemanticContract as validateSemanticContractV1 } from '../src/m
 import { schemaHint } from '../src/llm/internal/core/pure.js';
 import canonicalSpec from '../src/music/semantic/semantic-output-v1.json' with { type: 'json' };
 import conformance from '../src/music/semantic/semantic-output-v1.conformance.json' with { type: 'json' };
+import semanticV2Spec from '../src/music/semantic/semantic-output-v2.json' with { type: 'json' };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '../src/music/semantic/cli.ts');
@@ -123,6 +125,11 @@ test('semantic runtime static hashes match the frozen Coyote contract', () => {
     ),
   );
   assert.ok(PROMPT_STATIC.includes('Bittersweet is valid only when all three gate values are Y'));
+});
+
+test('semantic mood ids are the lowercase Coyote V2 contract order', () => {
+  assert.deepEqual(SEMANTIC_MOOD_IDS, semanticV2Spec.moods.map((mood) => mood.toLowerCase()));
+  assert.deepEqual(SEMANTIC_MOODS.map((mood) => mood.toLowerCase()), SEMANTIC_MOOD_IDS);
 });
 
 test('canonical semantic contract conformance matches the vendored corpus', () => {

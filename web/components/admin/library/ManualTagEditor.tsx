@@ -54,7 +54,7 @@ export function ManualTagEditor(props: {
   onCancel: () => void;
 }) {
   const { track, vocab, busy, eraBusy } = props;
-  const [sel, setSel] = useState<string[]>((track.moods || []).slice(0, 3));
+  const [sel, setSel] = useState<string[]>(track.moods || []);
   const [energy, setEnergy] = useState<string>(track.energy || 'none');
   const [applyToAlbum, setApplyToAlbum] = useState(false);
   // Seeded from the manual override only, never the resolved era year: a
@@ -64,7 +64,7 @@ export function ManualTagEditor(props: {
   );
 
   const toggle = (m: string) =>
-    setSel(cur => cur.includes(m) ? cur.filter(x => x !== m) : (cur.length >= 3 ? cur : [...cur, m]));
+    setSel(cur => cur.includes(m) ? cur.filter(x => x !== m) : [...cur, m]);
   const energyVal = energy === 'none' ? null : energy;
 
   const eraTyped = eraInput.trim();
@@ -76,14 +76,14 @@ export function ManualTagEditor(props: {
     // Renders as a sibling of .lib-row, so the testid is the only way to scope to it.
     <div data-testid="manual-tag-editor" className="grid gap-3 border-b border-ink bg-[var(--ink-softer)] px-4 py-3">
       <div className="grid gap-1.5">
-        <Eyebrow>moods · up to 3</Eyebrow>
+        <Eyebrow>semantic moods</Eyebrow>
         <div className="flex flex-wrap gap-1.5">
           {vocab.length === 0 && <SkeletonText lines={1} />}
           {vocab.map(m => {
             const on = sel.includes(m);
             // Pass `disabled` rather than dropping onClick: without a handler the
             // Pill falls back to a Badge <span>, unfocusable and unannounced.
-            const unavailable = busy || (!on && sel.length >= 3);
+            const unavailable = busy;
             return (
               <Pill
                 key={m}
@@ -160,4 +160,3 @@ export function ManualTagEditor(props: {
     </div>
   );
 }
-

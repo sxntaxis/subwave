@@ -361,7 +361,7 @@ export function LibraryProvider({
       const response = await adminJson<BrowseResponse>(
         adminFetch, '/library/browse?limit=1', undefined, signal,
       );
-      return response.moodVocab ?? [];
+      return response.semanticMoodVocab ?? [];
     },
     enabled: false,
   });

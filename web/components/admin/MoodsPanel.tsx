@@ -438,9 +438,9 @@ export default function MoodsPanel() {
             Moods &amp; moments.
           </div>
           <div className="mt-1 text-[11px] leading-[1.6] text-muted">
-            The words your library is tagged with, and which of them each part of the day, the
-            weather, and the calendar leans into. Edit the list and every show, festival, and
-            auto-DJ pick draws from it.
+            Audio / context steering vocabulary used by CLAP affinity, time/weather context, and
+            programming. Fixed V1.21 semantic track moods are managed separately in the Library
+            browser; these saved labels remain operator-editable.
           </div>
         </div>
         <SectionTabs tabs={tabs} value={tab} onChange={selectTab} label="Moods sections" />
@@ -451,7 +451,7 @@ export default function MoodsPanel() {
       {!loaded && !err && tab !== 'festivals' && <SkeletonCards cards={6} />}
 
       {tab === 'vocab' && loaded && (
-        <Card title="Mood vocabulary" sub="the moods every track is tagged with">
+        <Card title="Station steering vocabulary" sub="editable audio and programming context labels">
           <div className="field">
             <div className="field-hint">
               Give each mood a short id (letters, digits, dashes) and, if you like, a sound

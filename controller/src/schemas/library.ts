@@ -7,9 +7,6 @@
 // the route enforces membership.
 import { z } from 'zod';
 
-/** At most three moods per track — the tagger's own ceiling. */
-export const MANUAL_TAG_MOODS_MAX = 3;
-
 export const MANUAL_TAG_ENERGIES = ['low', 'medium', 'high'] as const;
 
 export interface ManualTagContext {
@@ -39,13 +36,6 @@ export function manualTagSchema(ctx: ManualTagContext) {
           return z.NEVER;
         }
         const values = items as string[];
-        if (values.length > MANUAL_TAG_MOODS_MAX) {
-          c.addIssue({
-            code: 'custom',
-            message: `at most ${MANUAL_TAG_MOODS_MAX} moods per track`,
-          });
-          return z.NEVER;
-        }
         if (ctx.moodNames) {
           const unknown = values.filter((m) => !ctx.moodNames!.includes(m));
           if (unknown.length) {

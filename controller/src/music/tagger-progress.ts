@@ -6,6 +6,7 @@ export const PROGRESS_PREFIX = '[progress] ';
 export type TaggerPhase =
   | 'walk'
   | 'enrich'
+  | 'semantic'
   | 'embed'
   | 'seed'
   | 'propagate'
@@ -24,6 +25,15 @@ export interface TaggerProgress {
   round?: number;
   // Cumulative failures within the current phase.
   errors?: number;
+  // Canonical V1.21 mood outcomes for the semantic forward pass.
+  semantic?: {
+    labels: number;
+    none: number;
+    unresolved: number;
+    reused: number;
+    providerGenerations: number;
+    failures: number;
+  };
   // Per-leg tagged counts when dual-LLM mode is draining the batch queue.
   llm?: { legs: Record<string, number> };
   // Cumulative wall-clock per phase in ms. Attached to the terminal 'done' event

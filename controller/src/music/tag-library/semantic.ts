@@ -19,9 +19,32 @@ export interface SemanticTagStats {
   failures: number;
 }
 
+type CanonicalSemanticResult = {
+  outcome: 'SEMANTIC_LABELS' | 'SEMANTIC_NONE' | 'UNRESOLVED_INSUFFICIENT_EVIDENCE';
+  moods?: string[];
+};
+
 function orderedMoods(values: string[]): string[] {
   const present = new Set(values);
   return SEMANTIC_MOOD_IDS.filter(mood => present.has(mood));
+}
+
+/** Persist the complete V1.21 currentness state for every durable outcome. */
+export function persistCanonicalSemanticResult(id: string, result: CanonicalSemanticResult): 'labels' | 'none' | 'unresolved' {
+  const moods = result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE'
+    ? []
+    : orderedMoods(result.moods || []);
+  const energy = db.getTrack(id)?.energy ?? null;
+  db.upsertTrackTags(id, {
+    moods,
+    energy,
+    source: SEMANTIC_SOURCE,
+    confidence: null,
+    promptHash: SEMANTIC_PROMPT_HASH,
+    model: SEMANTIC_MODEL,
+  });
+  if (result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') return 'unresolved';
+  return moods.length ? 'labels' : 'none';
 }
 
 export async function runBoundedWorkers<T>(
@@ -81,32 +104,14 @@ export async function semanticTagIds(
         }
         stats.providerGenerations += providerCalls;
 
-        if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE') {
-          const moods = orderedMoods(result.moods || []);
-          const energy = db.getTrack(id)?.energy ?? null;
-          db.upsertTrackTags(id, {
-            moods,
-            energy,
-            source: SEMANTIC_SOURCE,
-            confidence: null,
-            promptHash: SEMANTIC_PROMPT_HASH,
-            model: SEMANTIC_MODEL,
+        if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE' || result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') {
+          const persisted = persistCanonicalSemanticResult(id, {
+            outcome: result.outcome as CanonicalSemanticResult['outcome'],
+            moods: result.moods,
           });
-          if (moods.length) stats.labels += 1;
-          else stats.none += 1;
-        } else if (result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') {
-          // Current unresolved is durable completion for routine restart scope,
-          // but it never creates an editorial MOOD value or coverage label.
-          const energy = db.getTrack(id)?.energy ?? null;
-          db.upsertTrackTags(id, {
-            moods: [],
-            energy,
-            source: SEMANTIC_SOURCE,
-            confidence: null,
-            promptHash: SEMANTIC_PROMPT_HASH,
-            model: SEMANTIC_MODEL,
-          });
-          stats.unresolved += 1;
+          if (persisted === 'labels') stats.labels += 1;
+          else if (persisted === 'none') stats.none += 1;
+          else stats.unresolved += 1;
         } else {
           stats.failures += 1;
           logEvent('warning', `Semantic mood tagging failed for ${id}: ${result.outcome}`);

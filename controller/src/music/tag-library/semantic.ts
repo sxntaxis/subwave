@@ -4,6 +4,7 @@ import { SEMANTIC_MODEL, SEMANTIC_PROMPT_HASH, SEMANTIC_MOOD_IDS, SEMANTIC_SOURC
 import type { WalkedSongLocator } from './flags.js';
 import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
+import { config } from '../../config.js';
 
 export interface SemanticTagStats {
   total: number;
@@ -21,13 +22,28 @@ function orderedMoods(values: string[]): string[] {
   return SEMANTIC_MOOD_IDS.filter(mood => present.has(mood));
 }
 
-function currentProvenance() {
-  return { source: SEMANTIC_SOURCE, promptHash: SEMANTIC_PROMPT_HASH, model: SEMANTIC_MODEL };
+export async function runBoundedWorkers<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  let cursor = 0;
+  const run = async (): Promise<void> => {
+    for (;;) {
+      if (signal?.aborted) return;
+      const index = cursor++;
+      if (index >= items.length) return;
+      await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), Math.max(1, items.length)) }, run));
 }
 
 export async function semanticTagIds(
   ids: string[],
   songs: Map<string, WalkedSongLocator>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<SemanticTagStats> {
   const stats: SemanticTagStats = {
     total: ids.length,
@@ -41,63 +57,59 @@ export async function semanticTagIds(
     semantic: { labels: 0, none: 0, unresolved: 0, reused: 0, providerGenerations: 0, failures: 0 },
   });
 
-  for (const id of ids) {
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('SEMANTIC_DUPLICATE_TRACK: cohort contains duplicate track IDs');
+  }
+
+  await runBoundedWorkers(ids, config.semantic.concurrency, async (id) => {
     const song = songs.get(id);
     if (!song) {
       stats.failures += 1;
-      stats.processed += 1;
       logEvent('warning', `Semantic mood tagging skipped ${id}: locator was not present in the live walk`);
-      reportProgress({
-        phase: 'semantic', label: 'Canonical semantic mood tagging', done: stats.processed, total: ids.length,
-        errors: stats.failures,
-        semantic: { labels: stats.labels, none: stats.none, unresolved: stats.unresolved,
-          reused: stats.reused, providerGenerations: stats.providerGenerations, failures: stats.failures },
-      });
-      continue;
-    }
-    try {
-      const result = await coyote.semanticRetag(coyote.locatorFromSong(song));
-      if (result.reused) stats.reused += 1;
-      const providerCalls = result.provider_calls;
-      if (typeof providerCalls !== 'number' || !Number.isInteger(providerCalls) || providerCalls < 0) {
-        throw new Error('PROVIDER_ACCOUNTING_FAILURE: Coyote did not return an exact provider_calls integer');
-      }
-      stats.providerGenerations += providerCalls;
+    } else try {
+        const result = await coyote.semanticRetag(coyote.locatorFromSong(song));
+        if (result.reused) stats.reused += 1;
+        const providerCalls = result.provider_calls;
+        if (typeof providerCalls !== 'number' || !Number.isInteger(providerCalls) || providerCalls < 0) {
+          throw new Error('PROVIDER_ACCOUNTING_FAILURE: Coyote did not return an exact provider_calls integer');
+        }
+        stats.providerGenerations += providerCalls;
 
-      if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE') {
-        const moods = orderedMoods(result.moods || []);
-        const energy = db.getTrack(id)?.energy ?? null;
-        db.upsertTrackTags(id, {
-          moods,
-          energy,
-          source: SEMANTIC_SOURCE,
-          confidence: null,
-          promptHash: SEMANTIC_PROMPT_HASH,
-          model: SEMANTIC_MODEL,
-        });
-        if (moods.length) stats.labels += 1;
-        else stats.none += 1;
-      } else if (result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') {
-        // Current unresolved is durable completion for routine restart scope,
-        // but it never creates an editorial MOOD value or coverage label.
-        const energy = db.getTrack(id)?.energy ?? null;
-        db.upsertTrackTags(id, {
-          moods: [],
-          energy,
-          source: SEMANTIC_SOURCE,
-          confidence: null,
-          promptHash: SEMANTIC_PROMPT_HASH,
-          model: SEMANTIC_MODEL,
-        });
-        stats.unresolved += 1;
-      } else {
+        if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE') {
+          const moods = orderedMoods(result.moods || []);
+          const energy = db.getTrack(id)?.energy ?? null;
+          db.upsertTrackTags(id, {
+            moods,
+            energy,
+            source: SEMANTIC_SOURCE,
+            confidence: null,
+            promptHash: SEMANTIC_PROMPT_HASH,
+            model: SEMANTIC_MODEL,
+          });
+          if (moods.length) stats.labels += 1;
+          else stats.none += 1;
+        } else if (result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') {
+          // Current unresolved is durable completion for routine restart scope,
+          // but it never creates an editorial MOOD value or coverage label.
+          const energy = db.getTrack(id)?.energy ?? null;
+          db.upsertTrackTags(id, {
+            moods: [],
+            energy,
+            source: SEMANTIC_SOURCE,
+            confidence: null,
+            promptHash: SEMANTIC_PROMPT_HASH,
+            model: SEMANTIC_MODEL,
+          });
+          stats.unresolved += 1;
+        } else {
+          stats.failures += 1;
+          logEvent('warning', `Semantic mood tagging failed for ${id}: ${result.outcome}`);
+        }
+      } catch (err: unknown) {
         stats.failures += 1;
-        logEvent('warning', `Semantic mood tagging failed for ${id}: ${result.outcome}`);
+        const message = err instanceof Error ? err.message : String(err);
+        logEvent('warning', `Semantic mood tagging failed for ${id}: ${message}`);
       }
-    } catch (err: any) {
-      stats.failures += 1;
-      logEvent('warning', `Semantic mood tagging failed for ${id}: ${err?.message || err}`);
-    }
     stats.processed += 1;
     reportProgress({
       phase: 'semantic',
@@ -114,6 +126,6 @@ export async function semanticTagIds(
         failures: stats.failures,
       },
     });
-  }
+  }, options.signal);
   return stats;
 }

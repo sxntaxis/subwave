@@ -46,6 +46,9 @@ export const config = {
     socketPath: COYOTE_SOCKET_PATH,
     timeoutMs: envInt('COYOTE_TIMEOUT_MS', 150_000),
   },
+  semantic: {
+    concurrency: envInt('SEMANTIC_CONCURRENCY', 4, { min: 1, max: 8 }),
+  },
   soundsDir: SOUNDS_DIR,
   navidrome: {
     url: envUrl('NAVIDROME_URL', 'http://navidrome:4533'),

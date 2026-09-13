@@ -67,6 +67,26 @@ test('Coyote IPC surfaces backend errors without changing their code', async () 
   });
 });
 
+test('Coyote IPC exposes the shared exact track resolver', async () => {
+  await withServer((request) => {
+    assert.equal(request.op, 'track.resolve');
+    assert.equal((request.track as { navidromeId?: string }).navidromeId, 'nav-1');
+    return {
+      ok: true,
+      version: 1,
+      requestId: request.requestId,
+      result: { coyoteTrackId: 'coyote-1', path: '/music/a.flac', resolutionAuthority: 'navidrome_alias' },
+    };
+  }, async () => {
+    const result = await coyote.resolveTrack({ navidromeId: 'nav-1' });
+    assert.deepEqual(result, {
+      coyoteTrackId: 'coyote-1',
+      path: '/music/a.flac',
+      resolutionAuthority: 'navidrome_alias',
+    });
+  });
+});
+
 test('locator carries Navidrome identity hints but no file-system authority', () => {
   assert.deepEqual(coyote.locatorFromSong({
     id: 'nav-2',

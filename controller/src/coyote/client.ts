@@ -19,6 +19,13 @@ export interface CoyoteMoodReadResult {
   coyoteTrackId: string;
   path: string;
   moods: string[];
+  resolutionAuthority?: string;
+}
+
+export interface CoyoteTrackResolveResult {
+  coyoteTrackId: string;
+  path: string;
+  resolutionAuthority: string;
 }
 
 export interface CoyoteManualSetResult {
@@ -40,6 +47,7 @@ export interface CoyoteSemanticRetagResult {
   applied: boolean;
   coyoteTrackId: string;
   path: string;
+  resolutionAuthority?: string;
   outcome: string;
   moods: string[];
   proposalId?: string;
@@ -176,6 +184,10 @@ export function health(): Promise<{ status: string; contractVersion: number }> {
 
 export function readMood(track: CoyoteTrackLocator): Promise<CoyoteMoodReadResult> {
   return request('mood.read', { track });
+}
+
+export function resolveTrack(track: CoyoteTrackLocator): Promise<CoyoteTrackResolveResult> {
+  return request('track.resolve', { track });
 }
 
 export function manualSetMoods(tracks: CoyoteTrackLocator[], moods: string[]): Promise<CoyoteManualSetResult> {

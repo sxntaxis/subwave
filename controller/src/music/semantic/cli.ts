@@ -46,6 +46,10 @@ try {
   stdout.write(`${JSON.stringify(response)}\n`);
 } catch (error) {
   const message = error instanceof Error ? error.message : 'semantic classification failed';
+  const providerCalls = error && typeof error === 'object' && Number.isInteger((error as { provider_calls?: unknown }).provider_calls)
+    ? (error as { provider_calls: number }).provider_calls
+    : 0;
+  stdout.write(`${JSON.stringify({ provider_calls: providerCalls })}\n`);
   stderr.write(`${message}\n`);
   process.exitCode = 1;
 }

@@ -136,6 +136,7 @@ export interface SemanticResponse {
   renderer_sha256: string;
   semantic_input_sha256: string;
   semantic_run_fingerprint: string;
+  provider_calls: number;
   results: SemanticTrackResult[];
 }
 

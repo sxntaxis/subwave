@@ -66,6 +66,7 @@ export async function djObject({
   // Retry-After sleep short and prevent a ghost retry after the abort (mirrors
   // djAgent's threading, PR #751 review).
   signal = undefined,
+  onProviderCall = undefined,
 }: any): Promise<any> {
   return withFailover(
     kind,
@@ -85,10 +86,15 @@ export async function djObject({
           if (attempt === 1 && needsToolCallObject(l.cfg)) {
             lastVia = 'ai-sdk:tool';
             ({ object, usage, perf, warnings } = await withTransientRetry(kind,
-              () => objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, signal }), signal));
+              () => {
+                onProviderCall?.();
+                return objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, signal });
+              }, signal));
           } else if (attempt === 1) {
             lastVia = 'ai-sdk';
-            const result = await withTransientRetry(kind, () => generateText({
+            const result = await withTransientRetry(kind, () => {
+              onProviderCall?.();
+              return generateText({
               model: l.model,
               instructions: system,
               // Appended to the PROMPT, not to `system` — same placement as the
@@ -100,7 +106,8 @@ export async function djObject({
               output: Output.object({ schema }),
               reasoning: reasoningFor(l.cfg),
               ...(signal ? { abortSignal: signal } : {}),
-            }), signal);
+              });
+            }, signal);
             object = result.output;
             usage = usageOf(result);
             perf = perfOf(result);
@@ -118,7 +125,9 @@ export async function djObject({
             // (objectViaToolCall, djAgent's done-tool path) — this was the one
             // branch still using the operator's raw reasoning-on model instance.
             const hint = schemaHint(schema);
-            const result = await withTransientRetry(kind, () => generateText({
+            const result = await withTransientRetry(kind, () => {
+              onProviderCall?.();
+              return generateText({
               model: l.noThinkModel ?? l.model,
               instructions: system,
               prompt: `${prompt}\n\nRespond with a single JSON object only — no prose, no markdown fences.`
@@ -127,7 +136,8 @@ export async function djObject({
               maxOutputTokens,
               reasoning: reasoningFor(l.cfg, { forceNoThink: true }),
               ...(signal ? { abortSignal: signal } : {}),
-            }), signal);
+              });
+            }, signal);
             try {
               object = schema.parse(JSON.parse(extractJson(stripThinking(result.text))));
             } catch (parseErr: any) {

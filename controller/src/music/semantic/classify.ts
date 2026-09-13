@@ -102,6 +102,7 @@ export async function classifySemantic(
     options.onRawResult?.(result);
     return {
       ...responseBase(request, 'mock', 'mock-semantic-v1'),
+      provider_calls: 0,
       structural_schema_valid: true,
       semantic_contract_valid: true,
       semantic_outcome: 'VALID',
@@ -109,28 +110,40 @@ export async function classifySemantic(
     };
   }
 
-  await settings.load();
-  const llm = settings.get().llm;
-  if (llm?.provider !== FROZEN_PROVIDER || llm?.model !== FROZEN_MODEL || llm?.reasoning === true) {
-    throw new Error(`PROVIDER_PINNING_UNAVAILABLE: expected ${FROZEN_PROVIDER}:${FROZEN_MODEL} reasoning=${FROZEN_REASONING}`);
-  }
-  const result = await djObject(buildSemanticGenerationOptions(track));
-  options.onRawResult?.(result);
-  if (result.id !== track.id) {
-    throw new Error('SCHEMA_FAILURE: track id');
-  }
-  const contract = validateSemanticContract(result);
-  if (!contract.semanticValid) {
-    throw new Error(
-      `SEMANTIC_CONTRACT_FAILURE: code=${contract.code}; structural_schema_valid=${contract.structuralValid}; semantic_contract_valid=false`,
-    );
-  }
+  let providerCalls = 0;
+  try {
+    await settings.load();
+    const llm = settings.get().llm;
+    if (llm?.provider !== FROZEN_PROVIDER || llm?.model !== FROZEN_MODEL || llm?.reasoning === true) {
+      throw new Error(`PROVIDER_PINNING_UNAVAILABLE: expected ${FROZEN_PROVIDER}:${FROZEN_MODEL} reasoning=${FROZEN_REASONING}`);
+    }
+    const result = await djObject({
+      ...buildSemanticGenerationOptions(track),
+      onProviderCall: () => { providerCalls += 1; },
+    });
+    options.onRawResult?.(result);
+    if (result.id !== track.id) {
+      throw new Error('SCHEMA_FAILURE: track id');
+    }
+    const contract = validateSemanticContract(result);
+    if (!contract.semanticValid) {
+      throw new Error(
+        `SEMANTIC_CONTRACT_FAILURE: code=${contract.code}; structural_schema_valid=${contract.structuralValid}; semantic_contract_valid=false`,
+      );
+    }
 
-  return {
-    ...responseBase(request, FROZEN_PROVIDER, FROZEN_MODEL),
-    structural_schema_valid: true,
-    semantic_contract_valid: true,
-    semantic_outcome: 'VALID',
-    results: [result],
-  };
+    return {
+      ...responseBase(request, FROZEN_PROVIDER, FROZEN_MODEL),
+      provider_calls: providerCalls,
+      structural_schema_valid: true,
+      semantic_contract_valid: true,
+      semantic_outcome: 'VALID',
+      results: [result],
+    };
+  } catch (error) {
+    if (error && typeof error === 'object') {
+      (error as { provider_calls?: number }).provider_calls = providerCalls;
+    }
+    throw error;
+  }
 }

@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const PROTOCOL_VERSION = 1 as const;
 export const CONTRACT_VERSION = "the-lab-moods-v2" as const;
 export const SCHEMA_VERSION = "semantic-output-v2" as const;
-export const RENDERER_VERSION = "semantic-evidence-renderer-2.1.0" as const;
+export const RENDERER_VERSION = "semantic-evidence-renderer-2.1.1" as const;
 export const DECODER_VERSION = "semantic-decoder-v2" as const;
 export const SEMANTIC_EXPERIMENT_VERSION = 'v1.21' as const;
 
@@ -37,7 +37,7 @@ export const SCHEMA_MATERIAL = "semantic-output-v2|track.id:string|min=1|e:S,I|m
 export const EXPECTED_PROMPT_STATIC_SHA256 = "51cb3a5426bec242c5d58dcc40f894a5ea187ad5caba207faacaaaaeb5fd3a86" as const;
 export const EXPECTED_SCHEMA_SHA256 = "83d7ec4f79b751806e026ca85d7d7da612b906b58d8a4ef1a721b445e23759ce" as const;
 export const EXPECTED_CONTRACT_SHA256 = "698eaf98859a3d4d24136976b0b03db972fb572bd178740baf92ed364bbe534c" as const;
-export const EXPECTED_RENDERER_SHA256 = "8afdeb9b68c0a08bba28ff31b029122cdb4a41946c5445fc9fe39d5dad6308eb" as const;
+export const EXPECTED_RENDERER_SHA256 = "822c9be0a4d5bcdf5d4d00ef8c871a43c139f1674670ac65a1316ec9b85e8a74" as const;
 
 export const SEMANTIC_PROMPT_HASH = EXPECTED_PROMPT_STATIC_SHA256;
 export const SEMANTIC_MODEL = FROZEN_MODEL;

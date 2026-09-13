@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-semantic-scope-'));
@@ -45,4 +46,48 @@ test('scope selects stale machine rows but skips manual and current semantic row
   assert.equal(db.semanticProcessedCount(), 1);
   assert.equal(db.semanticLabelCount(), 0);
   assert.equal(db.getTrack('current')?.energy, 'medium');
+});
+
+test('forward orchestrator uses one semantic scope cohort for every phase', () => {
+  add('current-none');
+  add('current-unresolved');
+  add('stale-labelled');
+  add('manual-labelled');
+  db.upsertTrackTags('current-none', {
+    moods: [], energy: null, source: SEMANTIC_SOURCE, confidence: null,
+    promptHash: SEMANTIC_PROMPT_HASH, model: SEMANTIC_MODEL,
+  });
+  db.upsertTrackTags('current-unresolved', {
+    moods: [], energy: null, source: SEMANTIC_SOURCE, confidence: null,
+    promptHash: SEMANTIC_PROMPT_HASH, model: SEMANTIC_MODEL,
+  });
+  db.upsertTrackTags('stale-labelled', {
+    moods: ['bright'], energy: null, source: 'llm', confidence: null,
+    promptHash: 'old-prompt', model: 'old-model',
+  });
+  db.upsertTrackTags('manual-labelled', {
+    moods: ['warm'], energy: null, source: 'manual', confidence: 1,
+  });
+
+  const scope = db.semanticScopeIds();
+  assert.ok(scope.includes('stale-labelled'));
+  assert.ok(!scope.includes('current-none'));
+  assert.ok(!scope.includes('current-unresolved'));
+  assert.ok(!scope.includes('manual-labelled'));
+  assert.deepEqual(db.semanticScopeIds(2), scope.slice(0, 2));
+
+  const orchestrator = readFileSync(
+    fileURLToPath(new URL('../src/music/tag-library.ts', import.meta.url)),
+    'utf8',
+  );
+  assert.match(orchestrator, /const forwardSemanticCohort = db\.semanticScopeIds\(/);
+  assert.match(orchestrator, /targetUntagged: forwardSemanticCohort/);
+  assert.match(orchestrator, /scopeIds: forwardSemanticCohort/);
+  assert.match(orchestrator, /semanticTagIds\(forwardSemanticCohort, songs\)/);
+  const forwardBranch = orchestrator.slice(
+    orchestrator.indexOf('if (plan.forwardTag)'),
+    orchestrator.indexOf("if (!embeddings.isAvailable())"),
+  );
+  assert.doesNotMatch(forwardBranch,
+    /const allUntagged = db\.untaggedIds\(\)/);
 });

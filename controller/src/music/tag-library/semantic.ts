@@ -6,6 +6,7 @@ import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 
 export interface SemanticTagStats {
+  total: number;
   processed: number;
   labels: number;
   none: number;
@@ -29,6 +30,7 @@ export async function semanticTagIds(
   songs: Map<string, WalkedSongLocator>,
 ): Promise<SemanticTagStats> {
   const stats: SemanticTagStats = {
+    total: ids.length,
     processed: 0, labels: 0, none: 0, unresolved: 0, reused: 0, providerGenerations: 0, failures: 0,
   };
   reportProgress({
@@ -43,15 +45,24 @@ export async function semanticTagIds(
     const song = songs.get(id);
     if (!song) {
       stats.failures += 1;
+      stats.processed += 1;
       logEvent('warning', `Semantic mood tagging skipped ${id}: locator was not present in the live walk`);
+      reportProgress({
+        phase: 'semantic', label: 'Canonical semantic mood tagging', done: stats.processed, total: ids.length,
+        errors: stats.failures,
+        semantic: { labels: stats.labels, none: stats.none, unresolved: stats.unresolved,
+          reused: stats.reused, providerGenerations: stats.providerGenerations, failures: stats.failures },
+      });
       continue;
     }
     try {
       const result = await coyote.semanticRetag(coyote.locatorFromSong(song));
       if (result.reused) stats.reused += 1;
-      if (!result.reused && ['SEMANTIC_LABELS', 'SEMANTIC_NONE', 'UNRESOLVED_INSUFFICIENT_EVIDENCE'].includes(result.outcome)) {
-        stats.providerGenerations += 1;
+      const providerCalls = result.provider_calls;
+      if (typeof providerCalls !== 'number' || !Number.isInteger(providerCalls) || providerCalls < 0) {
+        throw new Error('PROVIDER_ACCOUNTING_FAILURE: Coyote did not return an exact provider_calls integer');
       }
+      stats.providerGenerations += providerCalls;
 
       if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE') {
         const moods = orderedMoods(result.moods || []);

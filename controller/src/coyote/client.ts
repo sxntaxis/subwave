@@ -46,6 +46,7 @@ export interface CoyoteSemanticRetagResult {
   resultId?: string;
   reused?: boolean;
   changed?: boolean;
+  provider_calls?: number;
   writerStatus?: string;
   metadata?: {
     prompt_static_sha256?: string;

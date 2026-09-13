@@ -33,9 +33,8 @@ interface Props {
   soundsLikeActive: boolean;
   // null (old controller / not yet polled) is treated as 'normal', no warning.
   budgetMode: BudgetMode | null;
-  // Cost-preview attribution (#1162): mood/energy seed calls bill to the DJ's
-  // chat LLM (settings.llm), NOT the embedding provider. null until the settings
-  // poll lands, and the line then omits the attribution.
+  // Legacy provider labels remain accepted for the independent embedding path;
+  // canonical semantic accounting comes from exact Coyote provider_calls.
   llmLabel: string | null;
   embedLabel: string | null;
   // When set, the modal opens straight to the matching tab/selection.
@@ -112,9 +111,8 @@ export default function LibraryTaggingModal(p: Props) {
   const anyStep = effSteps.reconcile || effSteps.enrich || effSteps.tagMoods || effSteps.analyze;
   const onlyReconcile = effSteps.reconcile && !effSteps.enrich && !effSteps.tagMoods && !effSteps.analyze;
 
-  // Run-tab cost preview. seedEst is the up-front LLM seed budget tag-library.ts
-  // spends before propagation carries the rest; the batch-of-25 divisor mirrors
-  // tag-library's default --batch. Suppressed until coverage has live counts.
+  // Run-tab scope preview. Canonical semantic execution is bounded by the
+  // selected cohort; exact provider calls are reported by Coyote at runtime.
   const limitNum = p.batch === 'all' ? Infinity : parseInt(p.batch, 10);
   const inScope =
     p.remaining == null
@@ -122,8 +120,6 @@ export default function LibraryTaggingModal(p: Props) {
       : limitNum === Infinity
         ? p.remaining
         : Math.min(limitNum, p.remaining);
-  const seedEst =
-    inScope != null && p.libraryTotal != null ? Math.min(seedBudget(p.libraryTotal), inScope) : null;
   // 'normal' (or unknown) → no banner; soft/hard get a spend caution.
   const budgetWarn = p.budgetMode === 'soft' || p.budgetMode === 'hard' ? p.budgetMode : null;
 
@@ -188,8 +184,9 @@ export default function LibraryTaggingModal(p: Props) {
         {tab === 'run' && (
           <>
             <p className="text-[12px] leading-[1.55] text-muted">
-              Process new / untagged tracks. Untick a step to skip it this run — the
-              badge shows what each one costs.
+               Process the selected forward cohort. Each selected track is analyzed
+               independently; exact Coyote semantic results are reused without another
+               provider call. Untick a step to skip it this run.
             </p>
             <div className="grid gap-2.5">
               <Pass on={steps.reconcile} onClick={() => toggleStep('reconcile')}
@@ -197,17 +194,13 @@ export default function LibraryTaggingModal(p: Props) {
                 hint="Find newly-added tracks and drop ones deleted from Navidrome. Fast — no AI, no model calls." />
               <Pass on={steps.enrich} onClick={() => toggleStep('enrich')}
                 name="Enrich metadata" tag="network"
-                hint="Fetch Last.fm tags + lyrics per track to sharpen the mood read. External API calls — slower on big batches." />
+                 hint="Fetch independent metadata enrichment per track. External API calls — slower on big batches." />
               <Pass on={steps.tagMoods} onClick={() => toggleStep('tagMoods')}
                 name="Tag moods (LLM)" tag="AI · billed"
-                hint="The core step: embeds each track, then your DJ's LLM picks mood & energy and spreads tags to similar songs. Billed to the Settings → LLM provider — the embedding provider only handles similarity." />
-              {steps.tagMoods && seedEst != null && inScope != null && (
+                 hint="Each selected track is analyzed independently. Exact Coyote semantic results are reused without another provider call. Up to N new provider calls." />
+              {steps.tagMoods && inScope != null && (
                 <p className="-mt-1 pl-[26px] text-[11px] leading-[1.5] text-muted">
-                  ≈ <span className="mono-num">{num(seedEst)}</span> LLM seed calls in ~
-                  <span className="mono-num">{Math.ceil(seedEst / 25)}</span> batches
-                  {p.llmLabel && <> on <b>{p.llmLabel}</b></>}, plus re-checks
-                  for uncertain tracks · ≈ <span className="mono-num">{num(inScope)}</span> embedding calls
-                  {p.embedLabel && <> on <b>{p.embedLabel}</b></>}
+                   Up to <span className="mono-num">{num(inScope)}</span> new provider calls
                 </p>
               )}
               <Pass on={effSteps.analyze} onClick={() => toggleStep('analyze')} disabled={analyzeLocked}
@@ -415,10 +408,6 @@ function Pass({ on, onClick, name, hint, disabled, tag }: {
 // MIRROR of controller/src/music/tag-library.ts `autoSeedCount` (the backend
 // copy is authoritative): keep the 200 / 2500 / 0.04 constants in sync — a
 // comment there points back here.
-function seedBudget(librarySize: number): number {
-  return Math.max(200, Math.min(2500, Math.round(librarySize * 0.04)));
-}
-
 function Chip({ children }: { children: string }) {
   return (
     <span className="rounded-[3px] border border-separator-strong bg-[var(--ink-soft)] px-1.5 py-px text-[9px] font-bold tracking-[0.08em] text-muted uppercase">

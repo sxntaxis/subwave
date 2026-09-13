@@ -81,7 +81,7 @@ try {
     ].join('\n'),
   );
 
-  const out = execFileSync('tsx', [childScript], {
+  const out = execFileSync(process.execPath, ['--import', 'tsx', childScript], {
     encoding: 'utf8',
     env: { ...process.env, TRUST_CF_CONNECTING_IP: '1' },
   });

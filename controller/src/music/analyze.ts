@@ -28,6 +28,7 @@ const logEvent = makeEventLogger('analyze');
 
 export interface AnalyzeOptions {
   limit?: number;        // cap tracks this run (default: all that need it)
+  scopeIds?: string[];   // immutable forward cohort supplied by the tag orchestrator
   reAnalyze?: boolean;   // drop existing analysis first, redo everything
   // Re-scan: --re-analyze redoes ONLY the already-analysed population (captured
   // before the clear), never the remainder. Off for the standalone entry point.
@@ -226,7 +227,10 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   }
 
   const cap = opts.limit && opts.limit > 0 ? opts.limit : undefined;
-  const bpmIds = reAnalyzeScope
+  const fixedScope = opts.scopeIds;
+  const bpmIds = fixedScope
+    ? [...fixedScope]
+    : reAnalyzeScope
     ? (cap ? reAnalyzeScope.slice(0, cap) : reAnalyzeScope)
     : db.needsAnalysisIds(cap);
   let ids = bpmIds;
@@ -244,7 +248,7 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     backend,
   });
   const audioBackfill = audioDecision.widen;
-  if (audioBackfill && !reAnalyzeScope) {
+  if (audioBackfill && !reAnalyzeScope && !fixedScope) {
     const seen = new Set(bpmIds);
     const audioIds = db.unanalysedAudioIds(cap).filter(id => !seen.has(id));
     ids = cap ? [...bpmIds, ...audioIds].slice(0, cap) : [...bpmIds, ...audioIds];
@@ -261,7 +265,7 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   // detection, only on an explicit `=== true` — old sidecars never report the
   // flag and a stale image must keep the head-only scope.
   const includeTailMissing = analyzer.tailVocalAvailable() === true;
-  if (vocalBackfill && !reAnalyzeScope) {
+  if (vocalBackfill && !reAnalyzeScope && !fixedScope) {
     const seen = new Set(ids);
     const vocalIds = db.needsVocalIds(cap, includeTailMissing).filter(id => !seen.has(id));
     const before = ids.length;
@@ -284,7 +288,7 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     stemSlotsLeft = await stemCacheStore.headroomTracks();
     existingStemDirs = await stemCacheStore.cachedTrackIdSet();
   }
-  if (stemCache && !reAnalyzeScope) {
+  if (stemCache && !reAnalyzeScope && !fixedScope) {
     // The loop spends stemSlotsLeft in ids order and the earlier widenings'
     // tracks run FIRST, draining slots before this slice is reached. Reserve
     // them up front, or the announcement over-promises.

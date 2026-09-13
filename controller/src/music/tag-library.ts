@@ -1,5 +1,6 @@
-// Library tagger orchestrator. Phases: 0 enrich → 1 embed → 2 seed →
-// 3 KNN-propagate → 4 active-learn → 5 acoustic analyze. Each phase
+// Library tagger orchestrator. Canonical forward phases: setup/walk → enrich →
+// acoustic analysis → semantic tagging. Legacy embedding phases remain an
+// independent path when canonical semantic tagging is not selected. Each phase
 // short-circuits cleanly so partial runs make progress.
 //
 // Run:  docker exec sub-wave-controller npx tsx src/music/tag-library.ts
@@ -115,17 +116,16 @@ async function main() {
     }
     lap('walk');
 
-    const allUntagged = db.untaggedIds();
-    const targetUntagged = flags.limit === Infinity
-      ? allUntagged
-      : allUntagged.slice(0, flags.limit);
+    const forwardSemanticCohort = db.semanticScopeIds(
+      flags.limit === Infinity ? undefined : flags.limit,
+    );
     if (plan.enrich) {
       const enrichIds = selectEnrichIds({
         reEnrich: flags.reEnrich,
         rescan: false,
         limit: flags.limit,
         liveIds,
-        targetUntagged,
+        targetUntagged: forwardSemanticCohort,
       });
       await phaseEnrich(enrichIds, flags.reEnrich);
     } else {
@@ -133,14 +133,11 @@ async function main() {
     }
     lap('enrich');
 
-    const scope = db.semanticScopeIds(flags.limit === Infinity ? undefined : flags.limit);
-    logEvent('info', `${scope.length.toLocaleString('en-GB')} tracks selected for V1.21 semantic mood tagging`);
-    const semanticStats = await semanticTagIds(scope, songs);
-    lap('semantic');
+    logEvent('info', `${forwardSemanticCohort.length.toLocaleString('en-GB')} tracks selected for the shared V1.21 forward cohort`);
     if (plan.analyze) {
       try {
         await runAnalysisPass({
-          limit: flags.limit === Infinity ? undefined : flags.limit,
+          scopeIds: forwardSemanticCohort,
           reAnalyze: flags.reAnalyze,
           rescan: flags.rescan,
           vocalBackfill: flags.vocal ? true : flags.noVocal ? false : undefined,
@@ -150,7 +147,9 @@ async function main() {
       }
     }
     lap('analyze');
-    finish(startedAt, semanticStats.providerGenerations, semanticStats.labels, {}, timings, semanticStats);
+    const semanticStats = await semanticTagIds(forwardSemanticCohort, songs);
+    lap('semantic');
+    finish(startedAt, semanticStats.providerGenerations, semanticStats.processed, {}, timings, semanticStats);
     return;
   }
 
@@ -638,7 +637,8 @@ function finish(
   reportProgress({
     phase: 'done',
     label: 'Finished',
-    done: llmTagged,
+    done: semantic ? semantic.processed : llmTagged,
+    total: semantic ? semantic.total : undefined,
     llm: Object.keys(byLeg).length ? { legs: byLeg } : undefined,
     timings: timed.length ? Object.fromEntries(timed) : undefined,
     semantic: semantic

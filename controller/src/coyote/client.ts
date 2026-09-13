@@ -65,6 +65,19 @@ export interface CoyoteSemanticRetagResult {
   enrichment?: Record<string, unknown>;
 }
 
+export interface CoyoteSemanticPrepareResult {
+  ready: boolean;
+  coyoteTrackId: string | null;
+  identityAuthority: string | null;
+  renderer: string | null;
+  fingerprint: string | null;
+  commonCoreAvailable: boolean;
+  measuredAudioAvailable: boolean;
+  verifiedLyricsAvailable: boolean;
+  blockingReason: string | null;
+  provider_calls: number;
+}
+
 interface CoyoteErrorBody {
   code?: string;
   message?: string;
@@ -196,4 +209,8 @@ export function manualSetMoods(tracks: CoyoteTrackLocator[], moods: string[]): P
 
 export function semanticRetag(track: CoyoteTrackLocator): Promise<CoyoteSemanticRetagResult> {
   return request('mood.semantic_retag', { track });
+}
+
+export function semanticPrepare(track: CoyoteTrackLocator): Promise<CoyoteSemanticPrepareResult> {
+  return request('semantic.prepare', { track });
 }

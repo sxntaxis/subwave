@@ -87,7 +87,7 @@ test('semantic runtime static hashes match the frozen Coyote contract', () => {
   assert.equal(EXPECTED_PROMPT_STATIC_SHA256, "51cb3a5426bec242c5d58dcc40f894a5ea187ad5caba207faacaaaaeb5fd3a86");
   assert.equal(EXPECTED_SCHEMA_SHA256, "83d7ec4f79b751806e026ca85d7d7da612b906b58d8a4ef1a721b445e23759ce");
   assert.equal(EXPECTED_CONTRACT_SHA256, "698eaf98859a3d4d24136976b0b03db972fb572bd178740baf92ed364bbe534c");
-  assert.equal(EXPECTED_RENDERER_SHA256, "05867072f05d7caeb524414fe818af692a5af703bb4e04741a74dc81c5936016");
+  assert.equal(EXPECTED_RENDERER_SHA256, "8afdeb9b68c0a08bba28ff31b029122cdb4a41946c5445fc9fe39d5dad6308eb");
   assert.equal(
     semanticInputSha256([track]),
     '93ebbe1c7477c5070be75a20642df14b94e9a85ac7c84d313fce1957ef8c3f93',

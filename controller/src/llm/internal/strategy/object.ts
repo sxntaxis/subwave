@@ -58,6 +58,7 @@ export async function djObject({
   schema,
   temperature = 0.4,
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_OBJECT),
+  maxRetries = undefined,
   kind = 'sdk.djObject',
   leg = undefined,
   // Optional caller-supplied abort signal. No live caller wraps djObject in
@@ -67,7 +68,22 @@ export async function djObject({
   // djAgent's threading, PR #751 review).
   signal = undefined,
   onProviderCall = undefined,
+  onProviderCallEnd = undefined,
 }: any): Promise<any> {
+  const invokeProvider = async (via: string, fn: () => Promise<any>) => {
+    const token = onProviderCall?.({ via });
+    let outcome: any;
+    try {
+      const result = await fn();
+      outcome = { result };
+      return result;
+    } catch (error) {
+      outcome = { error };
+      throw error;
+    } finally {
+      onProviderCallEnd?.(token, outcome);
+    }
+  };
   return withFailover(
     kind,
     (err) => ({ user: prompt, ...failureDiagnostics(err) }),
@@ -87,14 +103,12 @@ export async function djObject({
             lastVia = 'ai-sdk:tool';
             ({ object, usage, perf, warnings } = await withTransientRetry(kind,
               () => {
-                onProviderCall?.();
-                return objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, signal });
+                return invokeProvider('ai-sdk:tool', () => objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, maxRetries, signal }));
               }, signal));
           } else if (attempt === 1) {
             lastVia = 'ai-sdk';
             const result = await withTransientRetry(kind, () => {
-              onProviderCall?.();
-              return generateText({
+              return invokeProvider('ai-sdk', () => generateText({
               model: l.model,
               instructions: system,
               // Appended to the PROMPT, not to `system` — same placement as the
@@ -102,11 +116,12 @@ export async function djObject({
               // byte-identical (the tagger hashes its own into prompt_hash).
               prompt: `${prompt}\n\n${NATIVE_JSON_INSTRUCTION}`,
               temperature,
-              maxOutputTokens,
+               maxOutputTokens,
+               maxRetries,
               output: Output.object({ schema }),
               reasoning: reasoningFor(l.cfg),
               ...(signal ? { abortSignal: signal } : {}),
-              });
+              }));
             }, signal);
             object = result.output;
             usage = usageOf(result);
@@ -126,17 +141,17 @@ export async function djObject({
             // branch still using the operator's raw reasoning-on model instance.
             const hint = schemaHint(schema);
             const result = await withTransientRetry(kind, () => {
-              onProviderCall?.();
-              return generateText({
+              return invokeProvider('ai-sdk:recovery', () => generateText({
               model: l.noThinkModel ?? l.model,
               instructions: system,
               prompt: `${prompt}\n\nRespond with a single JSON object only — no prose, no markdown fences.`
                 + (hint ? ` It MUST validate against this JSON Schema — every required key must be present:\n${hint}` : ''),
               temperature,
-              maxOutputTokens,
+               maxOutputTokens,
+               maxRetries,
               reasoning: reasoningFor(l.cfg, { forceNoThink: true }),
               ...(signal ? { abortSignal: signal } : {}),
-              });
+              }));
             }, signal);
             try {
               object = schema.parse(JSON.parse(extractJson(stripThinking(result.text))));

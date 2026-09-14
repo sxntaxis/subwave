@@ -69,7 +69,7 @@ export async function runBoundedWorkers<T>(
 export async function semanticTagIds(
   ids: string[],
   songs: Map<string, WalkedSongLocator>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; providerCallBudget?: { id: string; limit: number } } = {},
 ): Promise<SemanticTagStats> {
   const stats: SemanticTagStats = {
     total: ids.length,
@@ -96,7 +96,7 @@ export async function semanticTagIds(
       stats.failures += 1;
       logEvent('warning', `Semantic mood tagging skipped ${id}: locator was not present in the live walk`);
     } else try {
-        const result = await coyote.semanticRetag(coyote.locatorFromSong(song));
+        const result = await coyote.semanticRetag(coyote.locatorFromSong(song, { providerCallBudget: options.providerCallBudget }));
         if (result.reused) stats.reused += 1;
         const providerCalls = result.provider_calls;
         if (typeof providerCalls !== 'number' || !Number.isInteger(providerCalls) || providerCalls < 0) {

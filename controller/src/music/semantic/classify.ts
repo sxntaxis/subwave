@@ -26,9 +26,18 @@ import {
 } from './contract-v2.js';
 import { PROMPT_STATIC, assertFrozenPrompt } from './prompt-v2.js';
 import { validateSemanticContract } from './canonical-contract.js';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 const MAX_OUTPUT_TOKENS = 2048;
+const OPENROUTER_PROVIDER_OPTIONS = {
+  openrouter: {
+    provider: {
+      ignore: ['open-inference', 'deepinfra'],
+      allow_fallbacks: true,
+      require_parameters: true,
+    },
+  },
+} as const;
 
 export type SemanticClassifyOptions = {
   onRawResult?: (result: SemanticTrackResult) => void;
@@ -84,6 +93,8 @@ export function buildSemanticGenerationOptions(track: SemanticRequest['tracks'][
     prompt: stableJson(track),
     temperature: FROZEN_TEMPERATURE,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxRetries: 0,
+    providerOptions: OPENROUTER_PROVIDER_OPTIONS,
     schema: SemanticTrackResultSchema,
     kind: 'semantic.classify',
   };
@@ -112,6 +123,66 @@ export async function classifySemantic(
   }
 
   let providerCalls = 0;
+  let providerAttempt = 0;
+  const timingFile = process.env.COYOTE_PROVIDER_TIMING_FILE;
+  const budgetPath = process.env.COYOTE_PROVIDER_BUDGET_FILE;
+  const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const timing = (event: Record<string, unknown>) => {
+    if (!timingFile) return;
+    const slash = timingFile.lastIndexOf('/');
+    if (slash > 0) mkdirSync(timingFile.slice(0, slash), { recursive: true });
+    appendFileSync(timingFile, `${JSON.stringify(event)}\n`, { encoding: 'utf8' });
+  };
+  const reserveProviderCall = (meta: { via?: string } = {}) => {
+    if (budgetPath) {
+      const lock = `${budgetPath}.lock`;
+      for (;;) {
+        try { mkdirSync(lock); break; } catch { sleepSync(2); }
+      }
+      try {
+        const state = JSON.parse(readFileSync(budgetPath, 'utf8')) as { used: number; limit: number };
+        if (state.used >= state.limit) throw new Error('PROVIDER_CALL_BUDGET_EXHAUSTED');
+        state.used += 1;
+        const tmp = `${budgetPath}.${process.pid}.tmp`;
+        writeFileSync(tmp, `${JSON.stringify(state)}\n`, { encoding: 'ascii' });
+        renameSync(tmp, budgetPath);
+      } finally {
+        rmSync(lock, { recursive: true, force: true });
+      }
+    }
+    const attempt = ++providerAttempt;
+    const token = { attempt, startedAt: new Date().toISOString(), via: meta.via ?? null };
+    timing({ phase: 'provider_start', trackId: track.id, ...token });
+    providerCalls += 1;
+    const accountingFile = process.env.COYOTE_PROVIDER_ACCOUNTING_FILE;
+    if (accountingFile) writeFileSync(accountingFile, `${providerCalls}\n`, { encoding: 'ascii', flag: 'w' });
+    return token;
+  };
+  const finishProviderCall = (
+    token: { attempt: number; startedAt: string; via: string | null } | undefined,
+    outcome?: { result?: any; error?: any },
+  ) => {
+    if (!token) return;
+    const result = outcome?.result;
+    const error = outcome?.error;
+    const generationId = typeof result?.response?.id === 'string'
+      ? result.response.id
+      : typeof error?.response?.id === 'string' ? error.response.id : null;
+    const routedProvider = typeof result?.providerMetadata?.openrouter?.provider === 'string'
+      ? result.providerMetadata.openrouter.provider
+      : null;
+    timing({
+      phase: 'provider_end',
+      trackId: track.id,
+      attempt: token.attempt,
+      startedAt: token.startedAt,
+      endedAt: new Date().toISOString(),
+      via: token.via,
+      generationId,
+      routedProvider,
+      finishReason: typeof result?.finishReason === 'string' ? result.finishReason : typeof error?.finishReason === 'string' ? error.finishReason : null,
+    });
+  };
   try {
     await settings.load();
     const llm = settings.get().llm;
@@ -120,13 +191,8 @@ export async function classifySemantic(
     }
     const result = await djObject({
       ...buildSemanticGenerationOptions(track),
-      onProviderCall: () => {
-        providerCalls += 1;
-        const accountingFile = process.env.COYOTE_PROVIDER_ACCOUNTING_FILE;
-        if (accountingFile) {
-          writeFileSync(accountingFile, `${providerCalls}\n`, { encoding: 'ascii', flag: 'w' });
-        }
-      },
+       onProviderCall: reserveProviderCall,
+       onProviderCallEnd: finishProviderCall,
     });
     options.onRawResult?.(result);
     if (result.id !== track.id) {

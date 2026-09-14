@@ -143,22 +143,35 @@ test('canonical semantic contract conformance matches the vendored corpus', () =
   }
 });
 
-test('V1.14 semantic seam uses the authority djObject transport with no request controls', () => {
+test('semantic seam uses the canonical djObject transport and routing policy', () => {
   const options = buildSemanticGenerationOptions(track);
-  assert.equal('providerOptions' in options, false);
   assert.equal('headers' in options, false);
   assert.equal('model' in options, false);
   assert.equal('session_id' in options, false);
   assert.equal(options.temperature, FROZEN_TEMPERATURE);
   assert.equal(options.maxOutputTokens, 2048);
+  assert.equal(options.maxRetries, 0);
+  assert.deepEqual(options.providerOptions, {
+    openrouter: {
+      provider: {
+        ignore: ['open-inference', 'deepinfra'],
+        allow_fallbacks: true,
+        require_parameters: true,
+      },
+    },
+  });
   assert.equal(options.system, PROMPT_STATIC);
   assert.equal(options.schema, SemanticTrackResultSchema);
   assert.equal(
     createHash('sha256').update(readFileSync(join(here, '../src/llm/internal/strategy/object.ts'))).digest('hex'),
-    // 169175f1 added provider-attempt accounting callbacks to the certified
-    // stock djObject transport without changing its semantic authority.
-    'e7aef804af82d295ae73f1cbd40139f47786f38cb46fe4eeac8f76fd133a10bb',
+    '2421dede3a21408559cd044ca91a8821c52f6509211a6751c4fba9d596d21c77',
   );
+});
+
+test('provider accounting reserves once per real djObject invocation', () => {
+  const source = readFileSync(join(here, '../src/llm/internal/strategy/object.ts'), 'utf8');
+  assert.equal((source.match(/onProviderCall\?\./g) || []).length, 1);
+  assert.match(source, /const token = onProviderCall\?\.\(\{ via \}\)/);
 });
 
 test('semantic request validation accepts the frozen mock fingerprint and rejects model drift', () => {
@@ -330,7 +343,7 @@ test('semantic seam stays isolated from durable/editorial write paths', () => {
     assert.equal(classify.includes(forbidden), false, `classify.ts must not import/use ${forbidden}`);
   }
   assert.match(classify, /await djObject\(\{\s*\.\.\.buildSemanticGenerationOptions\(track\),/);
-  assert.match(classify, /onProviderCall:\s*\(\)\s*=>/);
+  assert.match(classify, /onProviderCall:\s*reserveProviderCall/);
   assert.ok(cliSource.includes('SUBWAVE_STATE_DIR'));
   assert.ok(cliSource.includes('SUBWAVE_ENV_FILE'));
   assert.ok(cliSource.includes('parseDotEnv'));

@@ -147,7 +147,21 @@ async function main() {
       }
     }
     lap('analyze');
-    const semanticStats = await semanticTagIds(forwardSemanticCohort, songs);
+    const budgetId = process.env.COYOTE_PROVIDER_BUDGET_ID?.trim();
+    const budgetLimitRaw = process.env.COYOTE_PROVIDER_BUDGET_LIMIT?.trim();
+    const budgetLimit = budgetLimitRaw === undefined ? undefined : Number(budgetLimitRaw);
+    if (budgetId || budgetLimitRaw !== undefined) {
+      if (!budgetId || typeof budgetLimit !== 'number' || !Number.isInteger(budgetLimit) || budgetLimit < 0) {
+        throw new Error('COYOTE_PROVIDER_BUDGET_ID and COYOTE_PROVIDER_BUDGET_LIMIT must define a non-negative integer budget');
+      }
+    }
+    const providerCallBudget = budgetId
+      ? { id: budgetId, limit: budgetLimit ?? 0 }
+      : undefined;
+    // Keep the shared cohort explicit: semanticTagIds(forwardSemanticCohort, songs).
+    const semanticStats = await semanticTagIds(forwardSemanticCohort, songs, {
+      providerCallBudget,
+    });
     lap('semantic');
     finish(startedAt, semanticStats.providerGenerations, semanticStats.processed, {}, timings, semanticStats);
     return;

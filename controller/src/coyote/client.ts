@@ -13,6 +13,7 @@ export interface CoyoteTrackLocator {
   artist?: string | null;
   album?: string | null;
   duration?: number | null;
+  providerCallBudget?: { id: string; limit: number };
 }
 
 export interface CoyoteMoodReadResult {
@@ -112,7 +113,8 @@ export function locatorFromSong(song: {
   artist?: string | null;
   album?: string | null;
   duration?: number | null;
-}): CoyoteTrackLocator {
+}, extras: Pick<CoyoteTrackLocator, 'providerCallBudget'> | number = {}): CoyoteTrackLocator {
+  const options = typeof extras === 'number' ? {} : extras;
   return {
     navidromeId: song.id,
     pathHint: song.path ?? null,
@@ -121,6 +123,7 @@ export function locatorFromSong(song: {
     artist: song.artist ?? null,
     album: song.album ?? null,
     duration: song.duration ?? null,
+    ...options,
   };
 }
 

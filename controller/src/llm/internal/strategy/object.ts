@@ -59,6 +59,7 @@ export async function djObject({
   temperature = 0.4,
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_OBJECT),
   maxRetries = undefined,
+  providerOptions = undefined,
   kind = 'sdk.djObject',
   leg = undefined,
   // Optional caller-supplied abort signal. No live caller wraps djObject in
@@ -103,7 +104,7 @@ export async function djObject({
             lastVia = 'ai-sdk:tool';
             ({ object, usage, perf, warnings } = await withTransientRetry(kind,
               () => {
-                return invokeProvider('ai-sdk:tool', () => objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, maxRetries, signal }));
+                return invokeProvider('ai-sdk:tool', () => objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, maxRetries, providerOptions, signal }));
               }, signal));
           } else if (attempt === 1) {
             lastVia = 'ai-sdk';
@@ -118,6 +119,7 @@ export async function djObject({
               temperature,
                maxOutputTokens,
                maxRetries,
+               providerOptions,
               output: Output.object({ schema }),
               reasoning: reasoningFor(l.cfg),
               ...(signal ? { abortSignal: signal } : {}),
@@ -149,6 +151,7 @@ export async function djObject({
               temperature,
                maxOutputTokens,
                maxRetries,
+               providerOptions,
               reasoning: reasoningFor(l.cfg, { forceNoThink: true }),
               ...(signal ? { abortSignal: signal } : {}),
               }));

@@ -42,7 +42,7 @@ export function emitInstructions(system?: string): string {
 
 export async function objectViaToolCall(
   leg: any,
-  { system, prompt, messages, schema, temperature, maxOutputTokens, maxRetries, signal }: any,
+  { system, prompt, messages, schema, temperature, maxOutputTokens, maxRetries, providerOptions, signal }: any,
 ): Promise<{ object: any; usage: any; perf?: any; warnings?: string[] }> {
   let captured: any;
   const emit = tool({
@@ -59,6 +59,7 @@ export async function objectViaToolCall(
     temperature,
     maxOutputTokens,
     maxRetries,
+    providerOptions,
     tools: { emit },
     // 'required' by default; an operator can downgrade to 'auto' per leg for a
     // server whose forced-tool backend crashes (issue #570). With one tool

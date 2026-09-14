@@ -161,7 +161,8 @@ export async function semanticTagIds(
     });
   }, options.signal, () => {
     if (systemicTimeout || usageLimitPaused) return true;
-    if (options.legacyProviderCap !== false && !legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
+    if (options.legacyProviderCap === false) return false;
+    if (!legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
     if (!providerCapLogged) {
       providerCapLogged = true;
       logEvent('warning', `Semantic provider call cap reached (${SEMANTIC_PROVIDER_CALL_CAP}); stopping new dispatch`);

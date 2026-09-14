@@ -47,6 +47,9 @@ export const config = {
     operationTimeoutMs: envInt('COYOTE_SEMANTIC_OPERATION_TIMEOUT_MS', 155_000),
     semanticTimeoutMs: envInt('SUBWAVE_SEMANTIC_IPC_TIMEOUT_MS', 180_000),
     timeoutMs: envInt('COYOTE_TIMEOUT_MS', 30_000),
+    // Preparation has its own server-side deadline and needs a small transport
+    // margin so a terminal PREPARATION_TIMEOUT response is observable.
+    semanticPrepareTimeoutMs: envInt('SUBWAVE_SEMANTIC_PREPARE_IPC_TIMEOUT_MS', 45_000),
   },
   semantic: {
     concurrency: envInt('SEMANTIC_CONCURRENCY', 4, { min: 1, max: 8 }),

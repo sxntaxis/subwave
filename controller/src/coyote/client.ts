@@ -212,5 +212,5 @@ export function semanticRetag(track: CoyoteTrackLocator): Promise<CoyoteSemantic
 }
 
 export function semanticPrepare(track: CoyoteTrackLocator): Promise<CoyoteSemanticPrepareResult> {
-  return request('semantic.prepare', { track });
+  return request('semantic.prepare', { track }, config.coyote.semanticPrepareTimeoutMs);
 }

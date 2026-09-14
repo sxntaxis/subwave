@@ -8,11 +8,12 @@ import test from 'node:test';
 const root = mkdtempSync(join(tmpdir(), 'subwave-coyote-ipc-'));
 const socketPath = join(root, 'coyote.sock');
 process.env.COYOTE_SOCKET_PATH = socketPath;
-process.env.COYOTE_TIMEOUT_MS = '1000';
+process.env.COYOTE_TIMEOUT_MS = '50';
+process.env.SUBWAVE_SEMANTIC_PREPARE_IPC_TIMEOUT_MS = '100';
 const coyote = await import('../src/coyote/client.js');
 
 async function withServer(
-  reply: (request: Record<string, unknown>) => Record<string, unknown>,
+  reply: (request: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>,
   run: () => Promise<void>,
 ): Promise<void> {
   const server = net.createServer((socket) => {
@@ -22,7 +23,7 @@ async function withServer(
       const newline = data.indexOf('\n');
       if (newline < 0) return;
       const request = JSON.parse(data.slice(0, newline)) as Record<string, unknown>;
-      socket.end(`${JSON.stringify(reply(request))}\n`);
+      Promise.resolve(reply(request)).then((response) => socket.end(`${JSON.stringify(response)}\n`));
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -84,6 +85,33 @@ test('Coyote IPC exposes the shared exact track resolver', async () => {
       path: '/music/a.flac',
       resolutionAuthority: 'navidrome_alias',
     });
+  });
+});
+
+test('semantic.prepare uses a dedicated timeout margin', async () => {
+  await withServer(async (request) => {
+    assert.equal(request.op, 'semantic.prepare');
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    return {
+      ok: true,
+      version: 1,
+      requestId: request.requestId,
+      result: {
+        ready: true,
+        coyoteTrackId: 'coyote-1',
+        identityAuthority: 'navidrome_alias',
+        renderer: 'semantic-evidence-renderer-2.1.1',
+        fingerprint: 'fingerprint',
+        commonCoreAvailable: true,
+        measuredAudioAvailable: true,
+        verifiedLyricsAvailable: false,
+        blockingReason: null,
+        provider_calls: 0,
+      },
+    };
+  }, async () => {
+    const result = await coyote.semanticPrepare({ navidromeId: 'nav-1' });
+    assert.equal(result.ready, true);
   });
 });
 

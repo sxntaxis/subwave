@@ -66,6 +66,16 @@ export interface CoyoteSemanticRetagResult {
   enrichment?: Record<string, unknown>;
 }
 
+export interface CoyoteSemanticBatchResult {
+  expectedIds: string[];
+  returnedIds: string[];
+  codexTurns: number;
+  integrityRetries: number;
+  rescueTurns: number;
+  usage?: Record<string, number> | null;
+  tracks: CoyoteSemanticRetagResult[];
+}
+
 export interface CoyoteSemanticPrepareResult {
   ready: boolean;
   coyoteTrackId: string | null;
@@ -212,6 +222,10 @@ export function manualSetMoods(tracks: CoyoteTrackLocator[], moods: string[]): P
 
 export function semanticRetag(track: CoyoteTrackLocator): Promise<CoyoteSemanticRetagResult> {
   return request('mood.semantic_retag', { track }, config.coyote.semanticTimeoutMs);
+}
+
+export function semanticRetagBatch(tracks: CoyoteTrackLocator[]): Promise<CoyoteSemanticBatchResult> {
+  return request('mood.semantic_retag_batch', { tracks }, config.coyote.semanticTimeoutMs);
 }
 
 export function semanticPrepare(track: CoyoteTrackLocator): Promise<CoyoteSemanticPrepareResult> {

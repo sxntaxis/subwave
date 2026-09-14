@@ -2,7 +2,7 @@
 // the rest are the consumer-facing shapes rows.ts maps it to.
 
 export type EnergyValue = 'low' | 'medium' | 'high' | null;
-export type TagSource = 'llm' | 'propagated' | 'uncertain-llm' | 'legacy-v1' | 'semantic-v1.21' | 'manual';
+export type TagSource = 'llm' | 'propagated' | 'uncertain-llm' | 'legacy-v1' | 'semantic-v1.21' | 'semantic-v1.22-luna-b24' | 'manual';
 
 export interface TrackRecord {
   id: string;

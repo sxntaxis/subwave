@@ -40,8 +40,10 @@ export const EXPECTED_CONTRACT_SHA256 = "698eaf98859a3d4d24136976b0b03db972fb572
 export const EXPECTED_RENDERER_SHA256 = "822c9be0a4d5bcdf5d4d00ef8c871a43c139f1674670ac65a1316ec9b85e8a74" as const;
 
 export const SEMANTIC_PROMPT_HASH = EXPECTED_PROMPT_STATIC_SHA256;
-export const SEMANTIC_MODEL = FROZEN_MODEL;
-export const SEMANTIC_SOURCE = 'semantic-v1.21' as const;
+// Production authority is the host-authenticated Codex Luna batch transport.
+// The legacy DeepSeek constants above remain solely for the dormant single-track path.
+export const SEMANTIC_MODEL = 'gpt-5.6-luna' as const;
+export const SEMANTIC_SOURCE = 'semantic-v1.22-luna-b24' as const;
 
 const JudgmentSchema = z.union([
   z.tuple([z.literal('N')]),

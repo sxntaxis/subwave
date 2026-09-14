@@ -96,21 +96,27 @@ export async function semanticTagIds(
 
   let providerCapLogged = false;
   let systemicTimeout = false;
-  await runBoundedWorkers(ids, config.semantic.concurrency, async (id) => {
+  let usageLimitPaused = false;
+  const batches = Array.from({ length: Math.ceil(ids.length / 24) }, (_, index) => ids.slice(index * 24, index * 24 + 24));
+  await runBoundedWorkers(batches, 1, async (batch) => {
     if (systemicTimeout) return;
-    const song = songs.get(id);
-    if (!song) {
-      stats.failures += 1;
-      logEvent('warning', `Semantic mood tagging skipped ${id}: locator was not present in the live walk`);
-    } else try {
-        const result = await coyote.semanticRetag(coyote.locatorFromSong(song, { providerCallBudget: options.providerCallBudget }));
+    const locators = batch.map((id) => ({ id, song: songs.get(id) }));
+    if (locators.some(({ song }) => !song)) {
+      for (const { id, song } of locators) if (!song) { stats.failures += 1; stats.processed += 1; logEvent('warning', `Semantic mood tagging skipped ${id}: locator was not present in the live walk`); }
+      return;
+    }
+    try {
+      const response = await coyote.semanticRetagBatch(locators.map(({ song }) => coyote.locatorFromSong(song!, { providerCallBudget: options.providerCallBudget })));
+      if (response.tracks.length !== batch.length || JSON.stringify(response.expectedIds) !== JSON.stringify(response.returnedIds) || response.tracks.some((result, index) => result.coyoteTrackId !== response.expectedIds[index])) {
+        throw new Error('BATCH_INTEGRITY_FAILURE: Coyote returned incomplete or reordered Luna results');
+      }
+      if (!Number.isInteger(response.codexTurns) || response.codexTurns < 0) {
+        throw new Error('CODEX_ACCOUNTING_FAILURE: Coyote did not return an exact codex turn count');
+      }
+      stats.providerGenerations += response.codexTurns;
+      for (const [index, result] of response.tracks.entries()) {
+        const id = batch[index];
         if (result.reused) stats.reused += 1;
-        const providerCalls = result.provider_calls;
-        if (typeof providerCalls !== 'number' || !Number.isInteger(providerCalls) || providerCalls < 0) {
-          throw new Error('PROVIDER_ACCOUNTING_FAILURE: Coyote did not return an exact provider_calls integer');
-        }
-        stats.providerGenerations += providerCalls;
-
         if (result.outcome === 'SEMANTIC_LABELS' || result.outcome === 'SEMANTIC_NONE' || result.outcome === 'UNRESOLVED_INSUFFICIENT_EVIDENCE') {
           const persisted = persistCanonicalSemanticResult(id, {
             outcome: result.outcome as CanonicalSemanticResult['outcome'],
@@ -123,16 +129,21 @@ export async function semanticTagIds(
           stats.failures += 1;
           logEvent('warning', `Semantic mood tagging failed for ${id}: ${result.outcome}`);
         }
-      } catch (err: unknown) {
-        stats.failures += 1;
+      }
+    } catch (err: unknown) {
+        stats.failures += batch.length;
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof coyote.CoyoteError && err.code === 'COYOTE_TIMEOUT') {
           systemicTimeout = true;
-          logEvent('error', `Semantic IPC timeout is systemic; stopping new dispatch after ${id}`);
+          logEvent('error', `Semantic IPC timeout is systemic; stopping new dispatch after ${batch[0]}`);
         }
-        logEvent('warning', `Semantic mood tagging failed for ${id}: ${message}`);
-      }
-    stats.processed += 1;
+        if (err instanceof coyote.CoyoteError && err.code === 'LUNA_USAGE_LIMIT') {
+          usageLimitPaused = true;
+          logEvent('warning', 'PAUSED_LUNA_USAGE_LIMIT_RESUME_SAFE: stopping new semantic dispatch');
+        }
+        logEvent('warning', `Semantic mood batch failed for ${batch[0]}..${batch.at(-1)}: ${message}`);
+    }
+    stats.processed += batch.length;
     reportProgress({
       phase: 'semantic',
       label: 'Canonical semantic mood tagging',
@@ -149,7 +160,7 @@ export async function semanticTagIds(
       },
     });
   }, options.signal, () => {
-    if (systemicTimeout) return true;
+    if (systemicTimeout || usageLimitPaused) return true;
     if (!legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
     if (!providerCapLogged) {
       providerCapLogged = true;
@@ -159,6 +170,9 @@ export async function semanticTagIds(
   });
   if (systemicTimeout) {
     throw new Error('SEMANTIC_RUNTIME_TIMEOUT: all dispatched operations settled; no new semantic work dispatched');
+  }
+  if (usageLimitPaused) {
+    throw new Error('PAUSED_LUNA_USAGE_LIMIT_RESUME_SAFE');
   }
   return stats;
 }

@@ -8,6 +8,13 @@ import { config } from '../../config.js';
 
 export const SEMANTIC_PROVIDER_CALL_CAP = 110;
 
+export function legacyProviderCapReached(
+  providerCallBudget: { id: string; limit: number } | undefined,
+  providerGenerations: number,
+): boolean {
+  return providerCallBudget === undefined && providerGenerations >= SEMANTIC_PROVIDER_CALL_CAP;
+}
+
 export interface SemanticTagStats {
   total: number;
   processed: number;
@@ -143,7 +150,7 @@ export async function semanticTagIds(
     });
   }, options.signal, () => {
     if (systemicTimeout) return true;
-    if (stats.providerGenerations < SEMANTIC_PROVIDER_CALL_CAP) return false;
+    if (!legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
     if (!providerCapLogged) {
       providerCapLogged = true;
       logEvent('warning', `Semantic provider call cap reached (${SEMANTIC_PROVIDER_CALL_CAP}); stopping new dispatch`);

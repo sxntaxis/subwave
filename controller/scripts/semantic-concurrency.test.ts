@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runBoundedWorkers } from '../src/music/tag-library/semantic.js';
+import {
+  legacyProviderCapReached,
+  runBoundedWorkers,
+  SEMANTIC_PROVIDER_CALL_CAP,
+} from '../src/music/tag-library/semantic.js';
 
 test('bounded semantic workers preserve membership and accounting under concurrency', async () => {
   for (const concurrency of [1, 4]) {
@@ -43,4 +47,16 @@ test('bounded semantic workers stop taking new tracks at the provider cap', asyn
   }, undefined, () => seen.length >= 4);
   assert.equal(completedCalls, 4);
   assert.equal(seen.length, 4);
+});
+
+test('explicit provider budgets override the legacy dispatch cap', () => {
+  assert.equal(
+    legacyProviderCapReached({ id: 'test-budget', limit: 996 }, SEMANTIC_PROVIDER_CALL_CAP + 1),
+    false,
+  );
+});
+
+test('unbudgeted semantic runs retain the legacy dispatch cap', () => {
+  assert.equal(legacyProviderCapReached(undefined, SEMANTIC_PROVIDER_CALL_CAP), true);
+  assert.equal(legacyProviderCapReached(undefined, SEMANTIC_PROVIDER_CALL_CAP - 1), false);
 });

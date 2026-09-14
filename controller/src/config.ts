@@ -45,7 +45,9 @@ export const config = {
   coyote: {
     socketPath: COYOTE_SOCKET_PATH,
     operationTimeoutMs: envInt('COYOTE_SEMANTIC_OPERATION_TIMEOUT_MS', 155_000),
-    semanticTimeoutMs: envInt('SUBWAVE_SEMANTIC_IPC_TIMEOUT_MS', 180_000),
+    // A Luna batch may make three 120-second exact-batch attempts plus one
+    // pending-only rescue; the client deadline must cover that contract.
+    semanticTimeoutMs: envInt('SUBWAVE_SEMANTIC_IPC_TIMEOUT_MS', 540_000),
     timeoutMs: envInt('COYOTE_TIMEOUT_MS', 30_000),
     // Preparation has its own server-side deadline and needs a small transport
     // margin so a terminal PREPARATION_TIMEOUT response is observable.

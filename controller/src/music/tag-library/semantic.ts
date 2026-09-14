@@ -76,7 +76,7 @@ export async function runBoundedWorkers<T>(
 export async function semanticTagIds(
   ids: string[],
   songs: Map<string, WalkedSongLocator>,
-  options: { signal?: AbortSignal; providerCallBudget?: { id: string; limit: number } } = {},
+  options: { signal?: AbortSignal; providerCallBudget?: { id: string; limit: number }; legacyProviderCap?: boolean } = {},
 ): Promise<SemanticTagStats> {
   const stats: SemanticTagStats = {
     total: ids.length,
@@ -161,7 +161,7 @@ export async function semanticTagIds(
     });
   }, options.signal, () => {
     if (systemicTimeout || usageLimitPaused) return true;
-    if (!legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
+    if (options.legacyProviderCap !== false && !legacyProviderCapReached(options.providerCallBudget, stats.providerGenerations)) return false;
     if (!providerCapLogged) {
       providerCapLogged = true;
       logEvent('warning', `Semantic provider call cap reached (${SEMANTIC_PROVIDER_CALL_CAP}); stopping new dispatch`);

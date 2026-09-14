@@ -161,6 +161,7 @@ async function main() {
     // Keep the shared cohort explicit: semanticTagIds(forwardSemanticCohort, songs).
     const semanticStats = await semanticTagIds(forwardSemanticCohort, songs, {
       providerCallBudget,
+      legacyProviderCap: false,
     });
     lap('semantic');
     finish(startedAt, semanticStats.providerGenerations, semanticStats.processed, {}, timings, semanticStats);

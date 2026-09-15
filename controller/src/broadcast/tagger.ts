@@ -184,9 +184,11 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
   tagger.mode = mode;
   tagger.progress = null;
 
-  // A never-counted library nulls every panel percentage for the whole run. Guarded
-  // on hasCount() so it fires at most once per install, not on every run.
-  if (!coverage.hasCount()) coverage.refresh().catch(() => {});
+  // Tag and reconcile children walk Navidrome themselves. Starting a second
+  // count walk here competes for the same Subsonic service and can time out.
+  // The exit handler refreshes the count after their walk; analyzer-only runs
+  // still seed the count when it has never been requested.
+  if (mode === 'analyze' && !coverage.hasCount()) coverage.refresh().catch(() => {});
 
   // Cross-restart lock: pid is the detached leader, so recoverFromRestart can
   // SIGTERM the whole group.

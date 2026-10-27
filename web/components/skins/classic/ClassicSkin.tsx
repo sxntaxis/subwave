@@ -52,7 +52,7 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
   const client = useStationClient();
   const {
     nowPlaying, context, dj, activeShow, listeners, llmTokens,
-    state, session, trackStartedAt, timezone, locale,
+    state, session, trackStartedAt, trackPausedAt, stationClock, timezone, locale,
   } = usePlayerFeed();
   const boothFeed = session.messages;
   const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
@@ -192,6 +192,8 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
       <CenterStage
         nowPlaying={nowPlaying}
         trackStartedAt={trackStartedAt}
+        trackPausedAt={trackPausedAt}
+        stationClock={stationClock}
         llmTokens={llmTokens}
         feed={boothFeed}
         djLineOn={tickerOn}
@@ -206,6 +208,8 @@ export default function ClassicSkin({ portalNode }: SkinProps) {
         audioRef={audioRef}
         tunedIn={tunedIn}
         trackStartedAt={trackStartedAt}
+        trackPausedAt={trackPausedAt}
+        stationClock={stationClock}
         duration={nowPlaying?.duration ?? 0}
       />
 

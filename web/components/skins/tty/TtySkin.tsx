@@ -92,13 +92,13 @@ export default function TtySkin(_props: SkinProps) {
   const client = useStationClient();
   const {
     nowPlaying, context, dj, activeShow, listeners, state, session,
-    trackStartedAt, timezone, locale,
+    trackStartedAt, trackPausedAt, stationClock, timezone, locale,
   } = usePlayerFeed();
   const { tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute } = usePlayerActions();
   const { showTuneIn, showOverlay, tuneInFromOverlay, handleTune } = useTuneInGate();
 
-  const elapsed = useElapsed(trackStartedAt);
+  const elapsed = useElapsed(trackStartedAt, trackPausedAt, stationClock);
   const clock = useClock();
   const stationLocale = normalizeStationLocale(locale);
   const listenerCount = listenerCountOf(listeners);
@@ -397,9 +397,9 @@ export default function TtySkin(_props: SkinProps) {
               <button
                 type="button"
                 onClick={() => void like.like()}
-                disabled={like.pending || like.liked}
+                disabled={like.pending}
                 aria-pressed={like.liked}
-                aria-label={like.liked ? 'Liked' : 'Like this track'}
+                aria-label={like.liked ? 'Unlike this track' : 'Like this track'}
                 className={cn(
                   'v3-focus border-0 bg-transparent p-0 uppercase',
                   like.liked ? 'font-bold text-[var(--accent)]' : 'cursor-pointer text-muted hover:text-ink',

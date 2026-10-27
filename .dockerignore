@@ -5,6 +5,8 @@
 # `npm ci` install and corrupting it (e.g. a Tailwind v3/v4 hybrid).
 **/node_modules
 **/.next
+# Local dev-server output contains stale generated TypeScript route checks.
+web/tmp
 .git
 .backups
 state
@@ -17,3 +19,9 @@ state
 **/.env
 **/.env.*
 !**/.env.example
+
+# SXNTAX only subsets the regular 3270 Nerd Font. Keep the source face needed
+# by the build-only subsetter and exclude the unused ~2.7 MB variants from the
+# Docker build context entirely.
+web/public/fonts/3270NerdFont*.ttf
+!web/public/fonts/3270NerdFont-Regular.ttf

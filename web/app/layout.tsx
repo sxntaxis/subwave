@@ -1,11 +1,10 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { Fraunces, Plus_Jakarta_Sans, JetBrains_Mono, Doto, Space_Grotesk, Instrument_Serif, IBM_Plex_Mono, Space_Mono, Fira_Code, Anton, Chakra_Petch, Saira_Stencil_One, Courier_Prime, Overpass_Mono } from 'next/font/google';
+import { Fraunces, Plus_Jakarta_Sans, JetBrains_Mono, Doto, Space_Grotesk, Instrument_Serif, IBM_Plex_Mono, Space_Mono, Fira_Code, Anton, Chakra_Petch, Saira_Stencil, Courier_Prime, Overpass_Mono } from 'next/font/google';
 import { GoogleAnalytics } from '@next/third-parties/google';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 import { LITE_INIT_SCRIPT } from '@/lib/lite';
-import { SKIN_INIT_SCRIPT } from '@/lib/skin';
 import { SITE_URL } from '@/lib/site';
 import { GA_ID } from '@/lib/ga';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
@@ -23,6 +22,7 @@ const fraunces = Fraunces({
   subsets: ['latin'],
   axes: ['opsz'],
   display: 'swap',
+  preload: false,
   variable: '--font-fraunces',
 });
 
@@ -32,12 +32,14 @@ const doto = Doto({
   subsets: ['latin'],
   weight: 'variable',
   display: 'swap',
+  preload: false,
   variable: '--font-doto',
 });
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
   display: 'swap',
+  preload: false,
   variable: '--font-space-grotesk',
 });
 
@@ -45,6 +47,7 @@ const instrumentSerif = Instrument_Serif({
   subsets: ['latin'],
   weight: '400',
   display: 'swap',
+  preload: false,
   variable: '--font-instrument-serif',
 });
 
@@ -52,6 +55,7 @@ const anton = Anton({
   subsets: ['latin'],
   weight: '400',
   display: 'swap',
+  preload: false,
   variable: '--font-anton',
 });
 
@@ -59,19 +63,22 @@ const chakraPetch = Chakra_Petch({
   subsets: ['latin'],
   weight: ['400', '700'],
   display: 'swap',
+  preload: false,
   variable: '--font-chakra-petch',
 });
 
-const sairaStencilOne = Saira_Stencil_One({
+const sairaStencilOne = Saira_Stencil({
   subsets: ['latin'],
   weight: '400',
   display: 'swap',
+  preload: false,
   variable: '--font-saira-stencil-one',
 });
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
   display: 'swap',
+  preload: false,
   variable: '--font-sans',
 });
 
@@ -81,6 +88,7 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin', 'latin-ext'],
   weight: ['300', '400', '500', '700', '800'],
   display: 'swap',
+  preload: false,
   variable: '--font-jetbrains',
 });
 
@@ -89,6 +97,7 @@ const ibmPlexMono = IBM_Plex_Mono({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   display: 'swap',
+  preload: false,
   variable: '--font-ibm-plex-mono',
 });
 
@@ -96,12 +105,14 @@ const spaceMono = Space_Mono({
   subsets: ['latin'],
   weight: ['400', '700'],
   display: 'swap',
+  preload: false,
   variable: '--font-space-mono',
 });
 
 const firaCode = Fira_Code({
   subsets: ['latin'],
   display: 'swap',
+  preload: false,
   variable: '--font-fira-code',
 });
 
@@ -109,12 +120,14 @@ const courierPrime = Courier_Prime({
   subsets: ['latin'],
   weight: ['400', '700'],
   display: 'swap',
+  preload: false,
   variable: '--font-courier-prime',
 });
 
 const overpassMono = Overpass_Mono({
   subsets: ['latin'],
   display: 'swap',
+  preload: false,
   variable: '--font-overpass-mono',
 });
 
@@ -183,6 +196,7 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const homepagePlayer = (process.env.SUBWAVE_HOMEPAGE || 'player').toLowerCase() === 'player';
   return (
     <html
       lang="en"
@@ -190,6 +204,23 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       suppressHydrationWarning
     >
       <head>
+        {/* SXNTAX has two critical local faces. 3270 is generated at build
+            time as a tiny source-aware Nerd Font subset, so preloading it no
+            longer means paying for the 2.75 MB upstream font. */}
+        <link
+          rel="preload"
+          href="/fonts/DiGrotesk-Regular.woff2?sx=v49"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/3270SXNTAX-Regular.woff2?sx=v50"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
         {/* Apply stored theme before paint to avoid a flash of the wrong
             palette. Static constant from lib/theme, no untrusted input. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
@@ -197,10 +228,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         {/* Resolve low-power "lite" mode before paint so a pinned kiosk never
             flashes the heavy build. Static constant from lib/lite. */}
         <script dangerouslySetInnerHTML={{ __html: LITE_INIT_SCRIPT }} />
-
-        {/* Hide the player shell before paint when this browser resolves to a
-            non-default skin. Static constant from lib/skin. */}
-        <script dangerouslySetInnerHTML={{ __html: SKIN_INIT_SCRIPT }} />
 
         <JsonLd data={SITE_JSONLD} />
 
@@ -216,7 +243,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body suppressHydrationWarning>
         <MotionProvider>
-          <ThemeProvider>
+          <ThemeProvider homepagePlayer={homepagePlayer}>
             <ServiceWorkerRegister />
             {children}
             {/* Mounted once at the root so every route has somewhere for

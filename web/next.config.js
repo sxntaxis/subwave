@@ -32,6 +32,7 @@ const version = resolveAppVersion();
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
+  poweredByHeader: false,
   // The /apps directory renders submitter-supplied icons + screenshots from the
   // community catalog. Those URLs are a trust boundary: an arbitrary host would
   // mean listener browsers fetching from anywhere, and an image that can be
@@ -74,6 +75,24 @@ const nextConfig = {
     .split(',')
     .map(s => s.trim())
     .filter(Boolean),
+  // Public SXNTAX assets are stable across a deployment. Let the browser reuse
+  // them aggressively on repeat visits without making first-load HTML stale.
+  async headers() {
+    return [
+      {
+        source: '/fonts/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=2592000' }],
+      },
+      {
+        source: '/textures/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=2592000' }],
+      },
+      {
+        source: '/sw.js',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }],
+      },
+    ];
+  },
   // Edge redirect for /admin → /admin/dash. A server-component `redirect()` in
   // app/admin/page.tsx crashed Next 15's Router post-sign-in: AdminShell renders its
   // sign-in form until auth is set, so the redirecting page mounts late as a child,

@@ -147,7 +147,7 @@ export interface TrackLike {
   /** Total likes for the current song, all airings. */
   count: number;
   pending: boolean;
-  /** Like the current track. No-op while unavailable, pending, or liked. */
+  /** Toggle this listener's like. No-op while unavailable or pending. */
   like: () => Promise<void>;
 }
 
@@ -167,13 +167,18 @@ export function useTrackLike(): TrackLike {
     count: 0,
   });
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const songRef = useRef(songId);
+  songRef.current = songId;
+  const mutationRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     setState({ songId, liked: false, count: 0 });
     if (!songId) return;
+    const mutation = mutationRef.current;
     likeStatus().then(st => {
-      if (cancelled || !st) return;
+      if (cancelled || !st || mutation !== mutationRef.current) return;
       setEnabled(st.enabled !== false);
       // Only apply if the answer is about the track we asked for; a status
       // racing a track change paints the wrong liked-state.
@@ -186,17 +191,21 @@ export function useTrackLike(): TrackLike {
   }, [songId, likeStatus]);
 
   const like = useCallback(async () => {
-    if (!songId || pending || (state.liked && state.songId === songId)) return;
+    if (!enabled || !songId || pendingRef.current) return;
+    pendingRef.current = true;
+    mutationRef.current++;
+    const liked = !(state.liked && state.songId === songId);
     setPending(true);
     try {
-      const res = await likeCurrent(songId);
-      if (res && (res.ok || res.alreadyLiked)) {
-        setState({ songId, liked: true, count: res.count ?? 0 });
+      const res = await likeCurrent(songId, liked);
+      if (songRef.current === songId && res && (res.ok || res.alreadyLiked) && (!res.songId || res.songId === songId)) {
+        setState({ songId, liked: res.liked ?? liked, count: res.count ?? 0 });
       }
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
-  }, [songId, pending, state.liked, state.songId, likeCurrent]);
+  }, [enabled, songId, state.liked, state.songId, likeCurrent]);
 
   return {
     available: enabled && !!songId,

@@ -38,9 +38,7 @@ export default function MusicStarvedBanner({
     >
       <AlertTriangle size={14} className="shrink-0 text-[var(--danger)]" aria-hidden="true" />
       <span>
-        <b>No music to play.</b> The station has run out of tracks and is airing the emergency
-        loop. Check that your music source is reachable and that the current show isn&rsquo;t
-        filtered down to nothing.
+        <b>Hold the frequency.</b> Music returns soon.
       </span>
       <Link
         href="/admin/doctor"

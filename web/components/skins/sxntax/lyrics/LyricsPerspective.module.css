@@ -1,0 +1,250 @@
+/* Alternate content of the existing NOW PLAYING hero, not a second panel.
+ * The Phosphoria foreground/polarity and shared audio player remain owners. */
+.perspective {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--sx-fg);
+  font-family: 'SX Die Grotesk', 'Helvetica Neue', Arial, sans-serif;
+}
+.follow {
+  position: absolute;
+  right: var(--sx-space-u, 6px);
+  bottom: var(--sx-space-u, 6px);
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, currentColor 58%, transparent);
+  border-radius: 0;
+  padding: 6px 9px;
+  color: var(--sx-fg);
+  background: color-mix(in srgb, var(--sx-fg) 5%, transparent);
+  font-family: 'SX 3270', '3270 Nerd Font', ui-monospace, monospace;
+  font-size: var(--sx-system-size, 13px);
+  line-height: 1.1;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.follow:hover, .follow:focus-visible {
+  color: var(--sx-opposing);
+  background: var(--sx-fg);
+  outline: none;
+}
+.scroll {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  outline-offset: -3px;
+}
+.scroll::-webkit-scrollbar { width: 0; height: 0; }
+.scrollUserActive {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, currentColor 35%, transparent) transparent;
+}
+.scrollUserActive::-webkit-scrollbar { width: 4px; }
+.scrollUserActive::-webkit-scrollbar-thumb { background: color-mix(in srgb, currentColor 35%, transparent); }
+.scroll:focus-visible { outline: 1px solid color-mix(in srgb, currentColor 45%, transparent); }
+.transcript {
+  padding-block: 0;
+  padding-inline: 2px clamp(8px, 4vw, 38px);
+}
+.transcriptPlain { padding-block: 0; }
+.line {
+  margin: 0 0 clamp(22px, 5vh, 54px);
+  color: color-mix(in srgb, currentColor 43%, transparent);
+  font-size: clamp(28px, 4.3vw, 54px);
+  font-weight: 700;
+  font-synthesis: none;
+  line-height: 1.14;
+  letter-spacing: -.026em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  transition: color 440ms cubic-bezier(.22,.61,.36,1), opacity 440ms ease;
+}
+.active {
+  color: var(--sx-fg);
+  text-shadow: 0 0 .28em color-mix(in srgb, currentColor 11%, transparent);
+}
+.past { color: color-mix(in srgb, currentColor 29%, transparent); }
+.wordPending { color: color-mix(in srgb, currentColor 44%, transparent); transition: color 180ms linear; }
+.wordActive { color: var(--sx-fg); transition: color 180ms linear; }
+@media (max-width: 640px) {
+  .perspective { height: 100%; max-height: 100%; }
+  .transcript { padding-block: 0; padding-right: 4px; }
+  .transcriptPlain { padding-block: 0; }
+  .line { font-size: clamp(29px, 8.1vw, 42px); margin-bottom: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .line, .wordPending, .wordActive { transition: none; }
+}
+
+/* Native YouLyPlus renderer sits *inside* the single SUB/WAVE hero, sharing
+   Phosphoria typography/foreground polarity. Upstream animation CSS stays scoped. */
+.perspective :global(#lyrics-plus-container-parent) {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  --lyrics-scroll-padding-top: 33.333333%;
+  scroll-padding-top: 0;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.perspective :global(#lyrics-plus-container) {
+  display: block;
+  --lyplus-font-family: 'SX Die Grotesk', sans-serif;
+  --lyplus-lyrics-pallete: var(--sx-fg);
+  --lyplus-text-primary: var(--sx-fg);
+  --lyplus-text-secondary: color-mix(in srgb, var(--sx-fg) 40%, transparent);
+  --lyplus-font-size-base: clamp(28px, 4.3vw, 54px);
+  --lyplus-padding-line: clamp(0px, .40vw, 4px);
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  /* Upstream's leading runway must agree with its native follow anchor. The
+   * adapter resolves the anchor to viewport pixels, avoiding percentage-width
+   * padding and negative spring targets for the first lines. */
+  padding-bottom: 0 !important;
+  font-weight: 700;
+  font-synthesis: none;
+  color: var(--sx-fg);
+  color-scheme: normal;
+}
+.perspective[data-lyrics-timing='plain'] :global(#lyrics-plus-container) { padding-top: 0; }
+.nativeControls {
+  position: absolute;
+  top: var(--sx-space-u, 6px);
+  right: var(--sx-space-u, 6px);
+  z-index: 2;
+  display: flex;
+  flex-flow: row nowrap;
+}
+.perspective :global(#lyrics-plus-buttons-wrapper) {
+  display: flex;
+  position: relative;
+  bottom: auto;
+  right: auto;
+  width: auto;
+  flex-flow: row nowrap;
+  gap: 6px;
+}
+.perspective :global(#lyrics-plus-buttons-wrapper button) {
+  color: var(--sx-fg);
+  background: color-mix(in srgb, var(--sx-fg) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sx-fg) 35%, transparent);
+  border-radius: 0;
+  font-family: 'SX 3270', ui-monospace, monospace;
+}
+.perspective :global(.lyrics-plus-metadata) { display: none; }
+
+/* Fade only the transcript viewport; menus and FOLLOW remain crisp and fixed. */
+.scroll {
+  --lyrics-edge-fade: clamp(14px, 2.5dvh, 28px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--lyrics-edge-fade), #000 calc(100% - var(--lyrics-edge-fade)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--lyrics-edge-fade), #000 calc(100% - var(--lyrics-edge-fade)), transparent);
+}
+.perspective :global(#lyrics-plus-container .lyrics-line) {
+  text-align: center !important;
+  padding-inline: var(--lyplus-padding-line) !important;
+  cursor: default;
+}
+.perspective :global(#lyrics-plus-container .lyrics-line-container),
+.perspective :global(#lyrics-plus-container .main-vocal-container),
+.perspective :global(#lyrics-plus-container .lyrics-romanization-container) {
+  text-align: center !important;
+  transform-origin: center !important;
+}
+.perspective :global(.lyrics-plain-text-content) { text-align: center; }
+.perspective :global(#lyrics-plus-container .lyrics-line:hover) { background: transparent; }
+.perspective :global([data-lyric-text-hover]) { cursor: pointer; }
+@media (max-width:640px) {
+  .perspective :global(#lyrics-plus-container) { --lyplus-font-size-base: clamp(29px, 8.1vw, 42px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .perspective :global(.lyrics-line), .perspective :global(.lyrics-syllable), .perspective :global(.char) { animation: none !important; transition: none !important; }
+}
+
+/* P19: the native active line shares the foreground's energy. Text stays
+ * crisp; bright-scene black type receives subtractive imprint, not glow
+ * lightening the artwork. Do not override YouLyPlus character wipes. */
+.perspective :global(.lyrics-line.active .main-vocal-container) {
+  text-shadow:
+    var(--sx-title-glow);
+}
+
+/* Presentation opacity belongs exclusively to the shared hero coordinator.
+ * Native near/far inactive-line blur below this surface is intentionally intact. */
+
+/* Quiet end imprint lives BELOW the final line inside the native scroller.
+ * Its reserved height is stable before/after reveal, so no scroll reset. */
+.outro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(11px, 1.45dvh, 16px);
+  margin: 0 auto;
+  padding: 0 clamp(5px, 1vw, 12px);
+  width: min(100%, 480px);
+  min-height: 0;
+  box-sizing: border-box;
+  color: var(--sx-fg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 650ms ease;
+}
+.outroVisible { opacity: .88; }
+.outroArt { width: 60px; height: 60px; flex: 0 0 60px; object-fit: cover; border-radius: 5px; }
+.outroCopy { min-width: 0; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.outroCopy > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outroCopy strong { font-size: clamp(15px, 2dvh, 19px); line-height: 1.15; }
+.outroCopy span, .outroCopy small { font-size: clamp(11px, 1.2dvh, 14px); line-height: 1.2; }
+.outroCopy .outroLabel { font-family: 'SX 3270', ui-monospace, monospace; letter-spacing: .06em; opacity: .66; }
+@media (prefers-reduced-motion: reduce) { .outro { transition: none; } }
+
+/* Hide every native lyric menu, including translation and timing offsets.
+ * FOLLOW and the station's bottom LYRICS action are separate controls. */
+.nativeControls,
+.perspective :global(#lyrics-plus-buttons-wrapper),
+.perspective :global(#lyrics-plus-translate-button),
+.perspective :global(#lyrics-plus-translation-dropdown),
+.perspective :global(#lyrics-plus-reload-button),
+.perspective :global(#lyrics-plus-options-dropdown) { display: none !important; }
+
+/* P21 ECO: preserve the native lyric engine's timing, per-word syllable states,
+ * duet roles, translations and text highlight, but remove animated glyph depth,
+ * overshooting transforms and repeated blur/filter work. The native renderer
+ * uses instant scroll positioning in lightweight mode (see lyricsRenderer.js).
+ * This makes ECO a legible reading surface, not a simplified karaoke engine. */
+.perspective[data-lyrics-rendering='eco'] .scroll { animation: none; }
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-line),
+.perspective[data-lyrics-rendering='eco'] :global(.main-vocal-container),
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-word),
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-syllable),
+.perspective[data-lyrics-rendering='eco'] :global(.char) {
+  animation: none !important;
+  text-rendering: optimizeLegibility;
+  transition-property: color, opacity !important;
+  transition-duration: 90ms !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-line.lyrics-gap .main-vocal-container),
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-line.lyrics-gap .lyrics-word) {
+  animation: none !important;
+  transform: none !important;
+}
+.perspective[data-lyrics-rendering='eco'] :global(.lyrics-line.active .main-vocal-container) {
+  text-shadow: var(--sx-title-glow);
+}
+@media (prefers-reduced-motion: reduce) {
+  .perspective .scroll { animation: none !important; }
+}

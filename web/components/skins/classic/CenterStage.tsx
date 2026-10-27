@@ -8,6 +8,7 @@ import { useTrackLike } from '@/components/skins/sharedHooks';
 import { fmtTime } from '@/lib/format';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
 import { useElapsed } from '@/hooks/useElapsed';
+import type { StationClock } from '@/lib/stationClock';
 import DjThinkingLine from './DjThinkingLine';
 import CountUp from './CountUp';
 import { Ripple } from '@/components/ui/ripple';
@@ -54,10 +55,10 @@ function LikeHeart() {
     <button
       type="button"
       onClick={like}
-      disabled={pending || liked}
+      disabled={pending}
       aria-pressed={liked}
-      aria-label={liked ? 'Liked' : 'Like this track'}
-      title={liked ? 'Liked — saved to the station favourites' : 'Like this track'}
+      aria-label={liked ? 'Unlike this track' : 'Like this track'}
+      title={liked ? 'Unlike this track' : 'Like this track'}
       className={cn(
         'v3-focus ml-[10px] inline-flex cursor-pointer items-center gap-[4px] border-0 bg-transparent p-0 align-middle transition-colors',
         liked ? 'text-vermilion' : 'text-muted hover:text-ink',
@@ -74,6 +75,8 @@ export interface CenterStageProps {
   nowPlaying: NowPlayingTrack | null;
   /** Epoch ms when the current track started (from useStationFeed). */
   trackStartedAt: number | null;
+  trackPausedAt: number | null;
+  stationClock: StationClock;
   /** Cumulative since-boot LLM token total, or null before the first poll. */
   llmTokens: number | null;
   feed: SessionTurn[];
@@ -90,11 +93,11 @@ export interface CenterStageProps {
   onOpenTimeline: () => void;
 }
 
-export default memo(function CenterStage({ nowPlaying, trackStartedAt, llmTokens, feed, djLineOn, boothBuddyOn, offline, upNext, onOpenBooth, onOpenTimeline }: CenterStageProps) {
+export default memo(function CenterStage({ nowPlaying, trackStartedAt, trackPausedAt, stationClock, llmTokens, feed, djLineOn, boothBuddyOn, offline, upNext, onOpenBooth, onOpenTimeline }: CenterStageProps) {
   const client = useStationClient();
   // The 1s elapsed tick lives here, in the component that displays it, so it
   // only re-renders this subtree — not the whole player (see useElapsed).
-  const elapsed = useElapsed(trackStartedAt);
+  const elapsed = useElapsed(trackStartedAt, trackPausedAt, stationClock);
   const has = !!nowPlaying?.title;
   // Everything the stage shows about "now" gates on `live`, so an outage reads
   // as off-air instead of a frozen now-playing.

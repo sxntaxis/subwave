@@ -5,11 +5,13 @@
 // StationOrigin, so pointing the player at another station means swapping the
 // origin (stationOrigin.ts) — no call site hardcodes a path.
 //
-// Response handling is deliberately per-endpoint: feed endpoints parse JSON
-// without an ok-check, /schedule and /themes throw on non-OK, /request/:id maps
+// Response handling is deliberately per-endpoint: feed endpoints require fresh,
+// successful, correctly shaped JSON; /schedule and /themes throw on non-OK; /request/:id maps
 // 404 to status 'unknown', the beacon is fire-and-forget. Keep it that way;
 // this module is plumbing, not policy.
 
+import type { LyricDocument } from '@/components/skins/sxntax/lyrics/lyricsModel';
+import { getStationAuthToken } from '@/lib/stationAuth';
 import { useMemo } from 'react';
 import {
   DEFAULT_STATION_ORIGIN,
@@ -69,19 +71,21 @@ export interface StationClient {
    *  Empty/nullish input stays '' so `<img>` fallbacks keep working. */
   resolve(path: string | null | undefined): string;
   coverUrl(subsonicId: string): string;
-  nowPlaying(): Promise<NowPlayingResponse>;
-  state(): Promise<StationState>;
+  nowPlaying(signal?: AbortSignal): Promise<NowPlayingResponse>;
+  /** Only the current aired Subsonic ID can be queried; 409 means stale. */
+  currentLyrics(songId: string, signal?: AbortSignal): Promise<{ songId: string; document: LyricDocument | null }>;
+  state(signal?: AbortSignal): Promise<StationState>;
   session(): Promise<SessionPayload>;
   /** The caller owns timeout/abort. */
   health(init?: { signal?: AbortSignal }): Promise<Response>;
-  schedule(): Promise<SchedulePayload>;
+  schedule(init?: { signal?: AbortSignal }): Promise<SchedulePayload>;
   themes(): Promise<ThemesPayload>;
   submitRequest(text: string, name: string): Promise<RequestResult>;
   /** 404 → status 'unknown'; network error → null so drawers keep polling. */
   requestStatus(requestId: string): Promise<RequestResult | null>;
   /** `songId` is what the client believes is on air; the controller rejects a
    *  stale tap. null on network error. */
-  likeCurrent(songId: string): Promise<LikeResult | null>;
+  likeCurrent(songId: string, liked?: boolean): Promise<LikeResult | null>;
   /** null on network error. */
   likeStatus(): Promise<LikeStatus | null>;
   /** Best-effort: never throws, never blocks. */
@@ -93,16 +97,47 @@ export interface StationClient {
 export function createStationClient(origin: StationOrigin): StationClient {
   const api = origin.apiUrl;
   const json = <T>(res: Response): Promise<T> => res.json() as Promise<T>;
+  const feedJson = async <T>(path: string, signal?: AbortSignal): Promise<T> => {
+    const timeout = AbortSignal.timeout(10_000);
+    const response = await fetch(`${api}${path}`, {
+      cache: 'no-store', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (!response.ok) throw new Error(`${path} fetch ${response.status}`);
+    return json<T>(response);
+  };
   return {
     origin,
     resolve: path => (path ? `${api}${path}` : ''),
     coverUrl: subsonicId => `${api}/cover/${encodeURIComponent(subsonicId)}`,
-    nowPlaying: () => fetch(`${api}/now-playing`).then(r => json<NowPlayingResponse>(r)),
-    state: () => fetch(`${api}/state`).then(r => json<StationState>(r)),
+    nowPlaying: async signal => {
+      const result = await feedJson<NowPlayingResponse>('/now-playing', signal);
+      if (!result || !Object.hasOwn(result, 'nowPlaying') || (result.nowPlaying != null && typeof result.nowPlaying.title !== 'string')) {
+        throw new Error('Invalid now-playing response');
+      }
+      return result;
+    },
+    currentLyrics: async (songId, signal) => {
+      const token = getStationAuthToken();
+      const response = await fetch(`${api}/lyrics/current?songId=${encodeURIComponent(songId)}`, {
+        cache: 'no-store', signal,
+        ...(token ? { headers: { 'x-station-auth': token } } : {}),
+      });
+      if (!response.ok) throw new Error(`lyrics fetch ${response.status}`);
+      const result = await json<{ songId: string; document: LyricDocument | null }>(response);
+      if (result?.songId !== songId || !Object.hasOwn(result, 'document')) {
+        throw new Error('Invalid lyrics response');
+      }
+      return result;
+    },
+    state: async signal => {
+      const result = await feedJson<StationState>('/state', signal);
+      if (!result || !Array.isArray(result.history) || !Array.isArray(result.upcoming)) throw new Error('Invalid state response');
+      return result;
+    },
     session: () => fetch(`${api}/session`).then(r => json<SessionPayload>(r)),
     health: init => fetch(`${api}/health`, { cache: 'no-store', signal: init?.signal }),
-    schedule: async () => {
-      const r = await fetch(`${api}/schedule`);
+    schedule: async init => {
+      const r = await fetch(`${api}/schedule`, { cache: 'no-store', signal: init?.signal });
       if (!r.ok) throw new Error(`schedule fetch ${r.status}`);
       return json<SchedulePayload>(r);
     },
@@ -128,10 +163,10 @@ export function createStationClient(origin: StationOrigin): StationClient {
         return null;
       }
     },
-    likeCurrent: async songId => {
+    likeCurrent: async (songId, liked = true) => {
       try {
         const r = await fetch(`${api}/like`, {
-          method: 'POST',
+          method: liked ? 'POST' : 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ songId }),
         });

@@ -13,6 +13,8 @@ export interface NowPlayingTrack {
   year?: number;
   duration?: number;
   subsonic_id?: string;
+  /** Liquidsoap's track-air marker, epoch seconds (whole-second on older mixers). */
+  timestamp?: number;
   // Merged in from the library DB. A not-yet-tagged track omits all of these.
   genre?: string | null;
   bpm?: number | null;
@@ -76,6 +78,8 @@ export interface SchedulePayload {
   personas: SchedulePersona[];
   shows: ScheduleShow[];
   schedule: ScheduleGrid;
+  /** Temporary live takeover; the weekly grid remains the regular programme. */
+  override?: { showId: string | null; startedAt: number; expiresAt: number } | null;
   /** Whether persona `soul` fields are included (same flag /personas reports). */
   soulsPublished?: boolean;
   timezone?: string | null;
@@ -110,6 +114,8 @@ export interface StreamInfo {
   mount?: string;
   format?: string;
   bitrate?: number | null;
+  /** Configured bitrate for the optional Opus mount, in kbps. */
+  opusBitrate?: number | null;
   sampleRate?: number | null;
   channels?: number | null;
   opusEnabled?: boolean;
@@ -123,6 +129,8 @@ export interface StreamInfo {
 
 /** `/now-playing` response. */
 export interface NowPlayingResponse {
+  /** Controller epoch sampled near response send; additive for older clients. */
+  serverTimeMs?: number;
   nowPlaying: NowPlayingTrack | null;
   context: StationContext | null;
   dj?: DjState;
@@ -142,6 +150,10 @@ export interface NowPlayingResponse {
 }
 
 export interface QueueEntry {
+  /** Per-airing pick comment, retained with the queue/history item. */
+  reason?: string;
+  startedAt?: string;
+  endedAt?: string;
   title?: string;
   artist?: string;
   album?: string;
@@ -193,6 +205,11 @@ export interface DjLogEntry {
 
 /** `/state` response. */
 export interface StationState {
+  current?: QueueEntry | null;
+  /** Station-wide aired speech covering the retained song history. */
+  airMessages?: SessionTurn[];
+  /** Effective live-edge progress origin and optional idle-pause boundary. */
+  playbackTiming?: { startedAt: number; pausedAt: number | null } | null;
   upcoming: QueueEntry[];
   history: QueueEntry[];
   djLog: DjLogEntry[];

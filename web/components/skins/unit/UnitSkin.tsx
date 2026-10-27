@@ -350,14 +350,14 @@ const FADER_LABELS = (
 export default function UnitSkin(_props: SkinProps) {
   const {
     nowPlaying, context, dj, activeShow, listeners, state,
-    trackStartedAt, timezone, locale,
+    trackStartedAt, trackPausedAt, stationClock, timezone, locale,
   } = usePlayerFeed();
   const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showOverlay, showTuneIn, tuneInFromOverlay, handleTune } = useTuneInGate();
   const client = useStationClient();
 
-  const elapsed = useElapsed(trackStartedAt);
+  const elapsed = useElapsed(trackStartedAt, trackPausedAt, stationClock);
   const stationLocale = normalizeStationLocale(locale);
   const listenerCount = listenerCountOf(listeners);
   const { stationName, djName, showName } = stationIdentity(dj, activeShow, context);
@@ -658,13 +658,13 @@ export default function UnitSkin(_props: SkinProps) {
                 <button
                   type="button"
                   onClick={() => { if (like.available) void like.like(); }}
-                  disabled={!like.available || like.pending || like.liked}
+                  disabled={!like.available || like.pending}
                   aria-pressed={like.liked}
-                  aria-label={like.liked ? 'Saved to the log' : 'Save this track'}
+                  aria-label={like.liked ? 'Unlike this track' : 'Save this track'}
                   className={cn(
                     styles.key,
                     'v3-focus relative flex flex-col gap-2 border-0 p-3.5 px-4 text-left',
-                    like.available && !like.liked ? 'cursor-pointer' : 'cursor-default',
+                    like.available ? 'cursor-pointer' : 'cursor-default',
                   )}
                 >
                   <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[var(--accent)] uppercase">
@@ -834,9 +834,9 @@ export default function UnitSkin(_props: SkinProps) {
               <button
                 type="button"
                 onClick={() => void like.like()}
-                disabled={like.pending || like.liked}
+                disabled={like.pending}
                 aria-pressed={like.liked}
-                aria-label={like.liked ? 'Saved' : 'Save this track'}
+                aria-label={like.liked ? 'Unlike this track' : 'Save this track'}
                 className={cn(
                   'v3-focus flex flex-none items-center gap-1 border-0 bg-transparent p-0 font-mono text-[12px] font-bold',
                   like.liked ? 'text-[var(--accent)]' : 'cursor-pointer text-[#8a8478]',

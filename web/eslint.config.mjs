@@ -26,6 +26,8 @@ export default defineConfig([
     'node_modules/**',
     'next-env.d.ts',
     'public/sw.js',
+    // Upstream MIT YouLyPlus sources stay vendor-owned; lint the TS host/bridge.
+    'components/skins/sxntax/lyrics/vendor/youlyplus/*.js',
   ]),
 
   // Strict styling rules — scoped to TypeScript files only so PR1 lands with
@@ -62,6 +64,8 @@ export default defineConfig([
           // historical reasons. Listed explicitly to keep the lint strict
           // outside this allow-list.
           ignore: [
+            // Required scope for the separately imported upstream renderer CSS.
+            '^subwave-youly-host$',
             '^v3-',
             // .fz-* — the console-deck footer's hardware-part classes
             // (TransportBar), defined in app/globals.css. Same legacy-CSS deal

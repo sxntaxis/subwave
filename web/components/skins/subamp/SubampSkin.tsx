@@ -5,8 +5,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
+import { Kawarp } from '@kawarp/react';
 import styles from './Subamp.module.css';
 import Analyzer from './Analyzer';
+import CrtOverlay from '../CrtOverlay';
 import {
   Conversation,
   ConversationContent,
@@ -19,11 +21,8 @@ import {
 } from '@/components/player/PlayerCore';
 import { useTuneInGate } from '@/components/player/useTuneInGate';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useCoverColors } from '@/hooks/useCoverColors';
-import { useDynamicStyle } from '@/hooks/useDynamicStyle';
 import { useElapsed } from '@/hooks/useElapsed';
 import { useClock } from '@/lib/hooks';
-import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { cn } from '@/lib/cn';
 import { REQUEST_NAME_MAX } from '@/lib/schemas.generated';
 import { fmtTime, normalizeStationLocale } from '@/lib/format';
@@ -61,37 +60,11 @@ const ART_CUT = {
   transition: { duration: 0 },
 };
 
-function Grip() {
-  return (
-    <span
-      className="h-1.5 min-w-4 flex-1 bg-[repeating-linear-gradient(90deg,var(--soft-border)_0_2px,transparent_2px_5px)]"
-      aria-hidden="true"
-    />
-  );
-}
-
 function Window({ title, children, className }: { title: ReactNode; children: ReactNode; className?: string }) {
-  const [open, setOpen] = useState(true);
   return (
     <div className={cn('bg-bg', styles.plate, className)}>
-      <div
-        onDoubleClick={() => setOpen(o => !o)}
-        className={cn('flex shrink-0 items-center gap-2.5 px-2.5 py-1 select-none', styles.titlebar)}
-      >
-        <Grip />
-        <span className="truncate text-[9px] font-bold tracking-[0.24em] uppercase">{title}</span>
-        <Grip />
-        <button
-          type="button"
-          onClick={() => setOpen(o => !o)}
-          aria-label={open ? 'Roll window up' : 'Roll window down'}
-          className="v3-focus cursor-pointer border border-[var(--line)] bg-transparent px-1 text-[9px] leading-tight text-muted hover:text-ink"
-        >
-          {open ? '▁' : '▆'}
-        </button>
-        <span className="border border-[var(--line)] px-1 text-[9px] leading-tight text-muted opacity-60" aria-hidden="true">✕</span>
-      </div>
-      {open && children}
+      <div className={styles.frameTitle}>{title}</div>
+      {children}
     </div>
   );
 }
@@ -100,13 +73,13 @@ export default function SubampSkin(_props: SkinProps) {
   const client = useStationClient();
   const {
     nowPlaying, context, dj, activeShow, listeners, state, session,
-    trackStartedAt, timezone, locale,
+    trackStartedAt, trackPausedAt, stationClock, timezone, locale,
   } = usePlayerFeed();
   const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showTuneIn, tuneInFromOverlay, handleTune } = useTuneInGate();
 
-  const elapsed = useElapsed(trackStartedAt);
+  const elapsed = useElapsed(trackStartedAt, trackPausedAt, stationClock);
   const clock = useClock();
   const stationLocale = normalizeStationLocale(locale);
   const listenerCount = listenerCountOf(listeners);
@@ -123,10 +96,6 @@ export default function SubampSkin(_props: SkinProps) {
   // Null art resolves the tint to transparent, so off-air/no-art degrades to
   // the plain desk.
   const coverSrc = nowPlaying?.subsonic_id ? client.coverUrl(nowPlaying.subsonic_id) : null;
-  const coverColors = useCoverColors(coverSrc);
-  const deskRef = useRef<HTMLDivElement | null>(null);
-  useDynamicStyle(deskRef, { '--sw-amp-tint': coverColors.vibrant });
-
   const slip = useRequestSlip({
     sent: 'request received — the DJ is on it.',
     refused: 'request refused.',
@@ -172,17 +141,13 @@ export default function SubampSkin(_props: SkinProps) {
 
   return (
     <div className={cn('absolute inset-0 overflow-hidden font-mono text-ink lg:overflow-y-auto', styles.shell)}>
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_70%_at_50%_42%,color-mix(in_oklab,var(--accent)_12%,transparent),transparent)]"
-        aria-hidden="true"
-      />
-      <div
-        ref={deskRef}
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_60%_at_50%_38%,color-mix(in_oklab,var(--sw-amp-tint,transparent)_18%,transparent),transparent)]"
-        aria-hidden="true"
-      />
+      {coverSrc && (
+        <div className={styles.kawarp} aria-hidden="true">
+          <Kawarp src={coverSrc} className={styles.kawarpCanvas} />
+        </div>
+      )}
 
-      <div className="absolute top-7 left-9 hidden text-[10px] tracking-[0.24em] text-muted uppercase lg:block">
+      <div className="absolute top-7 left-9 z-10 hidden text-[10px] tracking-[0.24em] text-muted uppercase lg:block">
         {stationName} — {showName ? `${showName} with ${djName}` : `with ${djName}`}
       </div>
       <div className="absolute top-3 right-3 z-10 flex items-center gap-3 lg:top-7 lg:right-9">
@@ -190,9 +155,8 @@ export default function SubampSkin(_props: SkinProps) {
           {[clock ? turnClock(clock.getTime(), timezone, stationLocale) : '', contextLine(context)]
             .filter(Boolean).join(' · ')}
         </span>
-        <ThemeSwitcher />
       </div>
-      <div className="relative mx-auto flex h-full w-full max-w-[580px] flex-col gap-2 px-3 pt-9 pb-3 lg:h-auto lg:min-h-full lg:justify-center lg:py-14">
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-[580px] flex-col gap-2 px-3 pt-9 pb-3 lg:h-auto lg:min-h-full lg:justify-center lg:py-14">
         <Window title={<>SUBAMP ▪ LIVE BROADCAST DECK</>} className="flex-none">
           <div className="flex flex-col gap-3 px-4 py-3.5">
             <div className="flex items-stretch gap-3.5">
@@ -292,9 +256,9 @@ export default function SubampSkin(_props: SkinProps) {
                 <button
                   type="button"
                   onClick={() => void like.like()}
-                  disabled={like.pending || like.liked}
+                  disabled={like.pending}
                   aria-pressed={like.liked}
-                  aria-label={like.liked ? 'Liked' : 'Like this track'}
+                  aria-label={like.liked ? 'Unlike this track' : 'Like this track'}
                   className={cn(
                     'v3-focus grid h-[34px] w-11 place-items-center border text-[13px]',
                     like.liked
@@ -457,6 +421,7 @@ export default function SubampSkin(_props: SkinProps) {
             </form>
         </Window>
       </div>
+      <CrtOverlay className={styles.crt} />
     </div>
   );
 }

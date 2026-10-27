@@ -6,6 +6,8 @@
 import { useEffect, useState } from 'react';
 
 export interface CoverColors {
+  // The URL this sample belongs to, preventing a stale average after src changes.
+  source: string | null;
   // Saturation-weighted dominant colour. `rgb(r, g, b)` string, or null if
   // extraction hasn't run or failed.
   vibrant: string | null;
@@ -13,7 +15,7 @@ export interface CoverColors {
   average: string | null;
 }
 
-const EMPTY: CoverColors = { vibrant: null, average: null };
+const EMPTY: CoverColors = { source: null, vibrant: null, average: null };
 
 // Downscale target: enough to find dominant hues, and keeps the per-track
 // getImageData walk to ~576 pixels.
@@ -114,7 +116,7 @@ export function useCoverColors(coverSrc: string | null): CoverColors {
 
         const vibrant = best ? rgb(best.r / best.n, best.g / best.n, best.b / best.n) : null;
         const average = rgb(ar / an, ag / an, ab / an);
-        setColors({ vibrant, average });
+        setColors({ source: coverSrc, vibrant, average });
       } catch {
         // Tainted canvas or read failure — leave the tint off rather than throw.
         if (!cancelled) setColors(EMPTY);

@@ -329,7 +329,9 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const analysed = p.coverage?.analysed ?? null;
   const audioEmbedded = p.coverage?.audioEmbedded ?? null;
   const vocalAnalyzed = p.coverage?.vocalAnalyzed ?? null;
-  const pct = p.coverage?.percent ?? null;
+  const pct = total != null
+    ? Math.min(100, Math.floor((semanticLabels / total) * 100))
+    : null;
   const apct = p.coverage?.analysedPercent ?? null;
   const audpct = p.coverage?.audioEmbeddedPercent ?? null;
   const vpct = p.coverage?.vocalAnalyzedPercent ?? null;
@@ -352,7 +354,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const vocalOn = (vocalAnalyzed ?? 0) > 0;
   // On a virgin library the per-dimension Backfill buttons stay hidden.
   const anyWorkDone = (tagged ?? 0) > 0 || (analysed ?? 0) > 0 || audioOn || vocalOn;
-  const remaining = total != null && tagged != null ? Math.max(0, total - tagged) : null;
+  const remaining = total != null ? Math.max(0, total - semanticLabels) : null;
   const running = !!p.tagger?.running;
   const scanning = !!p.coverage?.scanning;
   // A first count still in flight: `total` is null but a number is coming.

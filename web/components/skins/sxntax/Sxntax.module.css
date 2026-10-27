@@ -1,0 +1,1916 @@
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+/* Additional cuts from the owner-provided Di Grotesk archive.
+ * Keep this CSS source-only: font binaries are imported locally from that archive. */
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-Italic.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-BoldItalic.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-ExtraBold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-ExtraBoldItalic.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-Black.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX Die Grotesk';
+  src: url('/fonts/DiGrotesk-BlackItalic.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SX 3270';
+  src:
+    url('/fonts/3270SXNTAX-Regular.woff2?sx=v50') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+/* Make the UI's derived foreground/opposing pigments interpolate together.
+ * Without typed custom properties, direct var(--sx-fg) consumers snap even
+ * while inherited `color` fades, producing mixed polarity for several seconds. */
+@property --sx-fg {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #feffff;
+}
+@property --sx-opposing {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #040404;
+}
+
+.root {
+  --sx-frame-inset: 18px;
+  --sx-frame-stroke: 1.3px;
+  --sx-frame-clock: 18px;
+  --sx-safe-y: 24px;
+  --sx-player-stage-height: calc(100dvh - var(--sx-safe-y) - var(--sx-safe-y));
+  --sx-content-width: 100%;
+  --sx-content-max: 790px;
+  --sx-space-u: clamp(6px, .52vw, 10px);
+  --sx-space-invphi: clamp(3.708px, .3214vw, 6.18px);
+  --sx-space-phi: clamp(9.708px, .8414vw, 16.18px);
+  --sx-space-phi2: clamp(15.708px, 1.3614vw, 26.18px);
+  --sx-space-phi3: clamp(25.416px, 2.2027vw, 42.361px);
+  --sx-space-phi4: clamp(41.124px, 3.5641vw, 68.541px);
+  --sx-title-size: 104px;
+  --sx-artist-size: 40px;
+  --sx-album-size: 17px;
+  /* Fixed UI typography follows the home shell. Track title/artist/album are
+   * the only font sizes the hero fitter is allowed to change per song. */
+  --sx-system-size: clamp(13px, 1.15vw, 16px);
+  --sx-route-size: clamp(17px, 1.5vw, 22px);
+  --sx-control-size: clamp(14px, 1.25vw, 17px);
+  --sx-cover-size: 150px;
+  --sx-art-gap: 32px;
+  --sx-title-optical-inset: 0px;
+  --sx-artist-optical-inset: 0px;
+  --sx-album-optical-inset: 0px;
+  --sx-copy-target: 720px;
+  --sx-cluster-width: 930px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--sx-fg, #feffff);
+  background: var(--bg, #040404);
+  font-family: 'SX Die Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-ligatures: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  isolation: isolate;
+  transition:
+    color 3200ms cubic-bezier(.22,.61,.36,1),
+    --sx-fg 3200ms cubic-bezier(.22,.61,.36,1),
+    --sx-opposing 3200ms cubic-bezier(.22,.61,.36,1);
+}
+
+/* ECO does not animate a fluid field, but foreground pigment can still
+ * crossfade cheaply alongside its existing CSS artwork/base transition. */
+.liteVisuals {
+  transition:
+    color 3200ms cubic-bezier(.22,.61,.36,1),
+    --sx-fg 3200ms cubic-bezier(.22,.61,.36,1),
+    --sx-opposing 3200ms cubic-bezier(.22,.61,.36,1);
+}
+
+
+.cssReadyProbe {
+  --sx-css-ready: 1;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.root ::selection {
+  color: #040404;
+  background: #fff;
+  text-shadow: none;
+}
+
+.root ::-moz-selection {
+  color: #040404;
+  background: #fff;
+  text-shadow: none;
+}
+
+.contained {
+  --sx-frame-inset: 10px;
+  --sx-frame-clock: 12px;
+  --sx-safe-y: 23px;
+}
+
+.ambientBase,
+.kawarp,
+.liteAmbient,
+.litePhosphor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ambientBase {
+  z-index: 0;
+  background-color: #040404;
+  transition: background-color 10000ms linear, filter 520ms ease;
+}
+
+.fullVisuals .ambientBase {
+  background-color: var(--sx-ambient-base, #040404);
+}
+
+.liteVisuals .ambientBase {
+  background-color: var(--sx-lite-base, #040404);
+}
+
+.liteAmbient {
+  z-index: 1;
+  overflow: hidden;
+  contain: paint;
+  background:
+    radial-gradient(115% 82% at 16% 10%, color-mix(in srgb, var(--sx-lite-accent, #040404) 58%, transparent) 0%, transparent 63%),
+    radial-gradient(88% 105% at 86% 82%, color-mix(in srgb, var(--sx-lite-base, #040404) 46%, transparent) 0%, transparent 70%),
+    linear-gradient(145deg, color-mix(in srgb, var(--sx-lite-base, #040404) 88%, #040404 12%) 0%, var(--sx-lite-base, #040404) 52%, color-mix(in srgb, var(--sx-lite-accent, #040404) 34%, var(--sx-lite-base, #040404) 66%) 100%);
+}
+
+.litePhosphor {
+  z-index: 2;
+  opacity: .46;
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(255,255,255,.018) 0,
+    rgba(255,255,255,.018) 1px,
+    rgba(0,0,0,.030) 1px,
+    rgba(0,0,0,.030) 3px
+  );
+}
+
+.liteVisuals[data-light-ambient='true'] .litePhosphor {
+  opacity: .34;
+  background-image: repeating-linear-gradient(to right, rgba(0,0,0,.026) 0, rgba(0,0,0,.026) 1px, rgba(255,255,255,.015) 1px, rgba(255,255,255,.015) 3px);
+}
+
+.litePhosphor::after {
+  position: absolute;
+  inset: 0;
+  background-image: url('/textures/sxntax-lite-noise.png');
+  background-repeat: repeat;
+  content: '';
+  opacity: .065;
+}
+
+.liteVisuals[data-light-ambient='true'] .litePhosphor::after { opacity: .050; }
+
+.kawarp {
+  z-index: 1;
+  opacity: 0;
+  filter:
+    saturate(1.04)
+    brightness(var(--sx-kawarp-brightness, .78))
+    contrast(var(--sx-kawarp-contrast, .96));
+  transition:
+    opacity 10000ms cubic-bezier(.22,.61,.36,1),
+    filter 700ms linear;
+}
+
+.fullVisuals .kawarp {
+  opacity: .80;
+}
+
+.kawarpCanvas {
+  position: absolute !important;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.scrollport {
+  position: absolute;
+  z-index: 10;
+  top: var(--sx-safe-y);
+  right: calc(var(--sx-frame-inset) + 2px);
+  bottom: var(--sx-safe-y);
+  left: calc(var(--sx-frame-inset) + 2px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  opacity: 1;
+  filter: none;
+  transform: translateZ(0);
+  transition: opacity 260ms ease, filter 260ms ease, transform 260ms ease;
+}
+
+.scheduleScrollportHidden { visibility: hidden; }
+
+.booting .scrollport,
+.presentationPending .scrollport {
+  opacity: 0;
+  pointer-events: none;
+  filter: none;
+  transform: none;
+}
+
+/* Tune In is available as soon as the shell is typographically complete. The
+ * hero only enters this softened preview once feed + first media are coherent;
+ * until then the gate sits over the same clean black surface as /home. */
+.gated:not(.booting):not(.presentationPending) .scrollport {
+  opacity: .34;
+  filter: blur(4.2px);
+  transform: scale(1.006);
+}
+
+.liteVisuals .scrollport { scroll-behavior: auto; }
+
+.scrollport::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+.page {
+  position: relative;
+  width: min(var(--sx-content-width), var(--sx-content-max), calc(100% - var(--sx-space-phi4) - var(--sx-space-phi4)));
+  min-height: 100%;
+  margin-inline: auto;
+}
+
+.hero {
+  position: relative;
+  /* Preserve the one-screen stage when content fits, but never position
+   * hero controls underneath the following REQUEST section. Desktop titles
+   * can exceed the viewport just as mobile titles can. */
+  height: auto;
+  min-height: var(--sx-player-stage-height);
+}
+
+.heroStage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto var(--sx-station-song-gap) auto var(--sx-playback-controls-gap) auto minmax(0, 1fr);
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--sx-player-stage-height);
+  --sx-lyric-edge-inset: clamp(15px, 1.9dvh, 24px);
+  --sx-lyric-unit-gap: clamp(11px, 1.45dvh, 16px);
+  /* Modules own their line rhythm; the stage owns separation. These gaps
+   * never scale with the adaptive title or absorb spare viewport height. */
+  --sx-system-size: clamp(13px, .96vw, 14.4px);
+  --sx-route-size: clamp(20px, 1.8vw, 26px);
+  --sx-station-route-gap: 9px;
+  --sx-station-status-gap: 6px;
+  --sx-title-artist-gap: 10px;
+  --sx-artist-album-gap: 5px;
+  --sx-label-gap: 12px;
+  --sx-station-song-gap: 26px;
+  --sx-song-playback-gap: 22px;
+  --sx-timeline-facts-gap: 8px;
+  --sx-playback-controls-gap: 26px;
+  --sx-identity-heading-height: calc(var(--sx-system-size) * 1.45);
+  padding-block: var(--sx-lyric-edge-inset);
+}
+
+/* Track identity geometry remains content-responsive in the normal scene. */
+.heroStage .trackCorridor {
+  height: auto;
+  min-height: 0;
+}
+
+.heroStage .heroMain { min-width: 0; }
+.heroStage .trackCorridor,
+.heroStage .nowCluster { min-height: 0; }
+
+/* Same geometry in both modes: the view coordinator interpolates only the
+ * corridor's numeric height. Intrinsic artwork never stretches with lyrics. */
+.heroStage[data-lyrics-ui-revision] .nowCluster {
+  height: 100%;
+}
+.heroStage .nowHeading {
+  align-items: flex-start;
+  flex-shrink: 0;
+  margin-bottom: 0;
+  height: var(--sx-identity-heading-height);
+}
+/* The normal heading reserves just the label, not the hidden compact cover.
+ * The existing coordinator interpolates that heading to compact identity height
+ * when Lyrics opens. Station→label and facts→controls now share the 26px seam. */
+.heroStage .progressBlock,
+.heroStage .trackFacts { flex-shrink: 0; }
+/* Embedded showcases allocate the same central rectangle without a viewport
+ * grid; absolute surfaces must not collapse the content-height shell. */
+.contained .heroStage .nowCluster {
+  min-height: calc(var(--sx-identity-heading-height) + var(--sx-lyric-unit-gap) + clamp(250px, 42dvh, 530px));
+}
+
+.heroSpring,
+.heroSpringInner { min-height: 0; }
+
+.heroHeader { min-width: 0; }
+
+.contained .hero,
+.contained .heroStage {
+  height: auto;
+  min-height: auto;
+}
+
+.contained .heroStage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sx-space-phi2);
+}
+
+.contained .heroSpring,
+.contained .heroSpringInner { display: none; }
+
+.heroMain {
+  min-width: 0;
+  width: 100%;
+}
+
+.route,
+.stationLine,
+.statusLine,
+.liveLabel,
+.progressMeta,
+.trackFacts,
+.controls,
+.fromLine,
+.airStamp,
+.airMeta,
+.airSpeaker,
+.textAction,
+.sendAction {
+  font-family: 'SX 3270', '3270 Nerd Font', 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-ligatures: none;
+}
+
+.nerdIcon {
+  display: inline-block;
+  min-width: 1em;
+  font-family: 'SX 3270', '3270 Nerd Font', monospace;
+  font-variant-ligatures: none;
+  text-align: center;
+}
+
+.metaTag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 1.45em;
+  border: 1px solid color-mix(in srgb, currentColor 66%, transparent);
+  padding: .14em .42em .10em;
+  color: color-mix(in srgb, currentColor 82%, transparent);
+  background: color-mix(in srgb, var(--sx-opposing) 4%, transparent);
+  font-family: 'SX 3270', '3270 Nerd Font', 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-ligatures: none;
+  line-height: 1;
+  letter-spacing: .035em;
+  white-space: nowrap;
+}
+
+.route {
+  margin-bottom: var(--sx-station-route-gap, 9px);
+  color: color-mix(in srgb, currentColor 64%, transparent);
+  font-size: var(--sx-route-size);
+  line-height: 1;
+}
+
+.routeLink {
+  display: inline-block;
+  padding: .10em .025em .08em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.showLink {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.routeLink:hover,
+.routeLink:focus-visible {
+  color: var(--sx-opposing);
+  background: var(--sx-fg);
+  outline: 0;
+  text-decoration: none;
+}
+
+.stationLine {
+  max-width: 100%;
+  color: color-mix(in srgb, currentColor 78%, transparent);
+  font-size: var(--sx-system-size);
+  line-height: 1.3;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.statusLine {
+  margin-top: var(--sx-station-status-gap, 6px);
+  color: color-mix(in srgb, currentColor 58%, transparent);
+  font-size: var(--sx-system-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.nowCluster {
+  position: relative;
+  width: 100%;
+  margin-inline: 0;
+  opacity: 1;
+}
+
+/* Both perspectives inhabit the same song corridor. Keep the default
+ * identity subtree mounted for handoff/geometry probes while Lyrics is active. */
+.nowClusterLyrics { width: 100%; }
+.nowHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sx-space-phi2);
+  min-width: 0;
+  margin-bottom: 0;
+}
+.nowHeading > .liveLabel { margin-bottom: 0; flex-shrink: 0; }
+.lyricsTrackIdentity {
+  --sx-lyrics-art-size: clamp(56px, 8dvh, 80px);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sx-lyric-unit-gap, var(--sx-space-phi));
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 78%;
+  height: var(--sx-lyrics-art-size);
+  text-align: right;
+}
+.lyricsIdentityCopy { position: relative; min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; align-self: flex-start; }
+.lyricsIdentityResting { display: flex; flex-direction: column; gap: 3px; }
+.lyricsIdentityInHandoff .lyricsIdentityResting { visibility: hidden; }
+.lyricsIdentityBridge { position: absolute; inset: 0; pointer-events: none; }
+.lyricsCompactOutgoing, .lyricsCompactIncoming, .lyricsCompactOutgoingMass, .lyricsCompactIncomingMass {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 3px; overflow: visible;
+}
+.lyricsCompactOutgoing { opacity: var(--sx-bridge-out-core, 1); }
+.lyricsCompactIncoming { opacity: var(--sx-bridge-in-core, 0); }
+.lyricsCompactOutgoingMass, .lyricsCompactIncomingMass {
+  filter: blur(var(--sx-bridge-mass-blur, 4px));
+  transform: translateZ(0);
+}
+.lyricsCompactOutgoingMass { opacity: var(--sx-bridge-out-mass, 0); }
+.lyricsCompactIncomingMass { opacity: var(--sx-bridge-in-mass, 0); }
+/* Never let an album name determine the seam between the title unit and cover. */
+.lyricsIdentityBridge .lyricsIdentityTitle, .lyricsIdentityBridge .lyricsIdentityArtist, .lyricsIdentityBridge .lyricsIdentityAlbum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lyricsIdentityResting > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lyricsIdentityTitle {
+  font-family: 'SX Die Grotesk', sans-serif;
+  font-size: calc(var(--sx-lyrics-art-size) * .30);
+  font-weight: 700;
+  line-height: 1.08;
+}
+.lyricsIdentityArtist {
+  font-family: 'SX Die Grotesk', sans-serif;
+  font-size: clamp(13px, 1.8dvh, 17px);
+  line-height: 1.15;
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.lyricsIdentityAlbum {
+  font-family: 'SX Die Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  font-size: clamp(12px, 1.4dvh, 14px);
+  line-height: 1.2;
+  color: color-mix(in srgb, currentColor 84%, transparent);
+}
+.coverPlate.lyricsCoverPlate {
+  width: var(--sx-lyrics-art-size);
+  height: var(--sx-lyrics-art-size);
+  flex: 0 0 var(--sx-lyrics-art-size);
+  align-self: flex-start;
+  position: relative;
+  overflow: visible;
+  border-radius: 6px;
+}
+.lyricsCoverPlate > img, .lyricsCoverPlate > span { overflow: hidden; border-radius: inherit; }
+.lyricsCoverFallback { display: grid; place-items: center; height: 100%; font-family: 'SX 3270', monospace; }
+
+/* One presentation rectangle, regardless of listener preference. Only paint
+ * ownership changes; none of the optical anchors participates in a mode grid. */
+.heroStage .nowCluster {
+  display: grid;
+  grid-template-rows: var(--sx-identity-heading-height) minmax(0, 1fr);
+  gap: var(--sx-label-gap);
+  min-height: 0;
+}
+.heroStage .nowHeading { grid-row: 1; }
+.heroStage [data-artwork-surface], .lyricsDocument, .lyricsPending { grid-area: 2 / 1; min-width: 0; min-height: 0; }
+.heroStage [data-artwork-surface] { align-content: start; opacity: 1; }
+.heroStage[data-lyrics-ui-revision] [data-artwork-surface] {
+  position: absolute;
+  top: calc(var(--sx-identity-heading-height) + var(--sx-label-gap));
+  left: 0;
+  right: 0;
+  height: auto;
+  grid-area: auto;
+}
+.heroStage .lyricsTrackIdentity { opacity: 0; }
+.lyricsDocument { display: flex; flex-direction: column; height: 100%; overflow: hidden; opacity: 0; }
+.lyricsDocument > [data-lyrics-perspective] { flex: 1 1 0%; width: 100%; height: 100%; max-height: 100%; min-height: 0; }
+.lyricsPending {
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  color: color-mix(in srgb, currentColor 54%, transparent);
+}
+.lyricsPendingDots { display: inline-flex; gap: 5px; align-items: center; opacity: 0; animation: sx-lyrics-pending-in 180ms ease 300ms forwards; }
+.lyricsPendingDots i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.lyricsPendingDots i:nth-child(2) { opacity: .66; }.lyricsPendingDots i:nth-child(3) { opacity: .34; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@keyframes sx-lyrics-pending-in { to { opacity: .86; } }
+.heroStage[data-lyrics-view='artwork'] .lyricsTrackIdentity { visibility: hidden; }
+.heroStage:not([data-lyrics-view='lyrics']) .lyricsDocument { pointer-events: none; }
+.heroStage [data-artwork-surface][inert] { pointer-events: none; }
+.trackCorridor {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+  min-height: 0;
+  transition: none;
+}
+.trackHandoff .heroStage[data-lyrics-view='artwork'] .trackCorridor {
+  transition-property: height;
+  transition-duration: var(--sx-track-corridor-preposition-ms, 3400ms);
+  transition-timing-function: cubic-bezier(.22,.72,.18,1);
+}
+.trackHandoff .heroStage[data-lyrics-view='artwork'] .trackCorridorRewrite {
+  transition-duration: var(--sx-track-corridor-glide-ms, 1800ms);
+}
+
+/* A quiet resting phosphor bloom gives the hero title a luminous edge without
+ * making normal playback soft. The transition temporarily replaces this with
+ * the centered monochrome bridge below. This is the accepted resting treatment
+ * and is intentionally outside .trackHandoff. */
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .titleNormal {
+  text-shadow:
+    0 0 .045em color-mix(in srgb, currentColor 34%, transparent),
+    0 0 .18em color-mix(in srgb, currentColor 18%, transparent),
+    0 0 .42em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .artist {
+  text-shadow:
+    0 .02em .05em color-mix(in srgb, currentColor 14%, transparent),
+    0 .08em .22em color-mix(in srgb, currentColor 7%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .albumLine {
+  text-shadow:
+    0 .018em .05em color-mix(in srgb, currentColor 11%, transparent),
+    0 .06em .18em color-mix(in srgb, currentColor 5%, transparent);
+}
+
+/* On a dark scene the foreground is white, so a dark drop shadow has no useful
+ * optical analogue. Give white type a slightly stronger same-luma bloom instead.
+ * text-shadow only paints outside the glyph; it does not blur/fill the interior.
+ * Black foreground keeps the accepted v38 treatment unchanged. */
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] .nowCluster:not(.trackDecay):not(.trackRewrite) .titleNormal {
+  text-shadow:
+    0 0 .05em color-mix(in srgb, currentColor 42%, transparent),
+    0 0 .20em color-mix(in srgb, currentColor 24%, transparent),
+    0 0 .48em color-mix(in srgb, currentColor 11%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true'] .nowCluster:not(.trackDecay):not(.trackRewrite) .titleNormal {
+  text-shadow:
+    0 .02em .04em color-mix(in srgb, currentColor 22%, transparent),
+    0 .10em .28em color-mix(in srgb, currentColor 12%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true'] .nowCluster:not(.trackDecay):not(.trackRewrite) .artist {
+  text-shadow:
+    0 .02em .05em color-mix(in srgb, currentColor 18%, transparent),
+    0 .08em .22em color-mix(in srgb, currentColor 9%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true'] .nowCluster:not(.trackDecay):not(.trackRewrite) .albumLine {
+  text-shadow:
+    0 .015em .05em color-mix(in srgb, currentColor 16%, transparent),
+    0 .06em .18em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] .nowCluster:not(.trackDecay):not(.trackRewrite) .artist {
+  text-shadow:
+    0 0 .065em color-mix(in srgb, currentColor 18%, transparent),
+    0 0 .20em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] .nowCluster:not(.trackDecay):not(.trackRewrite) .albumLine {
+  text-shadow:
+    0 0 .05em color-mix(in srgb, currentColor 14%, transparent),
+    0 0 .16em color-mix(in srgb, currentColor 6%, transparent);
+}
+
+/* P20: one optical contract for hero title, compact identity, and the active lyric.
+ * CurrentColor naturally yields white emission or black absorption; music controls
+ * the halo, never the background brightness. */
+:is(.fullVisuals, .liteVisuals) {
+  --sx-title-glow:
+    0 0 .05em color-mix(in srgb, currentColor calc(var(--sx-halo-near) + var(--sx-audio-halo, 0%)), transparent),
+    0 0 .20em color-mix(in srgb, currentColor calc(var(--sx-halo-mid) + var(--sx-audio-halo, 0%)), transparent),
+    0 0 .52em color-mix(in srgb, currentColor var(--sx-halo-far), transparent);
+}
+/* P19: polarity parity. Existing resting white emission is the baseline.
+ * Dark-type polarity receives a centered dark imprint with comparable edge
+ * presence, not a one-sided drop shadow. Audio drives HALO opacity only:
+ * never luminance of the scene, which would disturb legibility polarity. */
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] { --sx-halo-near: 42%; --sx-halo-mid: 24%; --sx-halo-far: 11%; }
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true']  { --sx-halo-near: 34%; --sx-halo-mid: 18%; --sx-halo-far: 8%; }
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) :is(.titleNormal, .lyricsIdentityTitle) {
+  text-shadow: var(--sx-title-glow);
+}
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .artist,
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .albumLine,
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .lyricsIdentityArtist,
+:is(.fullVisuals, .liteVisuals) .nowCluster:not(.trackDecay):not(.trackRewrite) .lyricsIdentityAlbum {
+  text-shadow:
+    0 0 .065em color-mix(in srgb, currentColor calc(18% + var(--sx-audio-halo, 0%)), transparent),
+    0 0 .20em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* QUALITY handoffs are driven by one runtime envelope rather than a stack of
+ * unrelated keyframes. The identity transition is centered and luma-only: old
+ * and new strings defocus into coincident glyph masses, then resolve. It does
+ * not generate horizontal displacement, persistence ghosts, or shadow halos. */
+.trackDecay,
+.trackRewrite { opacity: 1; }
+
+/* Handoff colour comes only from the real ambient artwork. UI phosphor
+ * treatment is neutral at rest and during crossover; there is no conditional
+ * RGB bleed path to suppress. */
+
+/* The CRT/noise layer remains live throughout the identity bridge. Texture
+ * continuity is part of the typography: the transition adds paint-only mass
+ * layers but never turns the environmental phosphor surface off. */
+
+.fullVisuals.trackHandoff .nowCopy {
+  opacity: 0;
+}
+
+/* The semantic live copy is hidden for the entire handoff. The bridge is the
+ * only identity paint source, so there are no duplicate ghost/smear paths. */
+.fullVisuals.trackHandoff .titleNormal,
+.fullVisuals.trackHandoff .artist,
+.fullVisuals.trackHandoff .albumLine {
+  opacity: 0;
+}
+
+@media (orientation: landscape) {
+  .fullVisuals.trackHandoff .nowGrid {
+    grid-template-columns: minmax(0, 1fr) var(--sx-handoff-cover-size, var(--sx-cover-size));
+  }
+}
+
+.fullVisuals.trackHandoff .coverPlate {
+  width: var(--sx-handoff-cover-size, var(--sx-cover-size));
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+.liteVisuals .nowCluster { transition: none; }
+
+.liteVisuals .route,
+.liteVisuals .stationLine,
+.liteVisuals .statusLine,
+.liteVisuals .metaTag {
+  text-shadow:
+    0 0 3px color-mix(in srgb, currentColor 13%, transparent),
+    0 0 8px color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.liteVisuals[data-light-ambient='true'] .route,
+.liteVisuals[data-light-ambient='true'] .stationLine,
+.liteVisuals[data-light-ambient='true'] .statusLine,
+.liteVisuals[data-light-ambient='true'] .metaTag {
+  text-shadow:
+    0 .5px 1px color-mix(in srgb, currentColor 20%, transparent),
+    0 2px 5px color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.nowGrid {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sx-cover-size);
+  gap: var(--sx-art-gap);
+  align-items: start;
+  width: 100%;
+}
+
+.nowGridNoCover {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.nowCopy {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+/* v34 song identity bridge -------------------------------------------------
+ *
+ * Outgoing and incoming identity are separate paint layers. At the midpoint
+ * both crisp cores are absent while both heavily defocused masses overlap.
+ * This creates an actual old-shape -> luminous mass -> new-shape bridge;
+ * unlike v33, the compositor never relies on swapping one string underneath
+ * the same ::before/::after shadows. These layers are absolute and aria-hidden,
+ * so the safe-corridor layout and semantic NOW PLAYING tree remain singular. */
+.identityBridge {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  z-index: 4;
+  height: 0;
+  width: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.bridgeTextLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: var(--sx-bridge-copy-width, calc(100% - var(--sx-cover-size) - var(--sx-art-gap)));
+  min-width: 0;
+  opacity: 0;
+  transform-origin: 0 18%;
+  will-change: opacity;
+}
+
+.bridgeNoCover {
+  width: var(--sx-bridge-copy-width, 100%);
+}
+
+.bridgeOutgoingCore {
+  z-index: 1;
+  opacity: var(--sx-bridge-out-core, 0);
+}
+
+.bridgeIncomingCore {
+  z-index: 1;
+  opacity: var(--sx-bridge-in-core, 0);
+}
+
+.bridgeOutgoingMass {
+  z-index: 0;
+  opacity: var(--sx-bridge-out-mass, 0);
+}
+
+.bridgeIncomingMass {
+  z-index: 0;
+  opacity: var(--sx-bridge-in-mass, 0);
+}
+
+/* Crisp bridge glyphs stay geometrically sharp. Bloom is outward-only via
+ * text-shadow; all actual defocus belongs to the separate mass copies. This
+ * preserves the CRT/noise texture inside bold glyphs while they remain legible. */
+
+/* The crisp bridge never drops into a flat middle state. It carries the same
+ * accepted resting phosphor vocabulary while the live semantic copy is hidden,
+ * then hands back to the resting rules without a visible lighting discontinuity. */
+.bridgeOutgoingCore .bridgeTitle,
+.bridgeIncomingCore .bridgeTitle {
+  text-shadow:
+    0 0 .045em color-mix(in srgb, currentColor 34%, transparent),
+    0 0 .18em color-mix(in srgb, currentColor 18%, transparent),
+    0 0 .42em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.bridgeOutgoingCore .bridgeArtist,
+.bridgeIncomingCore .bridgeArtist {
+  text-shadow:
+    0 .02em .05em color-mix(in srgb, currentColor 13%, transparent),
+    0 .08em .20em color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.bridgeOutgoingCore .bridgeAlbumLine,
+.bridgeIncomingCore .bridgeAlbumLine {
+  text-shadow:
+    0 .015em .045em color-mix(in srgb, currentColor 11%, transparent),
+    0 .06em .16em color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeOutgoingCore .bridgeTitle,
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeIncomingCore .bridgeTitle {
+  text-shadow:
+    0 0 .05em color-mix(in srgb, currentColor 42%, transparent),
+    0 0 .20em color-mix(in srgb, currentColor 24%, transparent),
+    0 0 .48em color-mix(in srgb, currentColor 11%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeOutgoingCore .bridgeTitle,
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeIncomingCore .bridgeTitle {
+  text-shadow:
+    0 .02em .04em color-mix(in srgb, currentColor 22%, transparent),
+    0 .10em .28em color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeOutgoingCore .bridgeArtist,
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeIncomingCore .bridgeArtist {
+  text-shadow:
+    0 .02em .05em color-mix(in srgb, currentColor 18%, transparent),
+    0 .08em .22em color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeOutgoingCore .bridgeAlbumLine,
+.fullVisuals.trackHandoff[data-light-ambient='true'] .bridgeIncomingCore .bridgeAlbumLine {
+  text-shadow:
+    0 .015em .05em color-mix(in srgb, currentColor 16%, transparent),
+    0 .06em .18em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeOutgoingCore .bridgeArtist,
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeIncomingCore .bridgeArtist {
+  text-shadow:
+    0 0 .065em color-mix(in srgb, currentColor 18%, transparent),
+    0 0 .20em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeOutgoingCore .bridgeAlbumLine,
+.fullVisuals.trackHandoff[data-light-ambient='false'] .bridgeIncomingCore .bridgeAlbumLine {
+  text-shadow:
+    0 0 .05em color-mix(in srgb, currentColor 14%, transparent),
+    0 0 .16em color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.bridgeOutgoingMass .bridgeTitle,
+.bridgeIncomingMass .bridgeTitle,
+.bridgeOutgoingMass .bridgeArtist,
+.bridgeIncomingMass .bridgeArtist,
+.bridgeOutgoingMass .bridgeAlbumLine,
+.bridgeIncomingMass .bridgeAlbumLine {
+  filter: blur(var(--sx-bridge-mass-blur, 3px));
+  text-shadow: 0 0 .10em color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.liveLabel {
+  margin-bottom: var(--sx-space-phi);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: var(--sx-system-size);
+  text-transform: uppercase;
+}
+
+.titleShell {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.titleNormal,
+.titleMeasure,
+.bridgeTitle {
+  width: 100%;
+  margin: 0;
+  padding: .015em 0 0;
+  font-family: 'SX Die Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--sx-title-size);
+  line-height: 1.01;
+  letter-spacing: 0;
+  font-kerning: normal;
+  font-feature-settings: 'kern' 1;
+  text-indent: calc(-1 * var(--sx-title-optical-inset));
+  word-break: normal;
+  overflow-wrap: normal;
+  text-wrap: balance;
+}
+
+.titleNormal {
+  overflow: visible;
+}
+
+.bridgeTitle {
+  overflow: visible;
+}
+
+.titleMeasure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.titleCjk {
+  font-family: 'Noto Sans CJK JP', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.artist,
+.bridgeArtist {
+  margin-top: var(--sx-title-artist-gap, 10px);
+  font-size: var(--sx-artist-size);
+  line-height: 1.02;
+  letter-spacing: -.005em;
+  font-kerning: normal;
+  font-feature-settings: 'kern' 1;
+  text-indent: calc(-1 * var(--sx-artist-optical-inset));
+}
+
+.albumLine,
+.bridgeAlbumLine {
+  margin-top: var(--sx-artist-album-gap, 5px);
+  color: color-mix(in srgb, currentColor 84%, transparent);
+  font-size: var(--sx-album-size);
+  line-height: 1.25;
+  letter-spacing: 0;
+  font-kerning: normal;
+  font-feature-settings: 'kern' 1;
+  text-indent: calc(-1 * var(--sx-album-optical-inset));
+}
+
+.coverPlate {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  width: var(--sx-cover-size);
+  aspect-ratio: 1;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, currentColor 58%, transparent);
+  box-sizing: border-box;
+  border-radius: 10px;
+  overflow: clip;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--sx-opposing) 12%, transparent);
+  box-shadow: 0 .20em .45em color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.coverHandoff {
+  overflow: clip;
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true'] .coverPlate {
+  box-shadow:
+    0 .12em .28em color-mix(in srgb, currentColor 10%, transparent),
+    0 .38em .95em color-mix(in srgb, currentColor 6%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] .coverPlate {
+  box-shadow:
+    0 0 .10em color-mix(in srgb, currentColor 16%, transparent),
+    0 0 .42em color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.coverLayer {
+  position: absolute;
+  inset: 0;
+  will-change: opacity;
+}
+
+.coverOutgoing {
+  opacity: var(--sx-cover-out-opacity, 1);
+}
+
+.coverIncoming {
+  opacity: var(--sx-cover-in-opacity, 0);
+}
+
+.progressBlock { width: 100%; margin-top: var(--sx-song-playback-gap, 22px); }
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: var(--sx-system-size);
+  line-height: 1.25;
+}
+
+.progressTrack {
+  position: relative;
+  height: 1px;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 32%, transparent);
+}
+
+.progressFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: currentColor;
+}
+
+.trackFacts {
+  display: -webkit-box;
+  width: 100%;
+  margin-top: var(--sx-timeline-facts-gap, 8px);
+  overflow: hidden;
+  color: color-mix(in srgb, currentColor 57%, transparent);
+  font-size: var(--sx-system-size);
+  line-height: 1.5;
+  letter-spacing: .035em;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.trackFacts > .metaTag {
+  min-height: 1.25em;
+  margin-right: 5px;
+  padding: .12em .36em .10em;
+  vertical-align: baseline;
+}
+
+.genreFacts {
+  min-width: 0;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: clamp(2px, .55vw, 9px);
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  font-size: var(--sx-control-size);
+}
+.controls::-webkit-scrollbar { display: none; }
+.controls > * { flex-shrink: 0; }
+.lyricsIcon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: .22em;
+  vertical-align: -.12em;
+  flex-shrink: 0;
+}
+
+
+.action,
+.textAction,
+.sendAction {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.action {
+  padding: var(--sx-space-u) var(--sx-space-invphi);
+  transition: color 70ms linear, background-color 70ms linear;
+}
+
+.action:not(:disabled):hover,
+.action:not(:disabled):focus-visible,
+.textAction:not(:disabled):hover,
+.textAction:not(:disabled):focus-visible,
+.sendAction:not(:disabled):hover,
+.sendAction:not(:disabled):focus-visible {
+  color: var(--sx-opposing);
+  background: var(--sx-fg);
+  outline: 0;
+}
+
+.action:disabled,
+.textAction:disabled,
+.sendAction:disabled {
+  cursor: default;
+  opacity: .48;
+}
+
+.volumeGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.volumeGroup .action:first-child {
+  margin-right: var(--sx-space-invphi);
+}
+
+.volumeReadout {
+  padding: var(--sx-space-u) var(--sx-space-invphi);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+
+.requestSection {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
+  container-type: inline-size;
+  padding: 68px 0 66px;
+  border-top: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.feedSection {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 980px;
+  --sx-air-title-size: clamp(24px, 2.35vw, 30px);
+  --sx-air-art-size: clamp(88px, 7.8vw, 116px);
+  width: 100%;
+  margin-inline: auto;
+  padding: 92px 0 84px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: var(--sx-space-phi);
+}
+
+.sectionHeader .liveLabel { margin-bottom: 0; }
+
+.requestForm { display: grid; gap: 19px; }
+
+.requestLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+  width: 100%;
+}
+
+.requestInputWrap {
+  --sx-request-size: clamp(50px, 5.2vw, 66px);
+  display: grid;
+  min-width: 0;
+  border-bottom: 1px solid currentColor;
+}
+
+.requestInputWrap textarea,
+.fromLine input {
+  appearance: none;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  outline: 0;
+}
+
+.requestInputWrap textarea,
+.requestHintGhost {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 1em;
+  padding: 0 0 10px;
+  font-family: 'SX Die Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  font-size: var(--sx-request-size);
+  line-height: 1.03;
+  letter-spacing: -.02em;
+}
+
+.requestInputWrap textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  overflow-x: hidden;
+  resize: none;
+}
+
+.requestHintGhost {
+  position: relative;
+  z-index: 0;
+  display: block;
+  align-self: start;
+  color: color-mix(in srgb, currentColor 48%, transparent);
+  pointer-events: none;
+  user-select: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.fromLine input::placeholder { color: color-mix(in srgb, currentColor 48%, transparent); }
+
+.sendAction {
+  align-self: end;
+  padding: 0 5px 10px;
+  font-size: 14px;
+}
+
+.fromLine {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: clamp(17px, 1.45vw, 20px);
+}
+
+.fromLine input {
+  padding: 0;
+  font: inherit;
+}
+
+.ackRow { min-width: 0; }
+
+.ackRow p {
+  max-width: 940px;
+  margin: 0;
+  overflow-wrap: break-word;
+  font-size: clamp(40px, 4.7vw, 58px);
+  line-height: .98;
+  letter-spacing: -.03em;
+}
+
+.textAction { padding: 6px 5px; font-size: 13px; }
+
+.airLogList {
+  border-top: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.airRow {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 150px;
+  display: grid;
+  grid-template-columns: clamp(72px, 7vw, 104px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sx-space-phi2);
+  padding: var(--sx-space-phi2) 0 var(--sx-space-phi3);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.airRowWithArt {
+  grid-template-columns: clamp(72px, 7vw, 104px) var(--sx-air-art-size) minmax(0, 1fr);
+}
+
+.airRowWithArt .airBody { grid-column: 3; }
+
+.airArtwork {
+  grid-column: 2;
+  width: var(--sx-air-art-size);
+  aspect-ratio: 1;
+  margin: 0;
+  box-sizing: border-box;
+  overflow: clip;
+  border: 1px solid color-mix(in srgb, currentColor 58%, transparent);
+  border-radius: 10px;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--sx-opposing) 12%, transparent);
+  box-shadow: 0 .16em .36em color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.airArtwork img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='true'] .airArtwork {
+  box-shadow:
+    0 .10em .24em color-mix(in srgb, currentColor 9%, transparent),
+    0 .30em .76em color-mix(in srgb, currentColor 5%, transparent);
+}
+
+:is(.fullVisuals, .liteVisuals)[data-light-ambient='false'] .airArtwork {
+  box-shadow:
+    0 0 .08em color-mix(in srgb, currentColor 14%, transparent),
+    0 0 .34em color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.airStamp {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: clamp(15px, 1.25vw, 17px);
+  line-height: 1.15;
+}
+
+.nextAirRow {
+  padding-top: var(--sx-space-phi2);
+  padding-bottom: var(--sx-space-phi3);
+}
+
+:is(.nextAirRow, .currentAirRow) .airStamp {
+  color: color-mix(in srgb, currentColor 76%, transparent);
+  letter-spacing: .05em;
+}
+
+.nextPending {
+  color: color-mix(in srgb, currentColor 58%, transparent);
+}
+
+.airBody { min-width: 0; }
+
+.airTrack {
+  min-width: 0;
+  font-size: var(--sx-air-title-size);
+  line-height: 1;
+  letter-spacing: -.015em;
+}
+
+.airTrack strong { font-weight: 400; }
+.airTrack span { color: color-mix(in srgb, currentColor 72%, transparent); }
+
+.airMeta {
+  margin-top: var(--sx-space-invphi);
+  color: color-mix(in srgb, currentColor 52%, transparent);
+  font-size: clamp(13px, 1.35vw, 17px);
+  line-height: 1.2;
+}
+
+.airReason {
+  max-width: 720px;
+  margin: var(--sx-space-phi) 0 0;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: clamp(16px, 1.7vw, 18px);
+  line-height: 1.08;
+  letter-spacing: -.01em;
+}
+
+.airSpeaker {
+  margin-bottom: 8px;
+  color: color-mix(in srgb, currentColor 66%, transparent);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.airVoice {
+  max-width: 720px;
+  margin: 0;
+  font-size: clamp(27px, 3.2vw, 36px);
+  line-height: 1;
+  letter-spacing: -.03em;
+}
+
+.voiceAirRow {
+  padding-top: 27px;
+  padding-bottom: 31px;
+}
+
+.bottomSpace { height: 42px; }
+
+.frame {
+  position: absolute;
+  z-index: 80;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  color: var(--sx-fg, #feffff);
+  pointer-events: none;
+  transition: color 3200ms cubic-bezier(.22,.61,.36,1);
+}
+
+.framePath {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--sx-frame-stroke);
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+
+.frameClock {
+  fill: currentColor;
+  font-family: 'SX 3270', '3270 Nerd Font', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--sx-frame-clock);
+  font-weight: 400;
+  font-variant-ligatures: none;
+  dominant-baseline: middle;
+  text-anchor: middle;
+}
+
+.tuneOverlay {
+  position: absolute;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #feffff;
+  background: rgba(4, 4, 4, .46);
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 240ms ease;
+}
+
+.fullVisuals .tuneOverlay {
+  transition-duration: 1100ms;
+  transition-timing-function: cubic-bezier(.22,.61,.36,1);
+}
+
+.liteVisuals .tuneOverlay { transition: none; }
+
+.tuneOverlayReleasing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tuneGate {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.bootGauge {
+  --sx-boot-progress: 25%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: clamp(150px, 12vw, 220px);
+  height: 6px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Ratatui LineGauge vocabulary: one horizontal symbol/rail, with filled and
+ * unfilled portions distinguished by contrast rather than a sweeping shimmer. */
+.bootGaugeTrack,
+.bootGaugeFill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  content: '';
+}
+
+.bootGaugeTrack {
+  width: 100%;
+  background: rgba(254,255,255,.32);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+
+.bootGaugeFill {
+  width: var(--sx-boot-progress);
+  min-width: 10%;
+  background: #feffff;
+  box-shadow: 0 0 5px rgba(254,255,255,.42);
+  transition: width 160ms steps(4, end);
+}
+
+.tuneGateBooting .bootGauge {
+  opacity: 1;
+}
+
+.tuneGateBooting .tunePrompt,
+.tuneGateBooting .performanceSelector {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tuneGateReady .tunePrompt,
+.tuneGateReady .performanceSelector {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.tunePrompt {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  font-family: 'SX 3270', '3270 Nerd Font', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: clamp(16px, 1.7vw, 21px);
+  line-height: 1;
+}
+
+.tunePrompt::before,
+.tunePrompt::after {
+  width: clamp(34px, 5vw, 72px);
+  height: 1px;
+  background: currentColor;
+  content: '';
+  opacity: .46;
+  transform-origin: center;
+}
+
+.tunePrompt:hover,
+.tunePrompt:focus-visible {
+  color: var(--sx-opposing);
+  background: var(--sx-fg);
+  outline: 0;
+}
+
+.tunePrompt:hover::before,
+.tunePrompt:hover::after,
+.tunePrompt:focus-visible::before,
+.tunePrompt:focus-visible::after {
+  background: var(--sx-opposing);
+  opacity: 1;
+}
+
+.tuneGateStarting .tunePrompt::before,
+.tuneGateStarting .tunePrompt::after {
+  animation: sx-gate-line-breathe 850ms ease-in-out infinite alternate;
+}
+
+.tuneGateStarting .tunePrompt > span {
+  animation: sx-gate-text-breathe 850ms ease-in-out infinite alternate;
+}
+
+.fullVisuals .tuneOverlayReleasing .tuneGateReady .tunePrompt,
+.fullVisuals .tuneOverlayReleasing .tuneGateReady .performanceSelector {
+  animation: sx-gate-phosphor-out 1100ms cubic-bezier(.22,.61,.36,1) both;
+}
+
+.tunePrompt:disabled,
+.performanceChoice:disabled {
+  cursor: default;
+}
+
+.performanceSelector {
+  position: absolute;
+  top: calc(50% + var(--sx-space-phi3));
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .20em;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  font-family: 'SX 3270', '3270 Nerd Font', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: clamp(13px, 1.15vw, 16px);
+  line-height: 1;
+}
+
+.performanceChoice {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  padding: .14em .24em .12em;
+  color: color-mix(in srgb, currentColor 68%, transparent);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.performanceSlash {
+  color: color-mix(in srgb, currentColor 42%, transparent);
+}
+
+.performanceChoice:hover,
+.performanceChoice:focus-visible,
+:global(html:not(.lite)) .performanceFull,
+:global(html.lite) .performanceLite {
+  color: #040404;
+  background: #feffff;
+  outline: 0;
+}
+
+.rendererReveal.fullVisuals .scrollport {
+  animation: sx-full-surface-reveal 2200ms cubic-bezier(.22,.61,.36,1) both;
+}
+
+@keyframes sx-gate-line-breathe {
+  from { transform: scaleX(.82); opacity: .30; }
+  to { transform: scaleX(1.08); opacity: .70; }
+}
+
+@keyframes sx-gate-text-breathe {
+  from { opacity: .72; }
+  to { opacity: 1; }
+}
+
+@keyframes sx-gate-phosphor-out {
+  0% {
+    opacity: 1;
+    filter: none;
+    text-shadow: none;
+  }
+  46% {
+    opacity: .78;
+    filter: blur(.25px) brightness(1.03);
+    text-shadow:
+      -.028em .006em 6px color-mix(in srgb, currentColor 22%, transparent),
+       .017em 0 5px color-mix(in srgb, currentColor 12%, transparent),
+       .034em -.004em 7px color-mix(in srgb, currentColor 20%, transparent);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(1.5px) brightness(1.07);
+    text-shadow:
+      -.060em .012em 10px color-mix(in srgb, currentColor 32%, transparent),
+       .034em .006em 8px color-mix(in srgb, currentColor 18%, transparent),
+       .068em -.008em 11px color-mix(in srgb, currentColor 29%, transparent);
+  }
+}
+
+@keyframes sx-full-surface-reveal {
+  0% {
+    opacity: .18;
+    filter: grayscale(1) blur(4.2px) brightness(.84);
+    transform: scale(1.002);
+  }
+  38% {
+    opacity: .52;
+    filter: grayscale(.72) blur(2.2px) brightness(.94);
+    transform: scale(1.001);
+  }
+  72% {
+    opacity: .86;
+    filter: grayscale(.24) blur(.65px) brightness(.99);
+    transform: scale(1.0003);
+  }
+  100% {
+    opacity: 1;
+    filter: none;
+    transform: translateZ(0);
+  }
+}
+
+.crt {
+  position: absolute;
+  z-index: 140;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  filter: none;
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.fullVisuals .crt { opacity: 1; }
+
+/* Newpixie P19: both foreground polarities use absorptive modulation.
+ * The shader reverses the mask phase on a bright scene; SCREEN + invert
+ * previously made the CRT almost invisible against white backgrounds. */
+.fullVisuals[data-light-ambient='true'] .crt {
+  mix-blend-mode: multiply;
+  filter: none;
+  opacity: 1;
+}
+
+
+.geometryProbe {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100dvh - (var(--sx-safe-y) * 2));
+  visibility: hidden;
+  pointer-events: none;
+  contain: layout style paint;
+}
+
+@container (max-width: 660px) {
+  .requestLine {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .sendAction {
+    justify-self: start;
+    padding: 8px 5px 0;
+  }
+
+  .fromLine { width: 100%; }
+}
+
+@media (orientation: portrait) {
+  .nowGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sx-space-phi2);
+  }
+
+  .coverPlate {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  .nowCopy {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .identityBridge { grid-row: 2; }
+
+  .trackFacts { -webkit-line-clamp: 3; }
+}
+
+@media (orientation: portrait) and (max-width: 760px) {
+  /* Readable first paint even before the adaptive fitter runs. The fitter
+   * applies the same compact portrait range against the real player budget. */
+  .heroStage {
+    --sx-title-size: clamp(30px, 12vw, 56px);
+    --sx-artist-size: 24px;
+  }
+  .titleNormal,
+  .bridgeTitle { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 760px) {
+  .root {
+    --sx-frame-inset: 11px;
+    --sx-frame-stroke: 1.25px;
+    --sx-frame-clock: 16px;
+    --sx-safe-y: 22px;
+    --sx-content-width: 100%;
+  }
+
+  .page { width: calc(100% - var(--sx-space-phi3) - var(--sx-space-phi3)); }
+
+  .nowGrid {
+    gap: var(--sx-space-phi);
+  }
+
+  .controls { gap: clamp(2px, .7vw, 7px); }
+
+  .requestSection { padding: 60px 0 56px; }
+  .feedSection { padding: 64px 0 56px; }
+
+  .requestInputWrap { --sx-request-size: clamp(38px, 9.5vw, 50px); }
+
+  .feedSection {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 980px;
+    --sx-air-title-size: clamp(18px, 5.6vw, 22px);
+    --sx-air-art-size: clamp(68px, 20vw, 84px);
+  }
+
+  .airRow {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 150px;
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: var(--sx-space-phi);
+    padding: var(--sx-space-phi2) 0 var(--sx-space-phi3);
+  }
+  .airRowWithArt {
+    grid-template-columns: 58px var(--sx-air-art-size) minmax(0, 1fr);
+  }
+  .airStamp { font-size: 14px; }
+  .airMeta { font-size: 12px; }
+  .airReason { font-size: clamp(15px, 4.5vw, 18px); }
+  .airSpeaker { font-size: 10px; }
+  .airVoice { font-size: clamp(24px, 7vw, 32px); }
+}
+
+@media (max-width: 480px) {
+  .page { width: calc(100% - var(--sx-space-phi2) - var(--sx-space-phi2)); }
+  /* A tall portrait title may push the only Lyrics entry point below the
+   * first viewport. Keep the existing controls row reachable while scrolling
+   * its own hero, without duplicating controls or covering REQUEST afterward.
+   * In a fitting hero, sticky has no positional effect. */
+  .heroStage > .controls {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: transparent;
+  }
+  .nowGrid { gap: var(--sx-space-u); }
+  .airRow { grid-template-columns: 50px minmax(0, 1fr); }
+  .airRowWithArt { grid-template-columns: 50px 64px minmax(0, 1fr); }
+  .airArtwork { width: 64px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root,
+  .ambientBase,
+  .kawarp,
+  .action,
+  .nowCluster,
+  .tuneOverlay, .trackCorridor, .lyricsPendingDots { transition: none; animation: none; }
+  .heroStage { transition: none; }
+
+  .trackRewrite .nowCopy,
+  .trackRewrite .coverPlate { animation: none; }
+}
+
+/* Phosphor treatment is intentionally achromatic. Earlier versions mounted
+ * an RGB channel-separation SVG filter here and added red/blue clock shadows;
+ * those were the direct source of the persistent coloured fringe. Keep a soft
+ * luma-only clock halo and let artwork/Kawarp carry the only scene colour. */
+:is(.fullVisuals, .liteVisuals) .frameClock {
+  text-shadow:
+    0 0 4px color-mix(in srgb, currentColor 14%, transparent),
+    0 0 10px color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.liteVisuals[data-light-ambient='false'] .framePath {
+  filter: drop-shadow(0 0 .7px color-mix(in srgb, currentColor 12%, transparent)) drop-shadow(0 0 3.8px color-mix(in srgb, currentColor 4.5%, transparent));
+}
+
+.liteVisuals[data-light-ambient='true'] .framePath {
+  filter: drop-shadow(0 .35px .7px color-mix(in srgb, currentColor 18%, transparent)) drop-shadow(0 1.5px 3.8px color-mix(in srgb, currentColor 6%, transparent));
+}
+
+/* v25: startup gauge is an inline critical veil, so it remains coherent even before CSS modules/fonts arrive. */
+.bootGauge { display: none !important; }
+
+/* P12: keep one controls rail in compact embedded and zoomed windows too. */
+.contained .controls { width: 100%; }
+@media (max-width: 480px) {
+  .heroStage .lyricsTrackIdentity { max-width: 68%; }
+  .controls { scroll-padding-inline: var(--sx-space-u); }
+}

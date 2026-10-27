@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import {
   createContext,
   useCallback,
@@ -59,7 +60,15 @@ export function useThemeSwitcher(): ThemeContextValue | null {
 // Light vs dark is a property of the palette, not a listener control: each theme
 // declares its own mode. The 30s poll is the upper bound on how long a listener
 // sees the old theme after an operator switch.
-export default function ThemeProvider({ children }: { children?: ReactNode }) {
+export default function ThemeProvider({
+  children,
+  homepagePlayer = true,
+}: {
+  children?: ReactNode;
+  homepagePlayer?: boolean;
+}) {
+  const pathname = usePathname();
+  const sxntaxPlayerRoute = pathname === '/listen' || (homepagePlayer && pathname === '/');
   const [themes, setThemes] = useState<Theme[]>([]);
   const [stationActiveId, setStationActiveId] = useState<string | null>(null);
   const [overrideId, setOverrideIdState] = useState<string | null>(null);
@@ -72,8 +81,9 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
   // localStorage is only safe to touch in an effect, so SSR renders cleanly. The
   // pre-paint <script> already painted, so the one-tick lag is invisible.
   useEffect(() => {
+    if (sxntaxPlayerRoute) return;
     setOverrideIdState(loadThemeOverride());
-  }, []);
+  }, [sxntaxPlayerRoute]);
 
   // Refs so the polling loop resolves the effective appearance without
   // re-creating itself on every state change.
@@ -120,10 +130,13 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
   }, [applyEffective]);
 
   useEffect(() => {
+    // SXNTAX derives its palette/polarity from artwork and does not consume the
+    // station theme registry. Keep /themes off the player's startup network.
+    if (sxntaxPlayerRoute) return;
     refreshThemes();
     const id = setInterval(refreshThemes, 30_000);
     return () => clearInterval(id);
-  }, [refreshThemes]);
+  }, [refreshThemes, sxntaxPlayerRoute]);
 
   // Applies without waiting for the next poll.
   const setOverride = useCallback(

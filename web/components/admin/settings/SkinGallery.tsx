@@ -123,6 +123,27 @@ function DriftPreview() {
   );
 }
 
+
+function SxntaxPreview() {
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[#040404] text-[#feffff]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_28%,rgba(32,176,192,.42),transparent_34%),radial-gradient(circle_at_22%_80%,rgba(128,16,112,.34),transparent_38%)]" />
+      <div className="absolute inset-2 rounded-[5px] border border-[#feffff]/75">
+        <span className="absolute top-[-4px] left-1/2 -translate-x-1/2 bg-[#040404] px-1 font-mono text-[5px] leading-none text-[#feffff]/80">02:17:41</span>
+      </div>
+      <div className="absolute inset-x-[18%] top-[28%] grid gap-1">
+        <span className="font-mono text-[5px] leading-none text-[#feffff]/55">/radio/sxntax</span>
+        <span className="h-[8px] w-4/5 bg-[#feffff]" />
+        <span className="h-[3px] w-1/2 bg-[#feffff]/65" />
+        <div className="mt-2 flex items-center gap-1">
+          <span className="size-5 border border-[#feffff]/65 bg-[#feffff]/15" />
+          <span className="h-px flex-1 bg-[#feffff]/55" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubampPreview() {
   return (
     <div className="flex h-full w-full flex-col gap-1 bg-[color-mix(in_oklab,var(--bg)_88%,var(--ink))] p-2.5">
@@ -207,6 +228,7 @@ function PlatterPreview() {
 }
 
 const PREVIEWS: Record<string, () => ReactNode> = {
+  sxntax: SxntaxPreview,
   classic: ClassicPreview,
   unit: UnitPreview,
   drift: DriftPreview,

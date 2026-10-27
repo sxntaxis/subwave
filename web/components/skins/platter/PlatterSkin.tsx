@@ -155,13 +155,13 @@ export default function PlatterSkin(_props: SkinProps) {
   const client = useStationClient();
   const {
     nowPlaying, context, dj, activeShow, listeners, state, session,
-    trackStartedAt, timezone, locale,
+    trackStartedAt, trackPausedAt, stationClock, timezone, locale,
   } = usePlayerFeed();
   const { tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showTuneIn, showOverlay, tuneInFromOverlay, handleTune } = useTuneInGate();
 
-  const elapsed = useElapsed(trackStartedAt);
+  const elapsed = useElapsed(trackStartedAt, trackPausedAt, stationClock);
   const listenerCount = listenerCountOf(listeners);
   const { stationName, djName, showName } = stationIdentity(dj, activeShow, context);
   const meta = trackMeta(nowPlaying);
@@ -287,9 +287,9 @@ export default function PlatterSkin(_props: SkinProps) {
                 <button
                   type="button"
                   onClick={() => void like.like()}
-                  disabled={like.pending || like.liked}
+                  disabled={like.pending}
                   aria-pressed={like.liked}
-                  aria-label={like.liked ? 'Liked' : 'Like this track'}
+                  aria-label={like.liked ? 'Unlike this track' : 'Like this track'}
                   className={cn(
                     'v3-focus flex size-14 flex-col items-center justify-center rounded-full border border-ink font-mono text-[9px] font-bold tracking-[0.1em]',
                     like.liked ? 'bg-[var(--accent)] text-bg' : 'cursor-pointer bg-bg hover:bg-[var(--field)]',

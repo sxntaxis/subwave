@@ -17,6 +17,20 @@
 # floor; the runner stage re-checks it at build time rather than trusting the
 # tag. Do not move this back to 22.
 
+# ---- SXNTAX font subset ---------------------------------------------------
+# Build-only Python stage: reduce the 2.75 MB patched Nerd Font to the small
+# text/icon vocabulary actually used by SXNTAX. No font tooling ships in the
+# runtime image.
+FROM python:3.12-slim-bookworm AS sxntaxfont
+WORKDIR /src
+RUN python -m pip install --no-cache-dir fonttools==4.63.0 brotli==1.1.0
+COPY tools/build-sxntax-nerdfont.py /src/tools/build-sxntax-nerdfont.py
+COPY web/ /src/web/
+RUN python /src/tools/build-sxntax-nerdfont.py \
+      --source /src/web/public/fonts/3270NerdFont-Regular.ttf \
+      --output /out/3270SXNTAX-Regular.woff2 \
+      --scan-root /src/web
+
 # ---- deps ----
 FROM node:24-bookworm-slim AS deps
 WORKDIR /app
@@ -28,6 +42,8 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/ ./
+COPY --from=sxntaxfont /out/3270SXNTAX-Regular.woff2 ./public/fonts/3270SXNTAX-Regular.woff2
+RUN rm -f ./public/fonts/3270NerdFont-Regular.ttf
 ENV NEXT_TELEMETRY_DISABLED=1
 # Public site origin. The routes that emit absolute URLs (canonicals, og:url,
 # robots, sitemap) all render per-request now and read the RUNTIME container

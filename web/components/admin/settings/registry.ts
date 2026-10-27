@@ -191,7 +191,7 @@ export const SETTINGS_INDEX: readonly IndexEntry[] = [
   { label: 'Password', section: 'music', card: 'Navidrome server', keywords: 'navidrome subsonic secret salt token' },
 
   // skin & themes
-  { label: 'Station skin', section: 'theme', card: 'Player skin', keywords: 'classic unit platter drift subamp tty listen face' },
+  { label: 'Station skin', section: 'theme', card: 'Player skin', keywords: 'sxntax radio classic unit platter drift subamp tty listen face' },
   { label: 'Active theme', section: 'theme', card: 'Themes', keywords: 'palette colours colors newsprint nightshift dark light' },
   { label: 'Show the tune-in overlay', section: 'theme', card: 'Tune-in overlay', keywords: 'gate tap to listen splash' },
   { label: 'Show the Booth Sprite', section: 'theme', card: 'Booth Buddy', keywords: 'mascot sprite request box' },

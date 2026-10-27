@@ -29,15 +29,24 @@ import type { RequestResult } from '@/lib/types';
 
 export interface PlayerAudio {
   audioRef: RefObject<HTMLAudioElement | null>;
+  audioElement: HTMLAudioElement | null;
+  mediaSourceRevision: number;
   /** Ref callback for the shell's <audio> element. Skins read audioRef; only
    *  the shell that renders the element attaches it, and it must use this
    *  rather than audioRef so the hook sees a remount (see usePlayer). */
   attachAudio: (el: HTMLAudioElement | null) => void;
   tunedIn: boolean;
   status: PlayerStatus;
+  attemptMediaStatus: PlayerStatus | 'error';
   volume: number;
   muted: boolean;
   idleStopped: boolean;
+  attemptId: number;
+  attemptStartedAt: number | null;
+  attemptStartedIdle: boolean;
+  clockAdvanced: boolean;
+  mediaWaiting: boolean;
+  playFailure: string | null;
   /** Stream confirmed offline. useStationFeed's streamOnline is null until the
    *  first poll and only flips false after the confirm window. */
   offline: boolean;
@@ -56,7 +65,7 @@ export interface PlayerActions {
   pollRequest: (requestId: string) => Promise<RequestResult | null>;
   /** Like the currently playing track (#991). null on network error; error
    *  statuses come back as a LikeResult with `error`. */
-  likeCurrent: (songId: string) => Promise<LikeResult | null>;
+  likeCurrent: (songId: string, liked?: boolean) => Promise<LikeResult | null>;
   /** Liked-state + count for the current airing. null on network error. */
   likeStatus: () => Promise<LikeStatus | null>;
 }
@@ -90,9 +99,12 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const feed = useStationFeed();
   const {
     audioRef,
+    audioElement,
+    mediaSourceRevision,
     attachAudio,
     tunedIn,
     status,
+    attemptMediaStatus,
     volume,
     setVolume,
     tune,
@@ -100,7 +112,16 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     toggleMute,
     muted,
     idleStopped,
-  } = usePlayer({ opusEnabled: feed.opusEnabled });
+    attemptId,
+    attemptStartedAt,
+    attemptStartedIdle,
+    clockAdvanced,
+    mediaWaiting,
+    playFailure,
+  } = usePlayer({
+    opusEnabled: feed.opusEnabled,
+    streamIdle: (feed.state as typeof feed.state & { streamIdle?: boolean }).streamIdle === true,
+  });
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;
@@ -136,7 +157,7 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
         return client.submitRequest(parsed.data.text, parsed.data.name);
       },
       pollRequest: requestId => client.requestStatus(requestId),
-      likeCurrent: songId => client.likeCurrent(songId),
+      likeCurrent: (songId, liked) => client.likeCurrent(songId, liked),
       likeStatus: () => client.likeStatus(),
     }),
     [setVolume, client],
@@ -172,25 +193,27 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   // reference-stable. Memoize on the fields so a volume drag doesn't cascade
   // into every feed consumer.
   const {
-    nowPlaying, context, dj, activeShow, listeners, streamOnline,
-    llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale,
+    stationClock, nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
+    llmTokens, state, session, trackStartedAt, trackPausedAt, opusEnabled, timezone, locale, stateSampleStartedAt, reconciliationId,
   } = feed;
   const feedValue = useMemo<StationFeed>(
     () => ({
-      nowPlaying, context, dj, activeShow, listeners, streamOnline,
-      llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale,
+      stationClock, nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
+      llmTokens, state, session, trackStartedAt, trackPausedAt, opusEnabled, timezone, locale, stateSampleStartedAt, reconciliationId,
     }),
-    [nowPlaying, context, dj, activeShow, listeners, streamOnline,
-     llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale],
+    [stationClock, nowPlaying, context, dj, activeShow, listeners, streamOnline, stream,
+      llmTokens, state, session, trackStartedAt, trackPausedAt, opusEnabled, timezone, locale, stateSampleStartedAt, reconciliationId],
   );
 
   const { latencyMs, quality } = signal;
   const audioValue = useMemo<PlayerAudio>(
     () => ({
-      audioRef, attachAudio, tunedIn, status, volume, muted, idleStopped, offline,
+      audioRef, audioElement, mediaSourceRevision, attachAudio, tunedIn, status, volume, muted, idleStopped, offline,
+      attemptId, attemptStartedAt, attemptStartedIdle, clockAdvanced, mediaWaiting, playFailure, attemptMediaStatus,
       signal: { latencyMs, quality },
     }),
-    [audioRef, attachAudio, tunedIn, status, volume, muted, idleStopped, offline, latencyMs, quality],
+    [audioRef, audioElement, mediaSourceRevision, attachAudio, tunedIn, status, volume, muted, idleStopped, offline,
+     attemptId, attemptStartedAt, attemptStartedIdle, clockAdvanced, mediaWaiting, playFailure, attemptMediaStatus, latencyMs, quality],
   );
 
   return (

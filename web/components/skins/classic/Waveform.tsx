@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useAnalyser } from '@/lib/hooks';
 import { pollWhileVisible } from '@/lib/poll';
+import { playbackElapsedSeconds } from '@/lib/playbackTime';
+import type { StationClock } from '@/lib/stationClock';
 
 const BARS = 120;
 
@@ -72,13 +74,15 @@ export interface WaveformProps {
   tunedIn: boolean;
   /** Epoch ms when the current track started (from useStationFeed). */
   trackStartedAt: number | null;
+  trackPausedAt: number | null;
+  stationClock: StationClock;
   /** Track length in seconds — 0/undefined parks the progress split at 0. */
   duration: number;
 }
 
 // One canvas paint per frame rather than 120 styled spans: ~0.25 ms/frame
 // against ~2.8 ms, which is what lets the strip run on Pi-class devices.
-export default memo(function Waveform({ audioRef, tunedIn, trackStartedAt, duration }: WaveformProps) {
+export default memo(function Waveform({ audioRef, tunedIn, trackStartedAt, trackPausedAt, stationClock, duration }: WaveformProps) {
   const { ready, read, sampleRate } = useAnalyser(audioRef, tunedIn);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelsRef = useRef<Float32Array>(new Float32Array(BARS));
@@ -114,10 +118,12 @@ export default memo(function Waveform({ audioRef, tunedIn, trackStartedAt, durat
     return pollWhileVisible(() => {
       // Clamped at both ends: trackStartedAt is listener-time and can sit a few
       // seconds in the future on a cold load.
-      const progress = Math.max(0, Math.min(1, (Date.now() - trackStartedAt) / 1000 / duration));
+      const stationNow = stationClock.nowMs();
+      const progress = stationNow === null ? 0 :
+        Math.min(1, playbackElapsedSeconds(trackStartedAt, trackPausedAt, stationNow) / duration);
       setPastBars(Math.floor(progress * BARS));
     }, 1000);
-  }, [trackStartedAt, duration]);
+  }, [trackStartedAt, trackPausedAt, stationClock, duration]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;

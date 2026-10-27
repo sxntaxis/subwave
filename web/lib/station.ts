@@ -16,22 +16,30 @@ export interface StationIdentity {
 // un-personalised install reports this verbatim.
 export const DEFAULT_STATION = 'SUB/WAVE';
 
+const IDENTITY_CACHE_MS = 60_000;
+let identityCache: { value: StationIdentity; expiresAt: number } | null = null;
+
 // Returns null on any failure so the caller falls back to generic SUB/WAVE
 // branding. The preview must never break.
 export async function fetchStationIdentity(): Promise<StationIdentity | null> {
+  const now = Date.now();
+  if (identityCache && identityCache.expiresAt > now) return identityCache.value;
+
   try {
     const res = await fetch(`${CONTROLLER_BASE}/dj`, {
       cache: 'no-store',
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(350),
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return {
+    const value = {
       station: typeof data?.station === 'string' ? data.station : '',
       stationDescription:
         typeof data?.stationDescription === 'string' ? data.stationDescription : '',
       tagline: typeof data?.tagline === 'string' ? data.tagline : '',
     };
+    identityCache = { value, expiresAt: now + IDENTITY_CACHE_MS };
+    return value;
   } catch {
     return null;
   }

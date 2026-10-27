@@ -29,19 +29,29 @@ export default function PlayerPageEffects() {
   // count; the controller also dedupes by IP. Best-effort, never blocks.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try {
-      if (sessionStorage.getItem('sw_beacon')) return;
-      sessionStorage.setItem('sw_beacon', '1');
-    } catch {
-      /* private mode: no storage — proceed, the server dedupes by IP */
-    }
-    const q = new URLSearchParams(window.location.search);
-    const utmSource = q.get('utm_source') || q.get('ref') || q.get('source') || undefined;
-    defaultStationClient.beacon({
-      referrer: document.referrer || '',
-      path: window.location.pathname,
-      utmSource,
-    });
+    let timer: number | null = null;
+    let idle: number | null = null;
+    const send = () => {
+      try {
+        if (sessionStorage.getItem('sw_beacon')) return;
+        sessionStorage.setItem('sw_beacon', '1');
+      } catch {
+        /* private mode: no storage — proceed, the server dedupes by IP */
+      }
+      const q = new URLSearchParams(window.location.search);
+      const utmSource = q.get('utm_source') || q.get('ref') || q.get('source') || undefined;
+      defaultStationClient.beacon({
+        referrer: document.referrer || '',
+        path: window.location.pathname,
+        utmSource,
+      });
+    };
+    if (typeof window.requestIdleCallback === 'function') idle = window.requestIdleCallback(send, { timeout: 2500 });
+    else timer = window.setTimeout(send, 1200);
+    return () => {
+      if (idle != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle);
+      if (timer != null) window.clearTimeout(timer);
+    };
   }, []);
 
   return null;

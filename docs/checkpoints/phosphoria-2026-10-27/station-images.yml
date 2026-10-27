@@ -1,0 +1,14 @@
+services:
+  controller:
+    image: subwave-controller:phosphoria-baseline-2026-10-27
+    networks:
+      - default
+      - stella_internal
+  broadcast:
+    image: subwave-broadcast:phosphoria-baseline-2026-10-27
+    networks:
+      - default
+      - stella_internal
+networks:
+  stella_internal:
+    external: true

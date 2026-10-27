@@ -11,58 +11,18 @@ import { SKIN_API_VERSION, type SkinComponent, type SkinManifest } from './types
 
 export const SKINS: SkinManifest[] = [
   {
-    id: 'classic',
-    name: 'Classic',
+    id: 'sxntax',
+    name: 'sxntax',
     description:
-      'The original SUB/WAVE face — masthead, centre stage, waveform, transport deck.',
+      'The station face for radio.sxntax.shop — ambient artwork, Ratatui frame, and a vertical broadcast log.',
     skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./classic/ClassicSkin'),
-  },
-  {
-    id: 'unit',
-    name: 'Unit SW-9',
-    description:
-      'A tabletop receiver — milled aluminium, weighted knobs, one glowing dot-matrix window.',
-    skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./unit/UnitSkin'),
-  },
-  {
-    id: 'drift',
-    name: 'Drift',
-    description:
-      'Ninety percent weather, ten percent type — the cover art becomes the room.',
-    skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./drift/DriftSkin'),
-  },
-  {
-    id: 'subamp',
-    name: 'Subamp',
-    description:
-      "A compact modular player — deck, booth and log stacked like it's 1998.",
-    skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./subamp/SubampSkin'),
-  },
-  {
-    id: 'tty',
-    name: 'TTY',
-    description:
-      'The station as a live process — panes and a status line, everything tails.',
-    skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./tty/TtySkin'),
-  },
-  {
-    id: 'platter',
-    name: 'Platter',
-    description:
-      'The flagship vinyl face — a reference turntable is the interface, needle and all.',
-    skinApiVersion: SKIN_API_VERSION,
-    load: () => import('./platter/PlatterSkin'),
+    load: () => import('./sxntax/SxntaxSkin'),
   },
 ];
 
-// Id facts (default id, legacy aliases) live in lib/skin.ts so the server
-// layout's SKIN_INIT_SCRIPT derives from the same data without importing this
-// registry's next/dynamic wrappers.
+// Id facts remain in lib/skin.ts for settings/backward compatibility. The
+// public player no longer resolves a runtime skin because SXNTAX is the only
+// supported face.
 export { DEFAULT_SKIN_ID };
 
 export function isKnownSkin(id: string | null | undefined): id is string {
@@ -92,7 +52,7 @@ export const SKIN_COMPONENTS: Record<string, SkinComponent> = Object.fromEntries
 
 /** Concretely-typed last-resort fallback for indexed lookups (the registry is
  *  a string-keyed record, so TS can't prove a hit). The bundler dedupes this
- *  against the classic entry's chunk. */
+ *  against the registry entry's chunk. */
 export const DEFAULT_SKIN_COMPONENT: SkinComponent = dynamic(
-  () => import('./classic/ClassicSkin'),
+  () => import('./sxntax/SxntaxSkin'),
 ) as SkinComponent;

@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useInterval } from 'usehooks-ts';
 import { isIOSDevice } from './platform';
+import { mediaEventBelongsToAttempt } from './mediaAttemptEvidence';
+import {
+  EMPTY_AUDIO_SIGNAL_EVIDENCE,
+  observeAudioSignal,
+  rmsDbfs,
+  type AudioSignalEvidence,
+} from './audioSignalEvidence';
+import { playErrorClass, radioDiagnostic } from './radioDiagnostics';
 
 // SSR-safe iOS flag: false on the server and first client render, real value
 // after mount. For branching UI that can't work on iOS (issue #298).
@@ -115,8 +123,8 @@ export function useAnalyser(
         if (cancelled) return;
         setReady(true);
 
-        // Some non-iOS WebKit builds wire the graph up but return only zeros.
-        // Probe once after playback starts; no samples in ~600ms means fall back.
+    // Some non-iOS WebKit builds return zeros, but so does a legitimate quiet
+    // opening. A constructed graph remains readable so later signal can recover.
         if (probedRef.current) return;
         onPlaying = () => {
           if (probedRef.current || cancelled) return;
@@ -141,9 +149,10 @@ export function useAnalyser(
               if (probeInterval) clearInterval(probeInterval);
               probeInterval = null;
               if (max === 0) {
-                // Fall back but never disconnect: the source feeds the speakers
-                // through this graph, so tearing it down mutes playback.
-                setReady(false);
+                  // `ready` describes the graph, not evidence of audible signal.
+                  // Consumers already treat zero bins as passive/no signal. Do
+                  // not permanently suppress sampling after a silent opening.
+                  setReady(true);
               }
             }
           }, 50);
@@ -168,4 +177,212 @@ export function useAnalyser(
   }, []);
 
   return { ready, read, sampleRate };
+}
+
+export type AudioSignalProbeStatus = 'inactive' | 'sampling' | 'detected' | 'unavailable';
+
+export interface AudioSignalProbe {
+  attemptId: number;
+  status: AudioSignalProbeStatus;
+  contextState: AudioContext['state'] | 'interrupted' | 'unsupported' | null;
+  graphCreated: boolean | null;
+  failureClass: string | null;
+  evidence: AudioSignalEvidence;
+}
+
+interface AudioSignalProbeOptions {
+  audioEl: HTMLAudioElement | null;
+  active: boolean;
+  gateOpen: boolean;
+  tunedIn: boolean;
+  playFailure: string | null;
+  attemptId: number;
+  sourceRevision: number;
+  attemptStartedAt: number | null;
+}
+
+const EMPTY_AUDIO_SIGNAL_PROBE: AudioSignalProbe = {
+  attemptId: 0,
+  status: 'inactive',
+  contextState: null,
+  graphCreated: null,
+  failureClass: null,
+  evidence: EMPTY_AUDIO_SIGNAL_EVIDENCE,
+};
+
+const AUDIO_SIGNAL_SAMPLE_INTERVAL_MS = 100;
+
+function audioContextStateLabel(state: AudioContext['state'] | string): AudioSignalProbe['contextState'] {
+  if (state === 'running' || state === 'suspended' || state === 'closed') return state;
+  if (state === 'interrupted') return 'interrupted';
+  return 'unsupported';
+}
+
+function safeFailureClass(error: unknown): string {
+  const name = playErrorClass(error);
+  return name === 'UnknownError' ? 'OtherError' : name;
+}
+
+/**
+ * Short-lived, opt-in decoded-PCM probe on the player's existing element.
+ * The graph is owned by ELEMENT_GRAPHS and reused if a skin has already made it.
+ * Sampling is active only while the startup status is visible; no sampling loop
+ * is retained after detection, gate completion, Tune Out, source change or unmount.
+ */
+export function useAudioSignalProbe({
+  audioEl,
+  active,
+  gateOpen,
+  tunedIn,
+  playFailure,
+  attemptId,
+  sourceRevision,
+  attemptStartedAt,
+}: AudioSignalProbeOptions): AudioSignalProbe {
+  const [probe, setProbe] = useState<AudioSignalProbe>(EMPTY_AUDIO_SIGNAL_PROBE);
+  const latest = useRef({ active, gateOpen, tunedIn, playFailure, attemptId, sourceRevision });
+  latest.current = { active, gateOpen, tunedIn, playFailure, attemptId, sourceRevision };
+
+  useEffect(() => {
+    if (!active || !audioEl || attemptId <= 0) {
+      setProbe(current => current.attemptId === attemptId && current.status === 'detected'
+        ? current
+        : { ...EMPTY_AUDIO_SIGNAL_PROBE, attemptId });
+      return;
+    }
+
+    let cancelled = false;
+    let finished = false;
+    let timer: number | null = null;
+    let onVisibilityChange: (() => void) | null = null;
+    const expectedSource = audioEl.currentSrc || audioEl.src || null;
+    const graphCreated = !ELEMENT_GRAPHS.has(audioEl);
+    const samples = new Float32Array(4096);
+    const byteSamples = new Uint8Array(4096);
+    let evidence = EMPTY_AUDIO_SIGNAL_EVIDENCE;
+    let contextState: AudioSignalProbe['contextState'] = null;
+
+    const finish = (result: 'signal-detected' | 'no-signal-before-gate' | 'unavailable' | 'cancelled', failureClass: string | null = null) => {
+      if (finished) return;
+      finished = true;
+      if (timer != null) window.clearInterval(timer);
+      timer = null;
+      if (onVisibilityChange) document.removeEventListener('visibilitychange', onVisibilityChange);
+      onVisibilityChange = null;
+      const status: AudioSignalProbeStatus = result === 'signal-detected'
+        ? 'detected'
+        : result === 'unavailable' ? 'unavailable' : 'inactive';
+      const finalProbe: AudioSignalProbe = {
+        attemptId,
+        status,
+        contextState,
+        graphCreated,
+        failureClass,
+        evidence,
+      };
+      setProbe(finalProbe);
+      const detectionMs = evidence.detectedAtMs == null || attemptStartedAt == null
+        ? null
+        : evidence.detectedAtMs - attemptStartedAt;
+      radioDiagnostic(attemptId, 'audio-signal-probe', {
+        result,
+        contextState,
+        graphCreated,
+        sampleCount: evidence.sampleCount,
+        rmsMinDbfs: evidence.minRmsDbfs,
+        rmsMaxDbfs: evidence.maxRmsDbfs,
+        detectionMs,
+        errorClass: failureClass,
+      });
+    };
+
+    const setup = async () => {
+      if (isIOSDevice()) {
+        contextState = 'unsupported';
+        finish('unavailable', 'NotSupportedError');
+        return;
+      }
+      let graph: ElementAudioGraph | null;
+      try {
+        graph = getOrCreateElementGraph(audioEl);
+      } catch (error) {
+        finish('unavailable', safeFailureClass(error));
+        return;
+      }
+      if (!graph) {
+        contextState = 'unsupported';
+        finish('unavailable', 'NotSupportedError');
+        return;
+      }
+      contextState = audioContextStateLabel(graph.ctx.state);
+      try {
+        if (graph.ctx.state === 'suspended') await graph.ctx.resume();
+      } catch (error) {
+        contextState = audioContextStateLabel(graph.ctx.state);
+        finish('unavailable', safeFailureClass(error));
+        return;
+      }
+      if (cancelled) return;
+      contextState = audioContextStateLabel(graph.ctx.state);
+      if (graph.ctx.state !== 'running') {
+        finish('unavailable', 'NotAllowedError');
+        return;
+      }
+      setProbe({ attemptId, status: 'sampling', contextState, graphCreated, failureClass: null, evidence });
+      onVisibilityChange = () => {
+        if (document.visibilityState !== 'visible') {
+          contextState = audioContextStateLabel(graph!.ctx.state);
+          finish('unavailable', 'OtherError');
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      timer = window.setInterval(() => {
+        if (cancelled || finished) return;
+        if (document.visibilityState !== 'visible') return;
+        if (audioEl.paused || audioEl.readyState < 2) return;
+        if (!mediaEventBelongsToAttempt(expectedSource, audioEl.currentSrc)) return;
+        if (graph!.ctx.state !== 'running') {
+          contextState = audioContextStateLabel(graph!.ctx.state);
+          finish('unavailable', 'NotAllowedError');
+          return;
+        }
+        try {
+          const analyser = graph!.analyser;
+          let rms: number | null;
+          if (typeof analyser.getFloatTimeDomainData === 'function') {
+            analyser.getFloatTimeDomainData(samples);
+            rms = rmsDbfs(samples);
+          } else if (typeof analyser.getByteTimeDomainData === 'function') {
+            analyser.getByteTimeDomainData(byteSamples);
+            for (let i = 0; i < byteSamples.length; i++) samples[i] = ((byteSamples[i] ?? 128) - 128) / 128;
+            rms = rmsDbfs(samples);
+          } else {
+            finish('unavailable', 'NotSupportedError');
+            return;
+          }
+          evidence = observeAudioSignal(evidence, rms, performance.now());
+          if (evidence.detected) finish('signal-detected');
+        } catch (error) {
+          finish('unavailable', safeFailureClass(error));
+        }
+      }, AUDIO_SIGNAL_SAMPLE_INTERVAL_MS);
+    };
+
+    void setup().catch(error => finish('unavailable', safeFailureClass(error)));
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+      if (!finished) {
+        const current = latest.current;
+        const sameAttempt = current.attemptId === attemptId && current.sourceRevision === sourceRevision;
+        const completedGate = sameAttempt && current.tunedIn && !current.gateOpen && current.playFailure == null;
+        const result = current.playFailure != null
+          ? 'unavailable'
+          : completedGate ? 'no-signal-before-gate' : 'cancelled';
+        finish(result, current.playFailure);
+      }
+    };
+  }, [active, audioEl, attemptId, attemptStartedAt, sourceRevision]);
+
+  return probe.attemptId === attemptId ? probe : { ...EMPTY_AUDIO_SIGNAL_PROBE, attemptId };
 }

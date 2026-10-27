@@ -1,8 +1,8 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { LyricsViewPhase } from './lyricsPresentation';
-import { presentationHeight } from './presentationGeometry';
+import { ownedPresentationHeight, presentationHeight } from './presentationGeometry';
 
 /** One reversible view envelope. Song semantics remain owned by the existing
  * track handoff; no CSS entry animation or timeout can resurrect an old song. */
@@ -14,6 +14,14 @@ export function useLyricsPresentation(
   const generation = useRef(0);
   const reveal = useRef<{key: string | null; started: number}>({key: null, started: 0});
   const [phase, setPhase] = useState<LyricsViewPhase>('artwork');
+  const reservedTrackHeight = useRef<number | null>(null);
+  const refreshGeometry = useRef<(() => void) | null>(null);
+  const setTrackHeight = useCallback((height: number | null) => {
+    if (height !== null && reservedTrackHeight.current === height) return;
+    reservedTrackHeight.current = height;
+    // Null is an explicit release/reapply, even if no observed content changed.
+    refreshGeometry.current?.();
+  }, []);
   useLayoutEffect(() => {
     const node = root.current;
     if (!node) return;
@@ -39,12 +47,15 @@ export function useLyricsPresentation(
     let compactHeading = 0;
     let identityGap = 12;
     const applyGeometry = (progress: number) => {
-      if (!corridor || normalHeight <= 0 || (handoffActive.current && progress === 0)) return;
+      if (!corridor || normalHeight <= 0) return;
+      const extent = ownedPresentationHeight(normalHeight, availableHeight, progress,
+        handoffActive.current, reservedTrackHeight.current);
+      if (extent === null) return;
       const height = presentationHeight(normalHeading, compactHeading, progress);
       if (heading) heading.style.height = `${height}px`;
       if (cluster) cluster.style.gridTemplateRows = `${height}px minmax(0, 1fr)`;
       if (artwork) artwork.style.top = `${height + identityGap}px`;
-      corridor.style.height = `${presentationHeight(normalHeight, availableHeight, progress)}px`;
+      corridor.style.height = `${extent}px`;
     };
     const outerHeight = (selector: string) => {
       const element = stage?.querySelector<HTMLElement>(selector);
@@ -70,6 +81,7 @@ export function useLyricsPresentation(
         - outerHeight('[data-hero-controls]'));
       applyGeometry(position.current);
     };
+    refreshGeometry.current = measureBudget;
     const observer = new ResizeObserver(measureBudget);
     // Observe intrinsic inputs only, never the animated corridor or transcript.
     for (const selector of ['[data-artwork-surface]', '[data-hero-header]', '[data-hero-progress]', '[data-hero-facts]', '[data-hero-controls]']) {
@@ -122,7 +134,8 @@ export function useLyricsPresentation(
       window.removeEventListener('resize', measureBudget);
       window.visualViewport?.removeEventListener('resize', measureBudget);
       node.removeAttribute('data-sx-view-moving');
+      if (refreshGeometry.current === measureBudget) refreshGeometry.current = null;
     };
   }, [root, wanted, documentKey, lite, trackProgress, handoffActive, ready]);
-  return { phase, mounted: wanted || phase !== 'artwork' };
+  return { phase, mounted: wanted || phase !== 'artwork', setTrackHeight };
 }

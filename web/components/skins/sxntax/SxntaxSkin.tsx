@@ -832,7 +832,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
   const lyricsSceneRequested = shouldKeepLyricsScene(lyricsWanted, liveLyrics.status, Boolean(lyricsPreview), offline);
   const presentedMatchesAiring = trackIdentity(presentedTrack) === trackIdentity(nowPlaying);
   const lyricDocumentKey = presentedMatchesAiring ? liveLyrics.document?.id ?? null : null;
-  const { phase: lyricsViewPhase, mounted: lyricsSurfaceActive } = useLyricsPresentation(
+  const { phase: lyricsViewPhase, mounted: lyricsSurfaceActive, setTrackHeight } = useLyricsPresentation(
     rootRef, lyricsSceneRequested, lyricDocumentKey, lite, transitionProgressRef, handoffActiveRef, bootReady,
   );
 
@@ -1180,10 +1180,11 @@ export default function SxntaxSkin({ contained }: SkinProps) {
 
   const settleTrackHandoff = useCallback(() => {
     handoffActiveRef.current = false;
+    setTrackHeight(null);
     const settled = settledTrackPresentation<TrackHandoffPresentation>();
     setPresentationPhase(settled.phase);
     setHandoffPresentation(settled.presentation);
-  }, []);
+  }, [setTrackHeight]);
 
   // A foreground reconciliation is not a witnessed transition. The feed has
   // already selected the listener-audible identity, so cancel any paused RAF
@@ -1231,6 +1232,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
     let frame = 0;
     let swapped = false;
     let liveFitRequested = false;
+    let geometryReserved = false;
     const timers: number[] = [];
     const wait = (ms: number) => new Promise<void>(resolve => {
       const id = window.setTimeout(resolve, ms);
@@ -1304,6 +1306,12 @@ export default function SxntaxSkin({ contained }: SkinProps) {
       const startedAt = performance.now();
       const tick = (now: number) => {
         if (!lease.isCurrent()) return;
+        if (!geometryReserved) {
+          geometryReserved = true;
+          // The handoff class has committed by this frame, so its established
+          // CSS glide applies. Only the shared coordinator writes the height.
+          if (safeHeight > 0) setTrackHeight(safeHeight);
+        }
         const progress = clampNumber((now - startedAt) / TRACK_HANDOFF_MS, 0, 1);
         applyTransitionVisualState(progress);
 
@@ -1318,7 +1326,10 @@ export default function SxntaxSkin({ contained }: SkinProps) {
           presentedTrackKeyRef.current = incomingTrackKey;
           setPresentedTrack(incomingTrack);
           setPresentationPhase('rewrite');
-          if (shrinking && incomingHeight) setTrackCorridorHeight(incomingHeight);
+          if (shrinking && incomingHeight) {
+            setTrackCorridorHeight(incomingHeight);
+            setTrackHeight(incomingHeight);
+          }
         }
 
         if (progress >= 1) {
@@ -1328,7 +1339,10 @@ export default function SxntaxSkin({ contained }: SkinProps) {
             setPresentedTrack(incomingTrack);
             setPresentationPhase('rewrite');
           }
-          if (incomingHeight) setTrackCorridorHeight(incomingHeight);
+          if (incomingHeight) {
+            setTrackCorridorHeight(incomingHeight);
+            setTrackHeight(incomingHeight);
+          }
           // Request one explicit final solve only after the synchronized layout
           // window has completed. Keep the incoming bridge painted until that
           // revision reports settled, so the fitted live title can never resize
@@ -1371,6 +1385,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
     incomingTrackKey,
     lite,
     playerReady,
+    setTrackHeight,
     settleTrackHandoff,
     tunedIn,
   ]);
@@ -1991,7 +2006,6 @@ export default function SxntaxSkin({ contained }: SkinProps) {
               <div className={styles.heroMain} data-hero-main>
                 <div
                   className={`${styles.trackCorridor} ${presentationPhase === 'rewrite' ? styles.trackCorridorRewrite : ''}`}
-                  style={trackCorridorHeight && lyricsViewPhase === 'artwork' && presentationPhase !== 'stable' ? { height: `${trackCorridorHeight}px` } : undefined}
                 >
                   <div
                     ref={nowClusterRef}

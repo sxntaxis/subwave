@@ -1,0 +1,3 @@
+services:
+  web:
+    image: subwave-web:phosphoria-corridor-handoff-fix

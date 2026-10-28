@@ -206,6 +206,8 @@ export interface DjLogEntry {
 /** `/state` response. */
 export interface StationState {
   current?: QueueEntry | null;
+  /** Station deliberately in standby; distinct from temporarily missing metadata. */
+  streamIdle?: boolean;
   /** Station-wide aired speech covering the retained song history. */
   airMessages?: SessionTurn[];
   /** Effective live-edge progress origin and optional idle-pause boundary. */

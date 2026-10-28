@@ -117,6 +117,7 @@ type TrackGeometry = {
 };
 
 const FullEffects = lazy(() => import('./SxntaxFullEffects'));
+const PENDING_TRACK_TITLE = 'Waiting for track details';
 const loadScheduleModal = () => import('./ScheduleModal');
 const ScheduleModal = lazy(loadScheduleModal);
 const AMBIENT_TRANSITION_MS = 10_000;
@@ -244,7 +245,7 @@ function measureTrackGeometry(
   const height = node.getBoundingClientRect().height;
   if (height <= 0) return null;
   const typography = readTrackTypography(stage);
-  const title = track?.title ?? 'Somewhere on the dial';
+  const title = track?.title ?? PENDING_TRACK_TITLE;
   const artist = track?.artist ?? 'Unknown artist';
   const album = [track?.album, track?.year].filter(Boolean).join(' · ') || 'live broadcast';
   return {
@@ -279,7 +280,7 @@ function typographySnapshotStyle(snapshot: TrackTypographySnapshot | null): SxSt
 }
 
 function bridgeTitle(track: TrackBridgeTrack, snapshot: TrackTypographySnapshot | null): string {
-  return snapshot?.renderedTitle || track?.title || 'Somewhere on the dial';
+  return snapshot?.renderedTitle || track?.title || PENDING_TRACK_TITLE;
 }
 
 function bridgeAlbum(track: TrackBridgeTrack): string {
@@ -1553,7 +1554,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
     (!lyricsSceneRequested && lyricsSurfaceActive && lastLyricsSnapshot?.key === trackIdentity(nowPlaying) &&
       lastLyricsSnapshot.key === trackIdentity(presentedTrack) ? lastLyricsSnapshot : null);
   const lyricsSceneActive = lyricsSurfaceActive;
-  const compactLyricsTitle = presentedTrack?.title ?? 'Somewhere on the dial';
+  const compactLyricsTitle = presentedTrack?.title ?? PENDING_TRACK_TITLE;
   const compactLyricsArtist = presentedTrack?.artist ?? 'Unknown artist';
   const compactLyricsAlbum = [presentedTrack?.album, presentedTrack?.year].filter(Boolean).join(' · ') || 'live broadcast';
   const compactLyricsCover = visibleCoverSrc;
@@ -2027,21 +2028,21 @@ export default function SxntaxSkin({ contained }: SkinProps) {
                           {visibleHandoff && (
                             <div className={styles.lyricsIdentityBridge} aria-hidden="true">
                               <div className={styles.lyricsCompactOutgoing}>
-                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.outgoing?.title ?? 'Somewhere on the dial'}</div>
+                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.outgoing?.title ?? PENDING_TRACK_TITLE}</div>
                                 <div className={styles.lyricsIdentityArtist}>{visibleHandoff.outgoing?.artist ?? 'Unknown artist'}</div>
                                 <div className={styles.lyricsIdentityAlbum}>{bridgeAlbum(visibleHandoff.outgoing)}</div>
                               </div>
                               <div className={styles.lyricsCompactIncoming}>
-                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.incoming?.title ?? 'Somewhere on the dial'}</div>
+                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.incoming?.title ?? PENDING_TRACK_TITLE}</div>
                                 <div className={styles.lyricsIdentityArtist}>{visibleHandoff.incoming?.artist ?? 'Unknown artist'}</div>
                                 <div className={styles.lyricsIdentityAlbum}>{bridgeAlbum(visibleHandoff.incoming)}</div>
                               </div>
                               <div className={styles.lyricsCompactOutgoingMass}>
-                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.outgoing?.title ?? 'Somewhere on the dial'}</div>
+                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.outgoing?.title ?? PENDING_TRACK_TITLE}</div>
                                 <div className={styles.lyricsIdentityArtist}>{visibleHandoff.outgoing?.artist ?? 'Unknown artist'}</div>
                               </div>
                               <div className={styles.lyricsCompactIncomingMass}>
-                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.incoming?.title ?? 'Somewhere on the dial'}</div>
+                                <div className={styles.lyricsIdentityTitle}>{visibleHandoff.incoming?.title ?? PENDING_TRACK_TITLE}</div>
                                 <div className={styles.lyricsIdentityArtist}>{visibleHandoff.incoming?.artist ?? 'Unknown artist'}</div>
                               </div>
                             </div>
@@ -2061,7 +2062,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
                   <div data-artwork-surface className={`${styles.nowGrid} ${heroHasCover ? '' : styles.nowGridNoCover}`} aria-hidden={lyricsSceneActive} inert={lyricsSceneActive}>
                    <div className={styles.nowCopy} data-hero-copy>
                        <AdaptiveTrackTitle
-                        title={offline ? 'Radio silence.' : (presentedTrack?.title ?? 'Somewhere on the dial')}
+                         title={offline ? 'Radio silence.' : (presentedTrack?.title ?? PENDING_TRACK_TITLE)}
                         artist={offline ? '' : (presentedTrack?.artist ?? 'Unknown artist')}
                         album={offline ? '' : ([presentedTrack?.album, presentedTrack?.year].filter(Boolean).join(' · ') || 'live broadcast')}
                         stageRef={heroStageRef}
@@ -2328,7 +2329,7 @@ export default function SxntaxSkin({ contained }: SkinProps) {
                   <div data-artwork-surface className={`${styles.nowGrid} ${nowPlaying?.subsonic_id ? '' : styles.nowGridNoCover}`}>
                     <div className={styles.nowCopy} data-hero-copy>
                       <AdaptiveTrackTitle
-                        title={nowPlaying?.title ?? 'Somewhere on the dial'}
+                        title={nowPlaying?.title ?? PENDING_TRACK_TITLE}
                         artist={nowPlaying?.artist ?? 'Unknown artist'}
                         album={[nowPlaying?.album, nowPlaying?.year].filter(Boolean).join(' · ') || 'live broadcast'}
                         stageRef={geometryProbeStageRef}

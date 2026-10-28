@@ -1,0 +1,3 @@
+services:
+  web:
+    image: subwave-web:background-station-feed-fix

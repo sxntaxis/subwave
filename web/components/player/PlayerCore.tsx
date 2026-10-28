@@ -12,6 +12,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   type Dispatch,
@@ -96,7 +97,8 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
   const client = useStationClient();
   // Feed first: usePlayer's Opus upgrade is gated on the mount the station says
   // it actually serves (#1300).
-  const feed = useStationFeed();
+  const feedAudioRef = useRef<HTMLAudioElement | null>(null);
+  const feed = useStationFeed(feedAudioRef);
   const {
     audioRef,
     audioElement,
@@ -122,6 +124,11 @@ export function PlayerCoreProvider({ children }: { children: ReactNode }) {
     opusEnabled: feed.opusEnabled,
     streamIdle: (feed.state as typeof feed.state & { streamIdle?: boolean }).streamIdle === true,
   });
+
+  useEffect(() => {
+    feedAudioRef.current = audioElement;
+    return () => { feedAudioRef.current = null; };
+  }, [audioElement]);
 
   // Only an explicit false is offline — see PlayerAudio.offline.
   const offline = feed.streamOnline === false;

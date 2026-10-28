@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { pollWhileVisible } from '@/lib/poll';
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { pollStationFeed } from '@/lib/stationPolling';
+import { stationFeedMetadata } from '@/lib/stationFeedMetadata';
 import { splitAudibleTurns } from '@/lib/sessionFeed';
 import { createStationClock, type StationClock } from '@/lib/stationClock';
 import { useStationClient } from '@/lib/stationClient';
@@ -68,13 +69,13 @@ function setIfChanged<T>(setter: Dispatch<SetStateAction<T>>, next: T): void {
   setter(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 }
 
-// 5s polling of /now-playing + /state + /session, paused while the tab is
-// hidden (with an immediate refetch on return).
+// Visible: 5s feed/session refresh. Hidden while playing: 15s critical metadata
+// only. Foreground return supersedes old work even after browser timer freezes.
 //
 // The listener offset is the advertised stream.bufferSeconds. Never measure it
 // as `buffered.end − currentTime`: that reports only the demuxed window (2.25s
 // against a true 22.5s offset), which flips every title ~20s early.
-export function useStationFeed(): StationFeed {
+export function useStationFeed(backgroundAudio?: RefObject<HTMLAudioElement | null>): StationFeed {
   const client = useStationClient();
   const [stationClock] = useState(createStationClock);
   const [nowPlaying, setNowPlaying] = useState<NowPlayingTrack | null>(null);
@@ -95,6 +96,8 @@ export function useStationFeed(): StationFeed {
   const [stateSampleStartedAt, setStateSampleStartedAt] = useState(0);
   const [reconciliationId, setReconciliationId] = useState(0);
   const lastTrackKeyRef = useRef<string | null>(null);
+  const lastKnownTrackRef = useRef<NowPlayingTrack | null>(null);
+  const reconciliationCounterRef = useRef(0);
   const offlinePollsRef = useRef(0);
   // Listener buffer depth in ms. A ref, not state, so the polling effect never
   // re-subscribes when it arrives. 0 until the first payload lands, degrading
@@ -110,11 +113,14 @@ export function useStationFeed(): StationFeed {
 
   useEffect(() => {
     stationClock.reset();
+    lastKnownTrackRef.current = null;
     let sessionInFlight = false;
     let inFlight = false;
     let requestSequence = 0;
+    let acceptedSequence = 0;
     let requestController: AbortController | null = null;
     let stopped = false;
+    const markReconciled = () => setReconciliationId(++reconciliationCounterRef.current);
     // Re-derive the visible feed and re-arm for the next line to become
     // audible. Runs on every poll and on its own timer, so a held line lands on
     // time rather than on the 5s poll grid.
@@ -132,7 +138,11 @@ export function useStationFeed(): StationFeed {
     };
     const tick = async (reconcile = false) => {
       if (stopped || (inFlight && !reconcile)) return;
-      if (reconcile) requestController?.abort();
+      if (reconcile) {
+        requestController?.abort();
+        if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+        promoteTimerRef.current = null;
+      }
       const controller = new AbortController();
       requestController = controller;
       const sequence = ++requestSequence;
@@ -148,13 +158,21 @@ export function useStationFeed(): StationFeed {
           client.state(controller.signal),
         ]);
         if (stopped || sequence !== requestSequence) return;
+        acceptedSequence = sequence;
+        if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+        promoteTimerRef.current = null;
         stationClock.sample(npRes.serverTimeMs, stateStartedAt, receivedMono);
         const stationNow = stationClock.nowMs();
         // Previous controller revisions have no serverTimeMs. Keep the web
         // deploy backward-compatible until controller and web are upgraded,
         // but all fully synchronized operation uses ONLY stationClock.
         const now = stationNow ?? Date.now();
-        const np = npRes.nowPlaying;
+        // A transient missing IPC marker on an otherwise live station must not
+        // erase metadata that was already accepted. Explicit off-air/idle still
+        // releases it; a cold client honestly shows the pending placeholder.
+        const np = stationFeedMetadata(npRes.nowPlaying, lastKnownTrackRef.current,
+          npRes.streamOnline, stRes.streamIdle);
+        const unseen = reconcile || document.hidden;
         // Clamped to 0–60s: a bad value parks the clock in the far future or
         // winds it back past the track start.
         const bufSec = npRes.stream?.bufferSeconds;
@@ -187,14 +205,17 @@ export function useStationFeed(): StationFeed {
         const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMs : now;
 
         if (trackKey !== lastTrackKeyRef.current) {
+          const wait = audibleAt - now;
           const commit = () => {
+            if (stopped || sequence !== acceptedSequence) return;
             promoteTimerRef.current = null;
             lastTrackKeyRef.current = trackKey;
+            lastKnownTrackRef.current = np;
             setTrackStartedAt(trackKey != null ? audibleAt : null);
             setTrackPausedAt(trackKey != null && serverPause != null ? serverPause + leadMs : null);
             setIfChanged(setNowPlaying, np);
+            if (document.hidden || (unseen && wait <= 0)) markReconciled();
           };
-          const wait = audibleAt - now;
           // Promote immediately when the audio is already out (wait <= 0), when
           // the stream drops, or on the first payload (a cold load has no
           // earlier track to keep showing).
@@ -206,6 +227,7 @@ export function useStationFeed(): StationFeed {
             // is recomputed against the freshest server stamp.
             if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
             promoteTimerRef.current = setTimeout(commit, wait);
+            if (unseen) markReconciled();
           }
         } else {
           setTrackPausedAt(serverPause != null ? serverPause + leadMs : null);
@@ -220,6 +242,8 @@ export function useStationFeed(): StationFeed {
           // Metadata enrichment (genres, bpm, cover) lands on later polls for a
           // track already on air, so keep taking it.
           setIfChanged(setNowPlaying, np);
+          lastKnownTrackRef.current = np;
+          if (unseen) markReconciled();
         }
         // The server clock sample also refreshes voice visibility after resume.
         applySession();
@@ -247,15 +271,14 @@ export function useStationFeed(): StationFeed {
         if (npRes.locale === 'en-US' || npRes.locale === 'en-GB') setLocale(npRes.locale);
         setIfChanged(setState, stRes);
         setStateSampleStartedAt(stateStartedAt);
-        if (reconcile) setReconciliationId(sequence);
 
         // Session/AIR is below the fold and not part of first-paint identity.
         // Fetch it only after the critical feed has committed; failures remain
         // isolated so they cannot discard a successful now-playing update.
-        if (!sessionInFlight) {
+        if (!document.hidden && !sessionInFlight) {
           sessionInFlight = true;
           void client.session().then(seRes => {
-            if (!stopped && seRes && Array.isArray(seRes.messages)) {
+            if (!stopped && sequence === requestSequence && seRes && Array.isArray(seRes.messages)) {
               rawSessionRef.current = seRes;
               applySession();
             }
@@ -270,23 +293,14 @@ export function useStationFeed(): StationFeed {
         if (sequence === requestSequence) inFlight = false;
       }
     };
-    const stopPolling = pollWhileVisible(() => { void tick(); }, 5000);
-    // A returning page must supersede a request begun before it was frozen. The
-    // feed applies the newest coherent now-playing/state pair only; old requests
-    // cannot repaint a stale identity after this foreground sample lands.
-    const reconcile = () => {
-      if (!document.hidden) void tick(true);
-    };
-    document.addEventListener('visibilitychange', reconcile);
-    window.addEventListener('focus', reconcile);
-    window.addEventListener('pageshow', reconcile);
+    const stopPolling = pollStationFeed(reconcile => { void tick(reconcile); }, () => {
+      const audio = backgroundAudio?.current;
+      return Boolean(audio && !audio.paused && !audio.ended);
+    });
     return () => {
       stopped = true;
       requestController?.abort();
       stopPolling();
-      document.removeEventListener('visibilitychange', reconcile);
-      window.removeEventListener('focus', reconcile);
-      window.removeEventListener('pageshow', reconcile);
       // A held track switch (or a held spoken line) must not land after teardown.
       if (promoteTimerRef.current) {
         clearTimeout(promoteTimerRef.current);
@@ -297,7 +311,7 @@ export function useStationFeed(): StationFeed {
         voiceTimerRef.current = null;
       }
     };
-  }, [client, stationClock]);
+  }, [backgroundAudio, client, stationClock]);
 
   return { stationClock, nowPlaying, context, dj, activeShow, listeners, streamOnline, stream, llmTokens, state, session, trackStartedAt, trackPausedAt, opusEnabled, timezone, locale, stateSampleStartedAt, reconciliationId };
 }

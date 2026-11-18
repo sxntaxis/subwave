@@ -21,20 +21,23 @@ export const router = express.Router();
 // listener's request quota. The store's per-airing dedup is the real ceiling.
 const LIKE_COOLDOWN_MS = 2_000;
 const LIKE_HOURLY_CAP = 60;
-const likeHistory = new Map<string, { last: number; hits: number[] }>();
+const likeHistory = new Map<string, { last: number; action?: 'like' | 'unlike'; hits: number[] }>();
 
-function checkLikeLimit(ip: string): { ok: boolean; retryAfter?: number } {
+function checkLikeLimit(ip: string, action: 'like' | 'unlike'): { ok: boolean; retryAfter?: number } {
   const now = Date.now();
   const oneHourAgo = now - 3_600_000;
   const rec = likeHistory.get(ip) || { last: 0, hits: [] };
   rec.hits = rec.hits.filter((t) => t > oneHourAgo);
-  if (rec.last && now - rec.last < LIKE_COOLDOWN_MS) {
+  // A genuine toggle may undo the previous action immediately. Repeated writes
+  // of the same action still cool down; all writes share the hourly ceiling.
+  if (rec.last && rec.action === action && now - rec.last < LIKE_COOLDOWN_MS) {
     return { ok: false, retryAfter: Math.ceil((LIKE_COOLDOWN_MS - (now - rec.last)) / 1000) };
   }
   if (rec.hits.length >= LIKE_HOURLY_CAP) {
     return { ok: false, retryAfter: Math.ceil((rec.hits[0] + 3_600_000 - now) / 1000) };
   }
   rec.last = now;
+  rec.action = action;
   rec.hits.push(now);
   likeHistory.set(ip, rec);
   if (likeHistory.size > 2000) {
@@ -64,7 +67,7 @@ router.post('/like', async (req, res) => {
   if (!cfg?.enabled) return res.status(403).json({ error: 'Likes are disabled on this station' });
 
   const ip = clientIp(req);
-  const gate = checkLikeLimit(ip);
+  const gate = checkLikeLimit(ip, 'like');
   if (!gate.ok) {
     res.set('Retry-After', String(gate.retryAfter));
     return res.status(429).json({ error: 'Too many likes — slow down', retryAfter: gate.retryAfter });
@@ -100,6 +103,28 @@ router.post('/like', async (req, res) => {
   } catch (err: any) {
     console.error('[likes] like failed:', err.message);
     res.status(500).json({ error: 'Could not record the like' });
+  }
+});
+
+router.delete('/like', async (req, res) => {
+  if (!settings.get()?.likes?.enabled) return res.status(403).json({ error: 'Likes are disabled on this station' });
+  const ip = clientIp(req);
+  const gate = checkLikeLimit(ip, 'unlike');
+  if (!gate.ok) {
+    res.set('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Too many likes — slow down', retryAfter: gate.retryAfter });
+  }
+  try {
+    const on = await currentLikeable();
+    if (!on) return res.status(409).json({ error: 'Nothing likeable on air right now' });
+    const asked = typeof req.body?.songId === 'string' ? req.body.songId : '';
+    if (asked && asked !== on.songId) return res.status(409).json({ error: 'That track just ended', songId: on.songId });
+    const result = await likes.removeLike({ songId: on.songId, startedAt: on.startedAt, ip });
+    // Listener undo never unstars the operator's Navidrome catalogue.
+    res.json({ ok: true, songId: on.songId, liked: false, removed: result.removed, count: result.count });
+  } catch (err: any) {
+    console.error('[likes] unlike failed:', err.message);
+    res.status(500).json({ error: 'Could not remove the like' });
   }
 });
 

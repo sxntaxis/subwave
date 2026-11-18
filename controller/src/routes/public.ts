@@ -13,7 +13,7 @@ import { getFullContext, geocodePlace } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
 import { getStreamStatus } from '../broadcast/listeners.js';
-import { isIdle } from '../broadcast/stream-idle.js';
+import { isIdle, playbackTiming } from '../broadcast/stream-idle.js';
 import { currentStarve } from '../broadcast/music-starve.js';
 import { getSetupStatusSync } from '../setup/firstRun.js';
 import { getStationTimezone } from '../time.js';
@@ -159,13 +159,40 @@ router.get('/persona-avatar/:id', async (req, res) => {
   }
 });
 
+// Current-airing lyrics only. Never expose a general Navidrome song lookup to
+// the public frontend: a stale ID must not retrieve a different library track.
+router.get('/lyrics/current', requireStationAuth, async (req, res) => {
+  const songId = typeof req.query.songId === 'string' ? req.query.songId : '';
+  if (!/^[\w-]{1,64}$/.test(songId)) return res.status(400).json({ error: 'invalid song' });
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const current = await queue.getNowPlaying();
+    if (!current?.subsonic_id || current.subsonic_id !== songId) {
+      return res.status(409).json({ error: 'song is not currently on air' });
+    }
+    const document = await subsonic.getDisplayLyrics(songId);
+    // The upstream request can finish after a transition. Recheck before
+    // delivering text, rather than publishing an already-departed recording.
+    const stillCurrent = await queue.getNowPlaying();
+    if (stillCurrent?.subsonic_id !== songId) {
+      return res.status(409).json({ error: 'song is no longer on air' });
+    }
+    return res.json({ songId, document });
+  } catch (err) {
+    // Don't log the lyric document, credentials, or provider request URL.
+    queue.log('warn', `/lyrics/current unavailable: ${err instanceof Error ? err.name : 'Error'}`);
+    return res.status(503).json({ error: 'lyrics temporarily unavailable' });
+  }
+});
+
 // Current track + context snapshot.
 router.get('/now-playing', async (req, res) => {
   try {
-    const [nowPlaying, ctx] = await Promise.all([
-      queue.getNowPlaying(),
-      getFullContext(),
-    ]);
+    // Read track identity AFTER any asynchronous context work. A weather fetch
+    // may straddle a skip; capturing the song before that wait serves the old
+    // track even though the controller already knows the new one.
+    const ctx = await getFullContext(undefined, { cachedWeatherOnly: true });
+    const nowPlaying = await queue.getNowPlaying();
     // Enrich with library tag/analysis data; getNowPlaying() stays a pure reader
     // of now-playing.json. An untagged track yields null and fields are omitted.
     if (nowPlaying?.subsonic_id) {
@@ -234,6 +261,9 @@ router.get('/now-playing', async (req, res) => {
     const publicClock: any = { ...(ctx.clock as any) };
     delete publicClock.spokenTimeOptions;
     res.json({
+      // Authoritative epoch for client clock synchronization. Emitted at the
+      // response boundary, from the same clock as playbackTiming.startedAt.
+      serverTimeMs: Date.now(),
       nowPlaying,
       context: { ...ctx, clock: publicClock },
       dj: {
@@ -359,6 +389,10 @@ router.get('/dj', async (req, res) => {
 // Listener-facing week view: shows, the 7x24 grid and a persona index (plus
 // `soul` when privacy.publishPersonaSouls is on). No TTS config, no behaviour
 // dials, no admin-only fields.
+export function publicShowTopic(show: { topic: string; publicDescription?: string }): string {
+  return show.publicDescription?.trim() ? show.publicDescription : show.topic;
+}
+
 router.get('/schedule', async (req, res) => {
   try {
     await settings.load();
@@ -369,7 +403,9 @@ router.get('/schedule', async (req, res) => {
     const shows = (s.shows || []).map((show: any) => ({
       id: show.id,
       name: show.name,
-      topic: show.topic,
+      // Keep the public wire key stable. Internal prompt/selector consumers
+      // continue to see the unmodified `show.topic` from settings.resolveShow.
+      topic: publicShowTopic(show),
       // `mood` is the lead entry for older clients, derived and never stored (#929).
       moods: Array.isArray(show.moods) ? show.moods : [],
       mood: Array.isArray(show.moods) && show.moods.length ? show.moods[0] : '',
@@ -433,6 +469,7 @@ router.get('/state', (req, res) => {
     needsSetup: getSetupStatusSync().needsSetup,
     // Programme paused by the idle gate (zero listeners), not broken.
     streamIdle: isIdle(),
+    playbackTiming: playbackTiming(),
     // Music chain starved (#1300), emergency loop on air. Not streamIdle, which
     // is a deliberate pause.
     musicStarved: starve.starved,
@@ -574,7 +611,7 @@ router.get('/similar-tracks', requireStationAuth, async (req, res) => {
       }
     }
 
-    const hits = seedId ? library.tracksLikeThisAudio(seedId, soundKnnWidth(limit)) : [];
+    const hits = seedId ? await library.tracksLikeThisAudioAsync(seedId, soundKnnWidth(limit)) : [];
     const results = hits
       // The station's own archive mixdowns are not music (#273).
       .filter((t) => !subsonic.isStationArchive(t))
@@ -680,3 +717,24 @@ router.get('/geocode', async (req, res) => {
 });
 
 router.get('/health', (req, res) => res.json({ status: 'on-air' }));
+
+// Dependency-aware readiness. Liveness stays unconditional; this endpoint is
+// for deployment checks and reports whether Navidrome is usable.
+router.get('/ready', async (_req, res) => {
+  const navidrome = await subsonic.ping();
+  if (!navidrome.ok) {
+    return res.status(503).json({
+      status: 'not-ready',
+      dependencies: { navidrome: { ok: false, reason: navidrome.reason } },
+    });
+  }
+  try {
+    await subsonic.getRecentlyAddedAlbums({ size: 1 });
+  } catch {
+    return res.status(503).json({
+      status: 'not-ready',
+      dependencies: { navidrome: { ok: false, reason: 'album_list_unavailable' } },
+    });
+  }
+  res.json({ status: 'ready', dependencies: { navidrome: { ok: true } } });
+});

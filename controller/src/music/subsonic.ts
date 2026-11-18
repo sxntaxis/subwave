@@ -1,5 +1,6 @@
 // Subsonic API client for Navidrome. Salt+token auth, never plaintext.
 
+import { normalizeNavidromeLyrics, type DisplayLyrics } from './lyrics-display.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { config } from '../config.js';
@@ -9,6 +10,28 @@ import * as blocklist from './blocklist.js';
 import * as sceneVocab from './scene-vocab.js';
 import { trackEraYear } from './show-filter.js';
 import { albumEraSuspect } from './era-suspect.js';
+
+export class SubsonicError extends Error {
+  readonly code = 'SUBSONIC_UNAVAILABLE';
+  readonly status?: number;
+  readonly retryable: boolean;
+
+  constructor(message: string, options?: { cause?: unknown; status?: number; retryable?: boolean }) {
+    super(message, options);
+    this.name = 'SubsonicError';
+    this.status = options?.status;
+    this.retryable = options?.retryable ?? false;
+  }
+}
+
+export function isSubsonicError(err: unknown): err is SubsonicError {
+  return err instanceof SubsonicError;
+}
+
+const CIRCUIT_FAILURE_LIMIT = 4;
+const CIRCUIT_COOLDOWN_MS = 15_000;
+let circuitFailures = 0;
+let circuitOpenUntil = 0;
 
 function buildAuth() {
   const salt = crypto.randomBytes(8).toString('hex');
@@ -81,45 +104,55 @@ function extractCount(sub, songs) {
 
 async function call(endpoint, params = {}) {
   const started = Date.now();
-  try {
-    const url = buildUrl(endpoint, params);
-    // Bounded fetch: a hung Navidrome must not pin the admin routes behind it (#786).
-    let res;
+  if (endpoint !== 'ping' && circuitOpenUntil > Date.now()) {
+    throw new SubsonicError('Navidrome circuit open after repeated failures', { retryable: false });
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      res = await fetch(url, { signal: AbortSignal.timeout(config.navidrome.timeoutMs) });
-    } catch (err) {
-      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-        throw new Error(
-          `Subsonic ${endpoint} timed out after ${config.navidrome.timeoutMs}ms — is Navidrome responding?`,
+      const url = buildUrl(endpoint, params);
+      const res = await fetch(url, { signal: AbortSignal.timeout(config.navidrome.timeoutMs) });
+      if (!res.ok) {
+        let body = '';
+        try { body = (await res.text()).slice(0, 200); } catch {}
+        throw new SubsonicError(
+          `Subsonic ${endpoint} failed: ${res.status}${body ? ` — ${body}` : ''}`,
+          { status: res.status, retryable: res.status >= 500 },
         );
       }
-      throw err;
+      const data = await res.json() as any;
+      const sub = data['subsonic-response'];
+      if (sub.status !== 'ok') throw new SubsonicError(`Subsonic error: ${sub.error?.message || 'unknown'}`);
+      circuitFailures = 0;
+      circuitOpenUntil = 0;
+      const songs = extractSongs(sub);
+      subLog.record({
+        t: new Date().toISOString(), endpoint, params, ms: Date.now() - started,
+        ok: true, count: extractCount(sub, songs),
+        songIds: songs.filter((i: any) => i?.id && i?.title)
+          .map((i: any) => ({ id: i.id, title: i.title, artist: i.artist })),
+      });
+      return sub;
+    } catch (err) {
+      const error = err instanceof SubsonicError ? err : new SubsonicError(
+        `Subsonic ${endpoint} unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err, retryable: true },
+      );
+      if (error.retryable && attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      if (endpoint !== 'ping' && error.retryable) {
+        circuitFailures++;
+        if (circuitFailures >= CIRCUIT_FAILURE_LIMIT) circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+      }
+      subLog.record({
+        t: new Date().toISOString(), endpoint, params, ms: Date.now() - started,
+        ok: false, count: 0, songIds: [], error: error.message,
+      });
+      throw error;
     }
-    if (!res.ok) {
-      // First 200 chars of the body, so triage sees the real server message.
-      let body = '';
-      try { body = (await res.text()).slice(0, 200); } catch {}
-      throw new Error(`Subsonic ${endpoint} failed: ${res.status}${body ? ` — ${body}` : ''}`);
-    }
-    const data = await res.json() as any;
-    const sub = data['subsonic-response'];
-    if (sub.status !== 'ok') throw new Error(`Subsonic error: ${sub.error?.message || 'unknown'}`);
-    const songs = extractSongs(sub);
-    subLog.record({
-      t: new Date().toISOString(), endpoint, params, ms: Date.now() - started,
-      ok: true, count: extractCount(sub, songs),
-      songIds: songs
-        .filter((i: any) => i?.id && i?.title)
-        .map((i: any) => ({ id: i.id, title: i.title, artist: i.artist })),
-    });
-    return sub;
-  } catch (err) {
-    subLog.record({
-      t: new Date().toISOString(), endpoint, params, ms: Date.now() - started,
-      ok: false, count: 0, songIds: [], error: err.message,
-    });
-    throw err;
   }
+  throw new SubsonicError(`Subsonic ${endpoint} failed after retries`, { retryable: true });
 }
 
 // Connectivity + auth check against config.navidrome. Never throws.
@@ -471,6 +504,17 @@ export async function getFrequentAlbums({ size = 20, offset = 0 } = {}) {
   return r.albumList2?.album || [];
 }
 
+// Bulk metadata writers leave Navidrome's filesystem watcher disabled. The
+// owner of the mutation explicitly starts one reconciliation scan afterwards.
+export async function startScan(): Promise<void> {
+  await call('startScan');
+}
+
+export async function scanInProgress(): Promise<boolean> {
+  const r = await call('getScanStatus');
+  return r.scanStatus?.scanning === true;
+}
+
 export async function getArtistInfo(id, { count = 10 } = {}) {
   const r = await call('getArtistInfo2', { id, count });
   return r.artistInfo2 || null;
@@ -583,6 +627,16 @@ export async function getLyrics(songId) {
   } catch {
     return '';
   }
+}
+
+// Full Navidrome lyric document for the current-airing listener view.
+// Keep provider credentials on the controller. Errors propagate to the endpoint
+// as unavailability, never as a misleading empty transcript.
+export async function getDisplayLyrics(songId: string): Promise<DisplayLyrics | null> {
+  // OpenSubsonic songLyrics v2 is opt-in; v1 sources still return their
+  // existing line/plain payload. Never fabricate cues when absent.
+  const raw = await call('getLyricsBySongId', { id: songId, enhanced: 'true' });
+  return normalizeNavidromeLyrics(songId, raw);
 }
 
 // Timed lyrics, preserving the per-line offsets getLyrics() drops (#1125) —

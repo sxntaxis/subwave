@@ -98,7 +98,7 @@ export async function semanticTagIds(
   let systemicTimeout = false;
   let usageLimitPaused = false;
   const batches = Array.from({ length: Math.ceil(ids.length / 24) }, (_, index) => ids.slice(index * 24, index * 24 + 24));
-  await runBoundedWorkers(batches, 1, async (batch) => {
+  await runBoundedWorkers(batches, config.semantic.concurrency, async (batch) => {
     if (systemicTimeout) return;
     const locators = batch.map((id) => ({ id, song: songs.get(id) }));
     if (locators.some(({ song }) => !song)) {

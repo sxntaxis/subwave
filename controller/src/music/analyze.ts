@@ -229,7 +229,7 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   const cap = opts.limit && opts.limit > 0 ? opts.limit : undefined;
   const fixedScope = opts.scopeIds;
   const bpmIds = fixedScope
-    ? [...fixedScope]
+    ? (cap ? db.needsAnalysisIdsInScope(fixedScope).slice(0, cap) : db.needsAnalysisIdsInScope(fixedScope))
     : reAnalyzeScope
     ? (cap ? reAnalyzeScope.slice(0, cap) : reAnalyzeScope)
     : db.needsAnalysisIds(cap);

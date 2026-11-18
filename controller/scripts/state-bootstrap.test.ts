@@ -129,6 +129,10 @@ for (const s of SUPERVISORS) {
     // reload_mode="watch" needs these to exist before liquidsoap starts.
     assert.ok(existsSync(join(dir, 'auto.m3u')), 'auto.m3u not created');
     assert.ok(existsSync(join(dir, 'jingles.m3u')), 'jingles.m3u not created');
+    assert.ok(existsSync(join(dir, 'listeners.jsonl')), 'listeners.jsonl not created');
+    assert.equal(statSync(join(dir, 'listeners.jsonl')).mode & 0o002, 0o002, 'listeners.jsonl is not writable by the controller');
+    assert.ok(existsSync(join(dir, 'icecast_listener_auth.txt')), 'listener auth flag not created');
+    assert.equal(statSync(join(dir, 'icecast_listener_auth.txt')).mode & 0o002, 0o002, 'listener auth flag is not writable by the controller');
     assert.ok(existsSync(join(dir, 'archive', '.ndignore')), '.ndignore not created');
   });
 

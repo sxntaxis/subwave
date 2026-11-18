@@ -464,6 +464,21 @@ export function needsAnalysisIds(limit?: number): string[] {
   return rows.map(r => r.id);
 }
 
+// Restrict the resumable analysis scope to a caller-selected cohort without
+// reprocessing tracks that already carry the current analysis version.
+export function needsAnalysisIdsInScope(ids: readonly string[]): string[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = requireDb().prepare(
+    `SELECT id FROM tracks
+       WHERE id IN (${placeholders})
+         AND (analysis_version IS NULL OR analysis_version < ?)
+         AND ${analysisFailureExclusion()}
+       ORDER BY id`,
+  ).all(...ids, ANALYSIS_VERSION) as Array<{ id: string }>;
+  return rows.map(r => r.id);
+}
+
 // Stamp a failed attempt; `error` is trimmed for the admin panel.
 export function recordAnalysisFailure(id: string, error: string): void {
   requireDb()

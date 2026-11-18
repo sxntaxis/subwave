@@ -1,4 +1,5 @@
 import { djObject } from '../../llm/sdk.js';
+import { languageModel } from '../../llm/provider.js';
 import * as settings from '../../settings.js';
 import {
   CONTRACT_VERSION,
@@ -26,6 +27,7 @@ import {
 } from './contract-v2.js';
 import { PROMPT_STATIC, assertFrozenPrompt } from './prompt-v2.js';
 import { validateSemanticContract } from './canonical-contract.js';
+import { generateSemanticOneCall, generateSemanticRecoveryOnly } from './one-call.js';
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 const MAX_OUTPUT_TOKENS = 2048;
@@ -189,11 +191,39 @@ export async function classifySemantic(
     if (llm?.provider !== FROZEN_PROVIDER || llm?.model !== FROZEN_MODEL || llm?.reasoning === true) {
       throw new Error(`PROVIDER_PINNING_UNAVAILABLE: expected ${FROZEN_PROVIDER}:${FROZEN_MODEL} reasoning=${FROZEN_REASONING}`);
     }
-    const result = await djObject({
-      ...buildSemanticGenerationOptions(track),
-       onProviderCall: reserveProviderCall,
-       onProviderCallEnd: finishProviderCall,
-    });
+    const transport = process.env.SUBWAVE_SEMANTIC_TRANSPORT;
+    const semanticModelConfig = {
+      provider: FROZEN_PROVIDER,
+      model: FROZEN_MODEL,
+      apiKey: settings.llmKeyFor(FROZEN_PROVIDER) || process.env.OPENROUTER_API_KEY || '',
+      reasoning: false,
+      ollamaUrl: '',
+      baseUrl: '',
+    };
+    const result = transport === 'recovery-only'
+      ? await generateSemanticRecoveryOnly({
+        model: languageModel(semanticModelConfig, { forceNoThink: true }),
+        providerConfig: semanticModelConfig,
+        system: PROMPT_STATIC,
+        track,
+        providerOptions: OPENROUTER_PROVIDER_OPTIONS,
+        onProviderCall: reserveProviderCall,
+        onProviderCallEnd: finishProviderCall,
+      })
+      : transport === 'one-call'
+      ? await generateSemanticOneCall({
+        model: languageModel(semanticModelConfig, { forceNoThink: true }),
+        system: PROMPT_STATIC,
+        track,
+        providerOptions: OPENROUTER_PROVIDER_OPTIONS,
+        onProviderCall: reserveProviderCall,
+        onProviderCallEnd: finishProviderCall,
+      })
+      : await djObject({
+        ...buildSemanticGenerationOptions(track),
+        onProviderCall: reserveProviderCall,
+        onProviderCallEnd: finishProviderCall,
+      });
     options.onRawResult?.(result);
     if (result.id !== track.id) {
       throw new Error('SCHEMA_FAILURE: track id');

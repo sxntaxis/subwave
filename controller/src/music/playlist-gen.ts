@@ -150,7 +150,7 @@ export async function buildCandidatePool(
     if (hasTextIndex && embeddings.isAvailable()) {
       try {
         const vec = await embeddings.embedQueryText(prompt, library.embeddingIndexTextMode());
-        if (vec) pools.push(normMany(library.tracksByVector(vec, 60), 'theme', 0.7));
+        if (vec) pools.push(normMany(await library.tracksByVectorAsync(vec, 60), 'theme', 0.7));
         else reasons.push('theme (lyric) search returned no vector');
       } catch (err: any) {
         reasons.push(`theme search failed: ${err?.message || err}`);
@@ -161,7 +161,7 @@ export async function buildCandidatePool(
     if (hasAudioIndex && analyzer.textEmbeddingAvailable() !== false) {
       try {
         const vecs = await analyzer.embedTexts([prompt], { timeoutMs: 20_000 });
-        if (vecs && vecs[0]) pools.push(normMany(library.tracksByAudioVector(vecs[0], 60), 'sound', 0.72));
+        if (vecs && vecs[0]) pools.push(normMany(await library.tracksByAudioVectorAsync(vecs[0], 60), 'sound', 0.72));
         else reasons.push('sound (timbre) search unavailable right now');
       } catch (err: any) {
         reasons.push(`sound search failed: ${err?.message || err}`);

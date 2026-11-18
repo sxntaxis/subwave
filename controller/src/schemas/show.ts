@@ -240,6 +240,14 @@ function showObjectSchema(ctx: ShowSchemaContext) {
           .max(SHOW_TOPIC_MAX, `topic must be 0-${SHOW_TOPIC_MAX} chars`)
           .default(''),
       ),
+      // Listener-facing copy is separate from `topic`: prompts and selection
+      // continue to consume topic, while GET /schedule projects this field
+      // through the existing public `topic` key. A missing field preserves the
+      // pre-existing public/internal behavior on upgrades.
+      publicDescription: z.preprocess(
+        nullToUndefined,
+        z.string().trim().max(SHOW_TOPIC_MAX, `publicDescription must be 0-${SHOW_TOPIC_MAX} chars`).optional(),
+      ),
       personaId: z
         .string({ error: 'Pick a host persona' })
         .refine((v) => ctx.personaIds.includes(v), 'must reference an existing persona'),
@@ -496,11 +504,14 @@ export function repairShowForLoad(
   personaIds: string[] | null,
 ): Record<string, unknown> {
   const host = typeof raw.personaId === 'string' ? raw.personaId : '';
-  return {
+  const repaired: Record<string, unknown> = {
     ...raw,
     id: typeof raw.id === 'string' && SHOW_ID_RE.test(raw.id) ? raw.id : undefined,
     name: typeof raw.name === 'string' ? raw.name.trim().slice(0, SHOW_NAME_MAX) : undefined,
     topic: typeof raw.topic === 'string' ? raw.topic.slice(0, SHOW_TOPIC_MAX) : undefined,
+    ...(typeof raw.publicDescription === 'string'
+      ? { publicDescription: raw.publicDescription.slice(0, SHOW_TOPIC_MAX).trim() }
+      : {}),
     segmentSkill: typeof raw.segmentSkill === 'string'
       ? raw.segmentSkill.trim().slice(0, SHOW_SEGMENT_SKILL_MAX)
       : undefined,
@@ -544,4 +555,6 @@ export function repairShowForLoad(
       max: EXCLUDED_PLAYLISTS_PER_SHOW,
     }),
   };
+  if (typeof raw.publicDescription !== 'string') delete repaired.publicDescription;
+  return repaired;
 }

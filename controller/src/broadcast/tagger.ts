@@ -5,6 +5,7 @@ import * as coverage from '../music/library-coverage.js';
 import { syncAllAfterTag } from '../music/playlist-sync.js';
 import { PROGRESS_PREFIX, EVENT_PREFIX, type TaggerProgress, type TaggerEvent } from '../music/tagger-progress.js';
 import { writePidfile, clearPidfile, readPidfile, isPidAlive, MANAGED_ENV } from '../music/tagger-lock.js';
+import * as subsonic from '../music/subsonic.js';
 
 type TaggerMode = 'tag' | 'analyze' | 'reconcile';
 
@@ -40,6 +41,8 @@ export const tagger: TaggerState = {
 
 // Buffer is capped at 100 in-process; admin surfaces only get this tail.
 const TAGGER_LOG_TAIL = 30;
+const NAVIDROME_SCAN_POLL_MS = 5000;
+const NAVIDROME_SCAN_MAX_MS = 2 * 60 * 60 * 1000;
 
 // Single snapshot source so GET /settings and GET /library/tagger can't drift.
 export function taggerView(): TaggerState {
@@ -72,6 +75,30 @@ function lastErrorText(): string | null {
 
 // Live handle for stopTagger() — cleared on the exit handler.
 let activeChild: ChildProcess | null = null;
+
+async function reconcileNavidromeAfterTag(): Promise<void> {
+  const started = Date.now();
+  try {
+    // A previous scan may still be finishing after a failed or interrupted run.
+    // Do not submit a second scan; wait for the existing one first.
+    while (await subsonic.scanInProgress()) {
+      if (Date.now() - started >= NAVIDROME_SCAN_MAX_MS) {
+        throw new Error('Navidrome scan did not finish within the two-hour reconciliation window');
+      }
+      await new Promise(resolve => setTimeout(resolve, NAVIDROME_SCAN_POLL_MS));
+    }
+    await subsonic.startScan();
+    while (await subsonic.scanInProgress()) {
+      if (Date.now() - started >= NAVIDROME_SCAN_MAX_MS) {
+        throw new Error('Navidrome scan did not finish within the two-hour reconciliation window');
+      }
+      await new Promise(resolve => setTimeout(resolve, NAVIDROME_SCAN_POLL_MS));
+    }
+    tagger.lastLog.push('[navidrome] post-tag reconciliation scan completed');
+  } catch (err: any) {
+    tagger.lastLog.push(`[warning] Navidrome post-tag reconciliation skipped: ${err?.message || String(err)}`);
+  }
+}
 
 // Caller must reject when `tagger.running` is already true.
 // re-* flags map to music/tag-library.ts: reseed (rebuild track_vectors + re-embed),
@@ -265,9 +292,12 @@ function spawnChild(mode: TaggerMode, args: string[], detail: string) {
       startedAt,
       finishedAt: new Date().toISOString(),
     };
-    // The run just walked the catalogue, and nothing else recounts unattended
-    // (#1570), so this is the one moment the total can refresh unasked.
-    coverage.refresh().catch(() => {});
+    // File-native semantic writes happen during the run. Reconcile Navidrome
+    // once before recounting, rather than letting its watcher scan continuously.
+    const settle = mode === 'tag'
+      ? reconcileNavidromeAfterTag()
+      : Promise.resolve();
+    settle.finally(() => coverage.refresh().catch(() => {})).catch(() => {});
     // Top up sync-enabled playlists (append-only). Fire-and-forget so a sync error
     // never touches the tagger's path.
     if (outcome === 'ok') syncAllAfterTag().catch(() => {});

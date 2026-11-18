@@ -55,7 +55,7 @@ export default definePickerTool({
           await library.load();
           const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
           if (vec) {
-            const sem = collect(library.tracksByVector(vec, 20, { excludeIds: knnExclude }));
+            const sem = collect(await library.tracksByVectorAsync(vec, 20, { excludeIds: knnExclude }));
             if (sem.length > 0) return sem;
           }
         }

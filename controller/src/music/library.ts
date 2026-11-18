@@ -9,6 +9,7 @@ import { openingKeyFrom, endingKeyFrom } from './mix.js';
 import { DEEP_CUT_DAYS, EMPTY_AIRED_INDEX, type AiredIndex } from './airing.js';
 import { trackKey, type CandidateLike } from './recency.js';
 import { isInstrumental } from './lyric-vocal.js';
+import { searchKnnAsync, closeVectorSearch } from './library-db/vector-search.js';
 
 let loaded = false;
 
@@ -19,11 +20,15 @@ export async function load() {
   // populated index on boot (#319). resolveEmbeddingDim() is only the fallback
   // for a never-tagged DB; a deliberate model swap goes via --reseed.
   await db.open({ embeddingDim: resolveEmbeddingDim(), adoptStoredDim: true });
+  await db.warmStats().catch(error => {
+    console.warn(`[library] initial stats worker failed; counts will retry in the background: ${error.message}`);
+  });
   loaded = true;
 }
 
 // Re-open after a backup restore swaps library.db underneath us.
 export async function reload() {
+  closeVectorSearch();
   if (db.isOpen()) db.close();
   loaded = false;
   invalidateAiredIndex();
@@ -32,6 +37,7 @@ export async function reload() {
 
 // Admin "Reset": unlike reload(), this deletes the file first.
 export async function reset() {
+  closeVectorSearch();
   loaded = false;
   invalidateAiredIndex();
   await db.reset();
@@ -54,6 +60,7 @@ export function checkpoint(): void {
 }
 
 export function shutdown(): void {
+  closeVectorSearch();
   if (db.isOpen()) db.close();
   loaded = false;
   invalidateAiredIndex();
@@ -379,6 +386,35 @@ export function tracksLikeThisAudio(seed: string, k: number, opts: db.KnnOpts = 
   return blocklist.rejectBlocked(out);
 }
 
+function hydrateKnn(hits: db.KnnHit[]): any[] {
+  const tracks = hits.flatMap(hit => {
+    const row = db.getTrack(hit.id);
+    return row ? [{ ...slimTrack(row), _similarity: hit.similarity }] : [];
+  });
+  return blocklist.rejectBlocked(tracks);
+}
+
+async function similarTracksAsync(seed: string, k: number, opts: db.KnnOpts, table: 'track_vectors' | 'track_audio_vectors'): Promise<any[]> {
+  if (!loaded || !seed) return [];
+  let hits = await searchKnnAsync(table, seed, k, opts);
+  if (!hits.length) {
+    for (const row of db.filter({ q: seed, limit: 8 }).rows) {
+      if (row.id === seed) continue;
+      hits = await searchKnnAsync(table, row.id, k, opts);
+      if (hits.length) break;
+    }
+  }
+  return hydrateKnn(hits);
+}
+
+export const tracksLikeThisAsync = (seed: string, k: number, opts: db.KnnOpts = {}) => similarTracksAsync(seed, k, opts, 'track_vectors');
+export const tracksLikeThisAudioAsync = (seed: string, k: number, opts: db.KnnOpts = {}) => similarTracksAsync(seed, k, opts, 'track_audio_vectors');
+
+export async function tracksByAudioVectorAsync(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): Promise<any[]> {
+  if (!loaded) return [];
+  return hydrateKnn(await searchKnnAsync('track_audio_vectors', vec, k, opts));
+}
+
 // The task-prefix mode the text-embedding index was built in — query embeds
 // must match it (embeddings.embedQueryText). 'plain' when the DB isn't loaded
 // or the meta predates mode tracking (legacy indexes were embedded bare).
@@ -388,8 +424,7 @@ export function embeddingIndexTextMode(): 'plain' | 'prefixed' {
 }
 
 // KNN against an externally-computed query vector (lyric-search free text).
-export function tracksByVector(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): any[] {
-  if (!loaded) return [];
+function textVectorFits(vec: number[] | Float32Array): boolean {
   // On embedding model drift the query vector stops matching the index dim and
   // knnByVector throws sqlite-vec's raw error at the DJ agent. Degrade to an
   // empty result instead.
@@ -401,8 +436,18 @@ export function tracksByVector(vec: number[] | Float32Array, k: number, opts: db
         `is ${meta.dim}-d (model: ${meta.model}). The embedding model changed — ` +
         `re-embed the library or pin settings.embedding back to the index's model.`,
     );
-    return [];
+    return false;
   }
+  return true;
+}
+
+export async function tracksByVectorAsync(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): Promise<any[]> {
+  if (!loaded || !textVectorFits(vec)) return [];
+  return hydrateKnn(await searchKnnAsync('track_vectors', vec, k, opts));
+}
+
+export function tracksByVector(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): any[] {
+  if (!loaded || !textVectorFits(vec)) return [];
   const hits = db.knnByVector(vec, k, opts);
   const out: any[] = [];
   for (const hit of hits) {
@@ -530,7 +575,7 @@ export function stats() {
   if (!loaded) {
     return { total: 0, mirrorTotal: 0, distinctArtists: 0, byMood: {}, byEnergy: {}, byGenre: {}, updatedAt: null, embeddingMeta: null };
   }
-  const s = db.stats();
+  const s = db.stats({ backgroundOnly: true });
   return {
     total: s.total,
     // Every row, tagged or not — NOT `total`, which counts only what the

@@ -176,6 +176,19 @@ export async function recordLike({ track, startedAt, ip }: RecordLikeInput): Pro
   return { ok: true, duplicate: false, count: countForSong(songId) };
 }
 
+// Idempotent undo of this listener's vote for this airing only. Earlier airings,
+// other listeners and operator curation are separate records and survive.
+export async function removeLike({ songId, startedAt, ip }: { songId: string; startedAt?: string | null; ip: string }): Promise<{ removed: boolean; count: number }> {
+  await load();
+  const airingKey = airingKeyFor(songId, startedAt);
+  const listenerKey = listenerKeyFor(ip);
+  const before = records.length;
+  records = records.filter(r => !(r.songId === songId && r.airingKey === airingKey && r.listenerKey === listenerKey && !isOperator(r)));
+  const removed = records.length !== before;
+  if (removed) scheduleFlush();
+  return { removed, count: countForSong(songId) };
+}
+
 // Idempotent per song: a double-tap can never write two records.
 export async function operatorLike(track: any): Promise<{ ok: boolean; added: boolean; count: number }> {
   await load();

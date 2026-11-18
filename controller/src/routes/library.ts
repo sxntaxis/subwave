@@ -206,7 +206,7 @@ router.get('/library/search-sound', requireAdmin, async (req, res) => {
       });
     }
     // Wide KNN, capped after the archive filter. Same width rule as /similar-tracks.
-    const hits = library.tracksByAudioVector(vecs[0], soundKnnWidth(limit));
+    const hits = await library.tracksByAudioVectorAsync(vecs[0], soundKnnWidth(limit));
     const results = hits
       .filter((t) => !subsonic.isStationArchive(t))
       .slice(0, limit)
@@ -469,8 +469,7 @@ router.get('/library/observatory/track/:id', requireAdmin, async (req, res) => {
 
     const textVec = db.getVector(id);
     const audioVec = db.getAudioVector(id);
-    const mixNext = library
-      .tracksLikeThis(id, 8)
+    const mixNext = (await library.tracksLikeThisAsync(id, 8))
       .map((n) => ({
         id: n.id,
         title: n.title,

@@ -34,7 +34,7 @@ export default definePickerTool({
     execute: async ({ songId }) => {
       try {
         await library.load();
-        const { tracks, matched, fellBack } = seedSimilarity(songId, 'text');
+        const { tracks, matched, fellBack } = await seedSimilarity(songId, 'text');
         if (tracks.length) {
           // Say which index answered. Without this the model reads audio
           // neighbours as mood/lyric matches and reasons about them on the

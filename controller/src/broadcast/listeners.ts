@@ -43,6 +43,27 @@ let lastStatus: StreamStatus = {
   sampleRate: null,
   channels: null,
 };
+let diagnosticLastOnline = false;
+let diagnosticLastCount = 0;
+let diagnosticAwaitingSourceAfterIdleResume = false;
+
+function radioDiagnostic(stage: string, detail: Record<string, string | number | boolean | null> = {}) {
+  if (process.env.SUBWAVE_RADIO_DIAGNOSTICS !== '1') return;
+  console.info(JSON.stringify({
+    type: 'radio-diagnostic',
+    component: 'controller',
+    stage,
+    monotonicMs: Number(performance.now().toFixed(1)),
+    approximateWallTime: new Date().toISOString(),
+    ...detail,
+  }));
+}
+
+// Diagnostic-only latch; fulfilled by the next already-scheduled successful
+// status poll that sees a live source after the idle gate was released.
+export function noteIdleResumeForDiagnostics(): void {
+  if (process.env.SUBWAVE_RADIO_DIAGNOSTICS === '1') diagnosticAwaitingSourceAfterIdleResume = true;
+}
 
 // Consecutive failed status polls before the last reading stops being trusted
 // (both cached `online` and the gated count). Under the limit we hold the last
@@ -159,6 +180,14 @@ async function pollCount(persistHistory: boolean) {
     peakSeen = Math.max(peakSeen, current);
     lastStatus = { online, listeners: { current, peak: peakSeen }, bitrate, sampleRate, channels };
     consecutiveStatusFailures = 0;
+    if (!diagnosticLastOnline && online) radioDiagnostic('source-observed-active');
+    if (diagnosticAwaitingSourceAfterIdleResume && online) {
+      radioDiagnostic('source-observed-after-idle-resume');
+      diagnosticAwaitingSourceAfterIdleResume = false;
+    }
+    if (diagnosticLastCount === 0 && current > 0) radioDiagnostic('listener-count-observed-positive', { listeners: current });
+    diagnosticLastOnline = online;
+    diagnosticLastCount = current;
   } catch {
     lastCount = null;
     // A transient fetch failure means "unknown", not offline (#461).

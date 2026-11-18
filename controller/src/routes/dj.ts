@@ -813,6 +813,9 @@ router.get('/dj/playlists', requireAdmin, async (_req, res) => {
 
 // Recently added tracks. Navidrome sorts only albums by recency, so expand the
 // newest albums into songs and flatten.
+let recentCache: { results: any[]; at: number } | null = null;
+const RECENT_CACHE_TTL_MS = 5 * 60 * 1000;
+
 router.get('/dj/recent', requireAdmin, async (req, res) => {
   const limit = Math.min(Math.max(parseInt(String(req.query?.limit || ''), 10) || 20, 1), 50);
   try {
@@ -820,12 +823,20 @@ router.get('/dj/recent', requireAdmin, async (req, res) => {
     const albums = await subsonic.getRecentlyAddedAlbums({ size: limit });
     // Bounded fan-out: unbounded Promise.all fired ~21 parallel getAlbum calls
     // and tipped a loaded Navidrome into failures (#786).
-    const songLists = await mapPool(albums, 5, (a: { id: string }) =>
-      subsonic.getAlbum(a.id).catch(() => []),
-    );
+    const songLists = await mapPool(albums, 5, (a: { id: string }) => subsonic.getAlbum(a.id));
     const results = songLists.flat().slice(0, limit).map(toAdminRow);
+    recentCache = { results, at: Date.now() };
     res.json({ results });
   } catch (err) {
+    if (subsonic.isSubsonicError(err)) {
+      queue.log('warn', `/dj/recent dependency unavailable: ${err.message}`);
+      if (recentCache && Date.now() - recentCache.at <= RECENT_CACHE_TTL_MS) {
+        res.setHeader('Warning', '110 - "Response is stale"');
+        return res.json({ results: recentCache.results.slice(0, limit), stale: true, staleAt: recentCache.at });
+      }
+      res.setHeader('Retry-After', '30');
+      return res.status(503).json({ error: 'navidrome_unavailable' });
+    }
     queue.log('error', `/dj/recent failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }

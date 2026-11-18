@@ -111,6 +111,7 @@ import {
 } from './queue/voice-io.js';
 import { awaitIntroRender, IntroRenderTracker } from './queue/intro-render.js';
 import { notifyQueued, notifySpoken } from './voice-events.js';
+import { AIR_HISTORY_TRACKS, airMessage, recoverAirMessages, retainAirMessages, type AirMessage } from './air-history.js';
 
 // One spoken segment, read twice: at commit (onQueued) and at air (onSpoken).
 interface SegmentDesc {
@@ -185,6 +186,7 @@ class Queue {
   upcoming: QueueItem[] = [];  // request items pushed by listeners, not yet playing
   current: QueueItem | null = null;    // what's broadcasting right now (request or auto)
   history: QueueItem[] = [];   // finished tracks, newest first
+  airMessages: AirMessage[] = []; // aired speech alongside the retained songs, independent of DJ sessions
   djLog: DjLogEntry[] = [];    // controller-level events for the web UI
   lastSeenKey: string | null = null;   // for change detection in the watcher
   _nowPlaying: NowPlaying | null = null;   // last parse of now-playing.json, refreshed by the watcher
@@ -230,6 +232,7 @@ class Queue {
           upcoming: this.upcoming,
           current: this.current,
           history: this.history,
+          airMessages: this.airMessages,
           // The rotate's boundary count (#1619). Snapshotted for the same
           // reason the queue itself is — a controller restart is routine, every
           // `--build controller` is one — and unlike `_trackStarts`, which is
@@ -276,7 +279,11 @@ class Queue {
       this.upcoming = (Array.isArray(stored.upcoming) ? stored.upcoming : [])
         .filter((i: QueueItem) => i?.track?.title && new Date(i.queuedAt || 0).getTime() > cutoff);
       this.current = stored.current || null;
-      this.history = Array.isArray(stored.history) ? stored.history : [];
+      this.history = Array.isArray(stored.history) ? stored.history.slice(0, AIR_HISTORY_TRACKS) : [];
+      const historySince = this.airHistorySince();
+      this.airMessages = Array.isArray(stored.airMessages)
+        ? retainAirMessages(stored.airMessages, historySince)
+        : recoverAirMessages(config.session.currentFile, config.session.dir, historySince);
       // Restore the rotate's count (#1619). Repaired, not trusted: this file is
       // on the operator's disk, and a junk value here decides how long the
       // station goes without a stinger. A snapshot written before this field
@@ -1515,7 +1522,7 @@ class Queue {
       try {
         this.log(kind, logText ?? text);
         this.noteHandoverSpeech(kind);
-        session.appendTurn({
+        const turn = session.appendTurn({
           role: 'segment',
           kind,
           text,
@@ -1525,6 +1532,14 @@ class Queue {
             ? { ...meta, airedAt: new Date(airedAt).toISOString() }
             : meta,
         });
+        const aired = airMessage(turn ?? {
+          t: new Date().toISOString(), role: 'segment', kind, text,
+          meta: airedAt != null ? { airedAt: new Date(airedAt).toISOString() } : {},
+        }, persona?.name ?? (meta.personaName as string | undefined));
+        if (aired) {
+          this.airMessages = retainAirMessages([...this.airMessages, aired], this.airHistorySince());
+          this.persist();
+        }
         notifySpoken({
           voiceId: handoff.voiceId,
           kind,
@@ -2055,9 +2070,10 @@ class Queue {
     if (this.current) {
       const endedAt = new Date().toISOString();
       this.history.unshift({ ...this.current, endedAt });
-      this.history = this.history.slice(0, 50);
+      this.history = this.history.slice(0, AIR_HISTORY_TRACKS);
+      this.airMessages = retainAirMessages(this.airMessages, this.airHistorySince());
       // The rolling 24h sidecar the picker's recents window reads; `history` is
-      // capped at 50 (~3h), too short for the observed repeat interval.
+      // capped at 100 (~6h), too short for the observed repeat interval.
       const t = this.current.track;
       if (t) {
         this._recentPlays.unshift({
@@ -2908,6 +2924,12 @@ class Queue {
     this.log('scheduler', 'Now-playing watcher started');
   }
 
+  airHistorySince(): number | null {
+    const oldest = this.history.at(-1)?.startedAt ?? this.current?.startedAt;
+    const at = oldest ? Date.parse(oldest) : NaN;
+    return Number.isFinite(at) ? at : null;
+  }
+
   snapshot() {
     const mapItem = (i: QueueItem) => ({
       // Named to match the subsonic_id already public on /now-playing; the
@@ -2921,6 +2943,9 @@ class Queue {
       startedAt: i.startedAt,
       endedAt: i.endedAt,
       queuedAt: i.queuedAt,
+      // Keep each airing's reason with that airing, not a session/track-id join
+      // that loses old comments or assigns a later repeat's reason to this play.
+      reason: i.aiPicked ? i.intent || undefined : undefined,
       sent: i.sent,
       // The operator block this row belongs to (#1622 FR 4), or absent. Carries
       // its own index/size rather than being counted here, so a block half
@@ -2936,6 +2961,7 @@ class Queue {
       current: this.current ? mapItem(this.current) : null,
       upcoming: this.upcoming.map(mapItem),
       history: this.history.map(mapItem),
+      airMessages: this.airMessages,
       // One operator-facing answer for the imminent FINALISED seam: effect flags
       // sit on opposite sides of the pair and stay proposals until the incoming
       // item drains, so the dashboard must not reverse-engineer precedence.

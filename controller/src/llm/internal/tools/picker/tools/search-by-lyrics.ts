@@ -29,7 +29,7 @@ export default definePickerTool({
         await library.load();
         const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
         if (!vec) return { error: 'embedding query failed' };
-        const list = library.tracksByVector(vec, 60, { excludeIds: knnExclude });
+        const list = await library.tracksByVectorAsync(vec, 60, { excludeIds: knnExclude });
         const out = collect(list);
         return out.length ? out : emptyResult(list.length, 'no thematic match in the lyric index — choose from your other tool results this round');
       }

@@ -20,7 +20,7 @@ export default definePickerTool({
     execute: async () => {
       try {
         await library.load();
-        const list = library.tracksByAudioVector(scope.audioWaypoint as number[], 60, { excludeIds: knnExclude });
+        const list = await library.tracksByAudioVectorAsync(scope.audioWaypoint as number[], 60, { excludeIds: knnExclude });
         const out = collect(list);
         return out.length ? out : emptyResult(list.length, 'the journey has no fresh tracks near this waypoint — pick via the library mood/genre/audio tools and keep the energy heading the same way');
       }

@@ -58,6 +58,7 @@ let weatherCache: { data: any; fetchedAt: number; configKey: string } = {
   configKey: '',
 };
 const WEATHER_TTL_MS = 30 * 60 * 1000;
+let publicWeatherRefresh: { key: string; promise: Promise<unknown> } | null = null;
 
 // Weather is settings-layer state: read the live settings cache, never a
 // config.weather mirror — onboarding and backup restore call settings.update()
@@ -89,6 +90,27 @@ function attributedLocation(weather = weatherConfig()) {
   return resolveOnAirLocation({ weather });
 }
 
+function unknownWeather(weather = weatherConfig()) {
+  return { condition: 'unknown', mood: null, temp: null,
+    tempUnit: weather.units === 'imperial' ? 'F' : 'C', location: attributedLocation(weather) };
+}
+
+/** Public metadata must never wait on an external forecast request. Serve the
+ * matching cached forecast (even stale), or unknown, and coalesce its refresh. */
+function weatherForPublicRead() {
+  const weather = weatherConfig();
+  const key = weatherConfigKey(weather);
+  const cached = weatherCache.configKey === key ? weatherCache.data : null;
+  if ((!cached || Date.now() - weatherCache.fetchedAt >= WEATHER_TTL_MS)
+    && publicWeatherRefresh?.key !== key) {
+    const promise = getWeather().catch(() => undefined).finally(() => {
+      if (publicWeatherRefresh?.promise === promise) publicWeatherRefresh = null;
+    });
+    publicWeatherRefresh = { key, promise };
+  }
+  return cached ?? unknownWeather(weather);
+}
+
 export async function getWeather() {
   const weather = weatherConfig();
   const configKey = weatherConfigKey(weather);
@@ -116,10 +138,12 @@ export async function getWeather() {
       isDay: data.current.is_day === 1,
       location: attributedLocation(weather),
     };
-    weatherCache = { data: result, fetchedAt: Date.now(), configKey };
+    if (weatherConfigKey(weatherConfig()) === configKey) {
+      weatherCache = { data: result, fetchedAt: Date.now(), configKey };
+    }
     return result;
   } catch {
-    return { condition: 'unknown', mood: null, temp: null, tempUnit, location: attributedLocation(weather) };
+    return unknownWeather(weather);
   }
 }
 
@@ -305,10 +329,10 @@ export function energyForDaypart(date = new Date()) {
 // festival, date, clock, active show, dominantMood) for a future moment — the
 // queue watcher picks the next track under the show that will be on air when it
 // plays. Weather and listener count stay live.
-export async function getFullContext(at?: Date) {
+export async function getFullContext(at?: Date, options: { cachedWeatherOnly?: boolean } = {}) {
   const now = at ?? new Date();
   const time = getTimeContext(now);
-  const weather = await getWeather();
+  const weather = options.cachedWeatherOnly ? weatherForPublicRead() : await getWeather();
   const festival = getFestivalContext(now);
   const date = getDateContext(now);
   const clock = getClockContext(now);

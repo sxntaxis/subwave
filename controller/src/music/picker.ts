@@ -307,7 +307,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // 1b. Embedding-KNN over the library; [] when the seed has no vector yet.
   if (currentTrack?.id) {
     try {
-      const knn = library.tracksLikeThis(currentTrack.id, 30, { excludeIds: knnExclude });
+      const knn = await library.tracksLikeThisAsync(currentTrack.id, 30, { excludeIds: knnExclude });
       add('embedding-similar', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_EMBEDDING_SIMILAR)));
     } catch {}
   }
@@ -326,12 +326,12 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // anchor is the journey's waypoint vector, so the pool drifts to the destination.
   if (audioWaypoint && audioWaypoint.length) {
     try {
-      const knn = library.tracksByAudioVector(audioWaypoint, 30, { excludeIds: knnExclude });
+      const knn = await library.tracksByAudioVectorAsync(audioWaypoint, 30, { excludeIds: knnExclude });
       add('audio-journey', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   } else if (currentTrack?.id) {
     try {
-      const knn = library.tracksLikeThisAudio(currentTrack.id, 30, { excludeIds: knnExclude });
+      const knn = await library.tracksLikeThisAudioAsync(currentTrack.id, 30, { excludeIds: knnExclude });
       add('audio-similar', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   }

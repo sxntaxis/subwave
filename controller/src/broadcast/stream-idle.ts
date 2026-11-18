@@ -16,10 +16,11 @@
 
 import * as settings from '../settings.js';
 import { warmHeavy } from '../audio/ttsHeavyClient.js';
-import { gatedListenerCount, refresh, setStreamIdle } from './listeners.js';
+import { gatedListenerCount, noteIdleResumeForDiagnostics, refresh, setStreamIdle } from './listeners.js';
 import { idleOn, idleOff, idleStatus } from './liquidsoap-control.js';
 import { queue } from './queue.js';
 import { nextIdleState, type IdleState } from './stream-idle-pure.js';
+import { PlaybackClock } from './playback-clock.js';
 
 // One tick every 5s. Live: read the 15s monitor's cached count. Idle: force a
 // fresh poll, so a new listener waits ~5s (worst case ~8s, since the forced
@@ -28,6 +29,26 @@ import { nextIdleState, type IdleState } from './stream-idle-pure.js';
 const TICK_MS = 5000;
 
 let state: IdleState = { idle: false, zeroSince: null };
+let gateAdopted = false;
+const playbackClock = new PlaybackClock();
+
+export function playbackTiming() {
+  return playbackClock.snapshot(queue.current?.startedAt);
+}
+
+let idleListenerDiagnosticReported = false;
+
+function radioDiagnostic(stage: string, detail: Record<string, string | number | boolean | null> = {}) {
+  if (process.env.SUBWAVE_RADIO_DIAGNOSTICS !== '1') return;
+  console.info(JSON.stringify({
+    type: 'radio-diagnostic',
+    component: 'controller',
+    stage,
+    monotonicMs: Number(performance.now().toFixed(1)),
+    approximateWallTime: new Date().toISOString(),
+    ...detail,
+  }));
+}
 
 // Read by GET /state so the player can tell "nobody's here" from "broken".
 export function isIdle() {
@@ -35,6 +56,16 @@ export function isIdle() {
 }
 
 async function tick() {
+  // A failed boot probe is unknown, not proof the mixer is live. Retry adoption
+  // so a controller-only deploy cannot strand a still-paused mixer on connect.
+  if (!gateAdopted) {
+    try {
+      state = { idle: await idleStatus(), zeroSince: null };
+      playbackClock.setIdle(state.idle, queue.current?.startedAt, Date.now());
+      setStreamIdle(state.idle);
+      gateAdopted = true;
+    } catch { return; }
+  }
   const st = settings.get()?.stream;
   const enabled = !!st?.idleWhenEmpty;
   const idleAfterMin = Number(st?.idleAfterMinutes) >= 1 ? Number(st?.idleAfterMinutes) : 10;
@@ -49,15 +80,26 @@ async function tick() {
     now: Date.now(),
     idleAfterMs: idleAfterMin * 60_000,
   });
+  if (state.idle && count !== null && count > 0 && !idleListenerDiagnosticReported) {
+    idleListenerDiagnosticReported = true;
+    radioDiagnostic('idle-listener-detected', { listeners: count });
+  }
   try {
     if (action === 'pause') {
-      await idleOn();
+      const idleResult = await idleOn();
+      radioDiagnostic(idleResult === 'OK' ? 'idle-entry-confirmed' : 'idle-entry-response-unconfirmed');
+      if (idleResult !== 'OK') { gateAdopted = false; return; }
       queue.log(
         'scheduler',
         `programme idle-paused — no listeners for ${idleAfterMin} min (mounts stay up, resumes on connect)`,
       );
     } else if (action === 'resume') {
-      await idleOff();
+      radioDiagnostic('idle-off-issued');
+      const idleResult = await idleOff();
+      radioDiagnostic(idleResult === 'OK' ? 'idle-off-confirmed' : 'idle-off-response-unconfirmed');
+      if (idleResult !== 'OK') { gateAdopted = false; return; }
+      if (idleResult === 'OK') noteIdleResumeForDiagnostics();
+      idleListenerDiagnosticReported = false;
       // Warm the tts-heavy sidecar (#1579): a cold Chatterbox reload is
       // 30-60s, audible if it lands on the first link after the room fills.
       // Not awaited and never throws — the render path reloads on its own, so
@@ -70,12 +112,15 @@ async function tick() {
           : 'programme resumed — idle pause released',
       );
     } else if (action === 'reassert') {
-      await idleOn();
+      if (await idleOn() !== 'OK') gateAdopted = false;
     }
   } catch {
+    gateAdopted = false;
+    if (action === 'resume') radioDiagnostic('idle-off-failed');
     return; // telnet unreachable — keep the current state, retry next tick
   }
   state = next;
+  playbackClock.setIdle(next.idle, queue.current?.startedAt, Date.now());
   setStreamIdle(next.idle);
 }
 
@@ -84,10 +129,10 @@ export function startStreamIdleMonitor() {
     // Adopt the gate's actual state: a restart mid-pause must not leave
     // Liquidsoap silent while we believe the programme is live.
     try {
-      if (await idleStatus()) {
-        state = { idle: true, zeroSince: null };
-        setStreamIdle(true);
-      }
+      state = { idle: await idleStatus(), zeroSince: null };
+      playbackClock.setIdle(state.idle, queue.current?.startedAt, Date.now());
+      setStreamIdle(state.idle);
+      gateAdopted = true;
     } catch {
       /* Liquidsoap not up yet — start live; ticks reconcile from here */
     }

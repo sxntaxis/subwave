@@ -2,6 +2,8 @@
 // embeddings, and the 2-D sound-map projection derived from them.
 
 import { requireDb } from './handle.js';
+import { queryKnn } from './knn-query.mjs';
+export { queryKnn } from './knn-query.mjs';
 
 export interface KnnHit {
   id: string;
@@ -47,10 +49,6 @@ export function knnByAudioVector(vec: number[] | Float32Array, k: number, opts: 
   return knnByBuffer(buf, k, null, 'track_audio_vectors', opts.excludeIds);
 }
 
-// How far past k the first pass widens for the exclusion set, as a multiple of k.
-// Sizing by the raw set size over-reads; the exact pass below covers the rest.
-const EXCLUDE_WIDEN_K_FACTOR = 3;
-
 // `table` is a hardcoded vec0 table name, never user input, so interpolating it
 // is safe; the MATCH buffer is still bound.
 function knnByBuffer(
@@ -60,28 +58,7 @@ function knnByBuffer(
   table: 'track_vectors' | 'track_audio_vectors',
   excludeIds?: ReadonlySet<string> | null,
 ): KnnHit[] {
-  const base = excludeId ? k + 1 : k;
-  const want = excludeIds ? excludeIds.size : 0;
-  const stmt = requireDb().prepare(
-    `SELECT id, distance FROM ${table} WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
-  );
-  const run = (limit: number): KnnHit[] => {
-    const rows = stmt.all(buf, limit) as Array<{ id: string; distance: number }>;
-    const hits: KnnHit[] = [];
-    for (const r of rows) {
-      if (excludeId && r.id === excludeId) continue;
-      if (excludeIds && excludeIds.has(r.id)) continue;
-      hits.push({ id: r.id, similarity: 1 - r.distance });
-      if (hits.length === k) break;
-    }
-    return hits;
-  };
-
-  const widened = Math.min(want, k * EXCLUDE_WIDEN_K_FACTOR);
-  const hits = run(base + widened);
-  // Short of k means the overlap is larger than assumed; pay for full widening.
-  if (hits.length < k && widened < want) return run(base + want);
-  return hits;
+  return queryKnn(requireDb(), buf, k, excludeId, table, excludeIds);
 }
 
 // Cheap gate: does this track have a CLAP vector, without decoding the blob.
@@ -175,5 +152,3 @@ export function setMapProjectionMeta(algo: string, space: string, count: number)
     )
     .run(algo, space, count, new Date().toISOString());
 }
-
-

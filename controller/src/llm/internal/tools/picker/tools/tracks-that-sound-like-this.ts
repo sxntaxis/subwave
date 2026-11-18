@@ -22,7 +22,7 @@ export default definePickerTool({
     execute: async ({ songId }) => {
       try {
         await library.load();
-        const { tracks, matched, fellBack } = seedSimilarity(songId, 'audio');
+        const { tracks, matched, fellBack } = await seedSimilarity(songId, 'audio');
         if (tracks.length) {
           return fellBack
             ? { tracks, note: `the seed has no audio fingerprint yet (audio analysis covers ${stats.withAudioEmbedding ?? 0} of ${stats.total} tracks so far), so these come from the mood/lyric index instead — they match the seed's tags and words, not its sound` }

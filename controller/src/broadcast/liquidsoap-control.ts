@@ -208,7 +208,9 @@ export async function idleOff() {
 // Returns true when the idle gate is active. `idle_status` replies "on"/"off".
 export async function idleStatus() {
   const res = await sendCommand('idle_status', 2000);
-  return /\bon\b/i.test(res);
+  if (res.trim() === 'on') return true;
+  if (res.trim() === 'off') return false;
+  throw new Error('Liquidsoap idle state was not confirmed');
 }
 
 interface DjQueueSnapshot {

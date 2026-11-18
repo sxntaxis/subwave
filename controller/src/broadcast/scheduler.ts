@@ -40,6 +40,7 @@ import { loadedCapabilities } from '../skills/loader.js';
 import { skillEligible } from '../skills/eligibility.js';
 import { getStationTimezone, onStationTimezoneChange } from '../time.js';
 import { withTrace, pruneOldEvents } from '../observability/events.js';
+import { beginPickerAudit, pickerAuditEnabled, type PickerAuditRecorder } from '../observability/picker-audit.js';
 import * as archives from './archives.js';
 import * as stemCacheStore from '../music/stem-cache.js';
 import * as stemBlendStore from './stem-blend.js';
@@ -82,7 +83,15 @@ async function tracksFromAlbums(albums: any[], perAlbum: number, max: number) {
 
 // Writes an M3U with mood-appropriate tracks for Liquidsoap's fallback source.
 export async function refreshAutoPlaylist() {
-  return withTrace({ kind: 'auto-playlist' }, () => refreshAutoPlaylistInner());
+  return withTrace({ kind: 'auto-playlist' }, async () => {
+    const audit = beginPickerAudit('auto_refresh', null);
+    try {
+      return await refreshAutoPlaylistInner(audit);
+    } catch (error) {
+      audit.finish({ outcome: 'error', fallbackPath: 'auto_playlist', fallbackReason: 'refresh_failed' });
+      throw error;
+    }
+  });
 }
 
 // Which show the file on disk holds (#1111); rules in auto-playlist-show.ts.
@@ -107,7 +116,7 @@ export async function refreshAutoPlaylistOnShowChange(reason: string): Promise<b
   return true;
 }
 
-async function refreshAutoPlaylistInner() {
+async function refreshAutoPlaylistInner(audit?: PickerAuditRecorder) {
   const ctx = await getFullContext();
   const mood = ctx.dominantMood;
   // Same library-scaled recency window as the live picker, keyed by BOTH id and
@@ -123,6 +132,7 @@ async function refreshAutoPlaylistInner() {
   // The fallback steers by the active show's genre/era/energy, mirroring
   // music/picker.ts (#629).
   const show: any = settings.resolveActiveShow();
+  audit?.setShowId(show?.id);
   // Multi-value lists (#929): OR within an attribute, AND across attributes.
   const showGenres: string[] = show?.genres ?? [];
   const eras = (show?.eras ?? []) as { fromYear: number | null; toYear: number | null }[];
@@ -409,6 +419,7 @@ async function refreshAutoPlaylistInner() {
   // max-track cue_out cap (#447) and the silence trim (music/silence-trim.ts).
   // No loudness / off / unmeasured → no stamp → unity and an untouched entry.
   for (const t of pool) await queue.applyLoudnessGain(t);
+  if (pickerAuditEnabled()) audit?.captureCandidates(pool.map((t: any) => t?.id));
 
   const lines = ['#EXTM3U', ...pool.map((t: any) => {
     const trim = silenceTrim.resolveSilenceTrim(t);
@@ -421,6 +432,7 @@ async function refreshAutoPlaylistInner() {
   // Atomic replace: Liquidsoap watches this file (reload_mode="watch"), so an
   // in-place write can trigger a reload of a truncated playlist.
   await writeFileAtomic(config.liquidsoap.autoPlaylist, lines.join('\n'));
+  audit?.finish({ outcome: pool.length ? 'success' : 'empty' });
   // The atomic rename swaps the inode, so the inotify watch can orphan itself
   // and loop a stale snapshot forever (#874). Force a telnet reload;
   // best-effort, so an unreachable mixer never fails the refresh.

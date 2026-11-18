@@ -640,7 +640,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}, explicitCurrent?: Candidate | null) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
@@ -710,6 +710,9 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   const candidates = excludedIds
     ? rawCandidates.filter((t) => t?.id && !excludedIds.has(t.id))
     : rawCandidates;
+  // Observe precisely the final list, immediately before its existing model
+  // boundary. The callback is best-effort and performs no candidate work.
+  try { opts.onAuditCandidates?.(candidates.map((c) => c?.id)); } catch {}
 
   const telemetry = (chosen?: Candidate): PickTelemetry => ({
     candidateCount: candidates.length,

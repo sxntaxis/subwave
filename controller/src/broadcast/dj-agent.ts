@@ -25,6 +25,7 @@ import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
+import { beginPickerAudit, pickerAuditEnabled } from '../observability/picker-audit.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
 import { showNoRepeatGuard } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
@@ -157,6 +158,9 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
+  const audit = beginPickerAudit('agent', null, showAt);
+  const auditSeen = pickerAuditEnabled() ? new Map<string, any>() : undefined;
+  try {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
@@ -175,6 +179,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // brief and buildTools' locks. Strict → a hard lock intersecting every tool's
   // results; soft → tracks exposed via showPlaylistTracks, no lock.
   const activeShow = settings.resolveActiveShow(showAt ?? undefined);
+  audit.setShowId(activeShow?.id);
   const playlistPool = activeShow ? await resolveShowPlaylistPool(activeShow) : null;
   const playlistLock = playlistPool && activeShow?.playlistStrict ? playlistPool.ids : null;
   const playlistTracks = playlistPool?.tracks ?? null;
@@ -248,6 +253,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // to the discovery tools without being unpacked on the way (see PickerRunArgs
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
+    ...(auditSeen ? { seen: auditSeen } : {}),
     recentIds,
     recentKeys,
     hardRecentIds,
@@ -268,12 +274,20 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     excludedIds,
   });
 
-  const run = await pickerAgent.run({
-    messages: session.windowMessages(),
-    scope,
-    showAt,
-  });
+  let run: Awaited<ReturnType<typeof pickerAgent.run>>;
+  try {
+    run = await pickerAgent.run({
+      messages: session.windowMessages(),
+      scope,
+      showAt,
+    });
+  } catch (error) {
+    if (auditSeen) audit.captureCandidates(auditSeen.keys());
+    audit.finish({ outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed' });
+    throw error;
+  }
   const { steps, toolCalls, extras } = run;
+  if (pickerAuditEnabled()) audit.captureCandidates(extras.seen.keys());
   let object = run.object;
 
   let song = object?.id ? extras.seen.get(object.id) : null;
@@ -327,6 +341,12 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls,
       cause: failure.kind,
     });
+    audit.finish({
+      outcome: 'rejected',
+      fallbackPath: 'pool',
+      fallbackReason: failure.kind,
+      toolCalls: toolCalls.length,
+    });
     // The verdict rides ON the error so the caller's catch can tell a model
     // that can't drive the harness (what the breaker catches) from tools that
     // had nothing to answer from.
@@ -362,8 +382,12 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   });
   // The pool rescue enqueues, links and records its own session turn, so a
   // rescued slot is a filled slot — runTrackEvent must treat it as done.
-  if (guarded.kind === 'rescued') return true;
+  if (guarded.kind === 'rescued') {
+    audit.finish({ outcome: 'fallback', fallbackPath: 'pool', fallbackReason: 'artist_guard_pool_rescue', toolCalls: toolCalls.length });
+    return true;
+  }
   if (guarded.kind === 'stale') {
+    audit.finish({ outcome: 'collision', chosenId: null, toolCalls: toolCalls.length });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
@@ -453,10 +477,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
   if (queued === 'stale') {
+    audit.finish({ outcome: 'collision', chosenId: song.id ?? null, toolCalls: toolCalls.length });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
-  if (queued !== 'queued') return false;
+  if (queued !== 'queued') {
+    audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length });
+    return false;
+  }
   session.appendTurn({
     role: 'dj', kind: 'pick',
     text: object.reason || `Selected "${song.title}".`,
@@ -483,7 +511,17 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     selectionPath: 'agent',
     fallback: false,
   });
+  audit.finish({
+    outcome: decisionPath === 'agent_repaired' ? 'repaired' : decisionPath === 'agent_repick' ? 'repicked' : 'success',
+    chosenId: song.id ?? null,
+    toolCalls: toolCalls.length,
+  });
   return true;
+  } catch (error) {
+    if (auditSeen) audit.captureCandidates(auditSeen.keys());
+    audit.finish({ outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_attempt_failed' });
+    throw error;
+  }
 }
 
 // The link's context with the clock stepped forward to `airAt`, the moment the
@@ -513,12 +551,29 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // tempo/key target instead of the current track. null → today's behaviour.
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
   // run's current waypoint vector, drifting the pool toward the destination.
-  const result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint, opts, current);
+  const audit = beginPickerAudit('pool', ctx?.activeShow?.id, showAt);
+  let result;
+  try {
+    result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint, {
+      ...opts,
+      ...(pickerAuditEnabled() ? { onAuditCandidates: ids => audit.captureCandidates(ids) } : {}),
+    }, current);
+  } catch (error) {
+    audit.finish({ outcome: 'error', fallbackReason: 'pool_candidate_build_or_model_error' });
+    throw error;
+  }
   if (!result) {
+    audit.finish({ outcome: 'empty', fallbackPath: 'auto_playlist', fallbackReason: 'no_candidates' });
     queue.log('picker', 'pool produced no pick');
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'pool_no_candidates', chosenTrackId: null, selectionPath: 'pool', fallback: true, fallbackReason: opts.avoidArtist ? 'no_candidates_avoiding_artist' : 'no_candidates' });
     return 'empty';
   }
+  const selectionOutcome = result.decisionPath === 'pool_repaired'
+    ? 'repaired'
+    : String(result.decisionPath || '').startsWith('pool_fallback') ? 'fallback' : 'success';
+  const fallbackReason = result.decisionPath === 'pool_fallback_llm_error'
+    ? 'model_error_first_candidate'
+    : result.decisionPath === 'pool_fallback_invalid_id' ? 'invalid_id_first_candidate' : undefined;
   // Build the link BEFORE enqueueing so it rides the queued item and airs when
   // the pick starts (#189).
   let link: string | null = null;
@@ -576,10 +631,12 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
   if (queued === 'stale') {
+    audit.finish({ outcome: 'collision', chosenId: result.song.id ?? null, fallbackReason: 'already_queued' });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), ...(result.telemetry || {}), decisionPath: 'collision_or_stale', chosenTrackId: null, selectionPath: 'pool', fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
   if (queued !== 'queued') {
+    audit.finish({ outcome: 'collision', chosenId: result.song.id ?? null, fallbackReason: 'enqueue_collision' });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), ...(result.telemetry || {}), decisionPath: 'collision_or_stale', chosenTrackId: result.song.id ?? null, selectionPath: 'pool', fallback: true, fallbackReason: 'collision' });
     return 'collision';
   }
@@ -610,6 +667,11 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
     selectionPath: 'pool',
     fallback: String(result.decisionPath || '').startsWith('pool_fallback'),
     fallbackReason: String(result.decisionPath || '').startsWith('pool_fallback') ? result.reason : null,
+  });
+  audit.finish({
+    outcome: selectionOutcome,
+    chosenId: result.song.id ?? null,
+    ...(fallbackReason ? { fallbackReason } : {}),
   });
   return 'queued';
 }

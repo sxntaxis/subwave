@@ -18,6 +18,10 @@ import { SEED_NOT_A_PICK_CLAUSE } from '../../../../util/pick-seed.js';
 import { slim } from './slim.js';
 
 export interface PickerScope {
+  // Optional attempt-local accumulator. The track picker supplies this so it
+  // can snapshot the same IDs exposed through PickerExtras even if the agent
+  // rejects/throws before returning extras. Not prompt/tool data.
+  seen?: Map<string, any>;
   recentIds: Set<string>;
   // lowercased "title|artist" — backfilled entries lack ids
   recentKeys: Set<string>;
@@ -121,7 +125,7 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     minTrackSec, playlistLock, excludedIds,
   } = scope;
 
-  const seen = new Map<string, any>();
+  const seen = scope.seen ?? new Map<string, any>();
 
   // Pushed into every KNN query so a heavily-aired cluster answers with its next
   // neighbours out instead of thinning toward empty.

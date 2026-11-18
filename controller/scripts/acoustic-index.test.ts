@@ -45,3 +45,18 @@ test('cold index fails open, warm index serves a coherent generation and invalid
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('failed warmup remains unavailable and close is terminal', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'acoustic-missing-'));
+  const index = createAcousticIndex(join(dir, 'missing.db'));
+  try {
+    assert.equal(await index.whenReady(500), false);
+    assert.equal(index.isFailed(), true);
+    assert.equal(await index.lookup(['fixture'], 750), null);
+    index.close();
+    assert.equal(await index.whenReady(5), false);
+  } finally {
+    index.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

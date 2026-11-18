@@ -28,7 +28,7 @@ export function createAcousticIndex(path: string) {
   const pending = new Map<number, Pending>();
   const readyWaiters = new Set<(ready: boolean) => void>();
   let child: ChildProcess | null = null;
-  let nextId = 0, closed = false;
+  let nextId = 0, closed = false, failed = false;
   function finishAll() {
     for (const p of pending.values()) { clearTimeout(p.timer); p.resolve(null); }
     pending.clear();
@@ -59,15 +59,21 @@ export function createAcousticIndex(path: string) {
         return;
       }
       if (message.type === 'stale' || message.type === 'unavailable') metrics.ready = false;
+      if (message.type === 'unavailable') {
+        failed = true;
+        finishAll();
+        process.kill();
+        return;
+      }
       const p = pending.get(message.requestId);
       if (!p) return;
       pending.delete(message.requestId); clearTimeout(p.timer);
       if (!p.expired) p.resolve(message.type === 'result' && Array.isArray(message.rows) ? message.rows : null);
     });
-    process.on('error', () => { metrics.ready = false; finishAll(); });
-    process.on('exit', () => { metrics.ready = false; child = null; finishAll(); });
+    process.on('error', () => { if (!closed) failed = true; metrics.ready = false; finishAll(); });
+    process.on('exit', () => { if (!closed) failed = true; metrics.ready = false; child = null; finishAll(); });
     process.send({ version: 1, type: 'warm', path });
-  } catch { metrics.ready = false; }
+  } catch { metrics.ready = false; failed = true; }
   function lookup(ids: readonly string[], timeoutMs: number): Promise<IndexedAcousticRow[] | null> {
     if (closed || !child?.connected || !metrics.ready || pending.size >= 8 || timeoutMs <= 0
       || !ids.length || ids.length > 262 || new Set(ids).size !== ids.length
@@ -99,17 +105,27 @@ export function createAcousticIndex(path: string) {
       readyWaiters.add(waiter);
     });
   }
-  return { lookup, close, metrics, whenReady };
+  return { lookup, close, metrics, whenReady, isFailed: () => failed || closed };
 }
 
 let shared: ReturnType<typeof createAcousticIndex> | null = null;
 let sharedNonce: string | null = null;
+let failures = 0, retryAt = 0;
+const retryDelays = [5_000, 30_000, 120_000];
 export function getSharedAcousticIndex() {
   const nonce = getDbNonce();
-  if (shared && sharedNonce !== nonce) { shared.close(); shared = null; }
+  if (shared && sharedNonce !== nonce) {
+    shared.close(); shared = null; failures = 0; retryAt = 0;
+  }
+  if (shared?.metrics.ready) { failures = 0; retryAt = 0; }
+  if (shared?.isFailed()) {
+    shared.close(); shared = null;
+    retryAt = Date.now() + retryDelays[Math.min(failures++, retryDelays.length - 1)];
+  }
+  if (!shared && Date.now() < retryAt) return null;
   if (!shared) { shared = createAcousticIndex(requireDb().name); sharedNonce = nonce; }
   return shared;
 }
 export function closeAcousticIndex() {
-  shared?.close(); shared = null; sharedNonce = null;
+  shared?.close(); shared = null; sharedNonce = null; failures = 0; retryAt = 0;
 }

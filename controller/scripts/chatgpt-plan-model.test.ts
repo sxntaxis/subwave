@@ -78,6 +78,19 @@ test('subscription quota prevents immediate repeated requests', async () => {
   assert.equal(calls, 1);
 });
 
+test('permission refusal does not repeatedly contact the plan endpoint', async () => {
+  let calls = 0;
+  const fakeFetch: typeof fetch = async () => {
+    calls++;
+    return Response.json({ error: { code: 'subscription_sharing_user_not_eligible' } }, { status: 403 });
+  };
+  const model = createPlanModel('fixture', async () => 'session-fixture', fakeFetch);
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }] }), { code: 'subscription_sharing_user_not_eligible', statusCode: 403 });
+  }
+  assert.equal(calls, 1);
+});
+
 test('specific forced tool is isolated and provider tools are refused', () => {
   const body = planRequest('fixture', {
     prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }],

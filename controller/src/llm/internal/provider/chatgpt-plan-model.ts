@@ -140,9 +140,11 @@ export function createPlanModel(
 ): LanguageModelV4 {
   let quotaUntil = 0;
   let unavailableUntil = 0;
+  let unavailableStatus = 404;
+  let unavailableCode = 'model_unavailable';
   const generate = async (options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> => {
     if (Date.now() < quotaUntil) throw new PlanStreamError('subscription_sharing_usage_limit_exceeded');
-    if (Date.now() < unavailableUntil) throw new PlanStreamError('model_unavailable', 404);
+    if (Date.now() < unavailableUntil) throw new PlanStreamError(unavailableCode, unavailableStatus);
     const body = planRequest(modelId, options);
     options.abortSignal?.throwIfAborted();
     const token = await credential();
@@ -156,7 +158,13 @@ export function createPlanModel(
     if (!response.ok) {
       const code = await errorCode(response) || `http_${response.status}`;
       if (response.status === 401 && onUnauthorized) await onUnauthorized(token).catch(() => {});
-      if (response.status === 404) unavailableUntil = Date.now() + 15 * 60_000;
+      // Admission refusals and missing models do not improve by asking the
+      // identical question again in djObject's recovery path or on every track.
+      if (response.status === 403 || response.status === 404) {
+        unavailableUntil = Date.now() + 15 * 60_000;
+        unavailableStatus = response.status;
+        unavailableCode = code;
+      }
       if (code === 'subscription_sharing_usage_limit_exceeded' || code === 'subscription_sharing_usage_unavailable') quotaUntil = Date.now() + 15 * 60_000;
       throw new PlanStreamError(code, response.status);
     }

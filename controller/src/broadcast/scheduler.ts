@@ -131,8 +131,10 @@ async function refreshAutoPlaylistInner(audit?: PickerAuditRecorder) {
 
   // The fallback steers by the active show's genre/era/energy, mirroring
   // music/picker.ts (#629).
-  const show: any = settings.resolveActiveShow();
+  const showAt = new Date();
+  const show: any = settings.resolveActiveShow(showAt);
   audit?.setShowId(show?.id);
+  audit?.setShowAt(showAt);
   // Multi-value lists (#929): OR within an attribute, AND across attributes.
   const showGenres: string[] = show?.genres ?? [];
   const eras = (show?.eras ?? []) as { fromYear: number | null; toYear: number | null }[];

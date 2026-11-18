@@ -24,6 +24,7 @@ test('agent, pool and auto refresh retain ordered unique IDs and safe outcome fi
       enabled: true, attemptId: 'trace-fixture', now: NOW, write: event => events.push(event),
     });
     audit.setShowId('show-fixture');
+    audit.setShowAt(new Date('2026-11-18T12:00:00.000Z'));
     audit.captureCandidates(['one', null, 'two', 'one', undefined]);
     audit.finish({ outcome: 'repaired', chosenId: 'two', toolCalls: 3 });
     audit.finish({ outcome: 'error', fallbackReason: 'must_not_replace_first_record' });

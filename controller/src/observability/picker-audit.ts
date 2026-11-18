@@ -108,6 +108,7 @@ export async function appendPickerAuditEvent(event: PickerAuditEvent, directory 
 
 export interface PickerAuditRecorder {
   setShowId(id: string | null | undefined): void;
+  setShowAt(at: Date | string | null | undefined): void;
   captureCandidates(ids: Iterable<string | null | undefined>): void;
   finish(result: PickerAuditResult): void;
 }
@@ -123,7 +124,7 @@ export function createPickerAuditRecorder(
     write: (event: PickerAuditEvent) => void;
   },
 ): PickerAuditRecorder {
-  const showAtIso = showAt instanceof Date
+  let showAtIso = showAt instanceof Date
     ? (Number.isFinite(showAt.getTime()) ? showAt.toISOString() : null)
     : (typeof showAt === 'string' ? showAt : null);
   let resolvedShowId = showId ?? null;
@@ -131,6 +132,11 @@ export function createPickerAuditRecorder(
   let finished = false;
   return {
     setShowId(id) { resolvedShowId = id ?? null; },
+    setShowAt(at) {
+      showAtIso = at instanceof Date
+        ? (Number.isFinite(at.getTime()) ? at.toISOString() : null)
+        : (typeof at === 'string' ? at : null);
+    },
     captureCandidates(ids) {
       if (!options.enabled || finished) return;
       const seen = new Set(candidates);

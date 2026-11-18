@@ -73,14 +73,22 @@ provider and lists models when the session is connected.
 ## Failure and rollback
 
 The provider waits for `response.completed` before it exposes text or tools.
-Quota and authorization failures stop same-leg retries; quota failures are
-temporarily held off to avoid hammering the account. Automatic fallback from a
+Quota and authorization failures stop same-leg retries; subscription limits
+and admission refusals pause further plan requests until the operator clears
+the refusal. Automatic fallback from a
 plan primary is restricted to an explicitly configured local Ollama model:
 it never silently switches to a metered API. Existing non-LLM music recovery
 remains in place.
 
 `status` returns `connected`, `disconnected`, `reauth_required`, or
-`unavailable`. A reauthentication needs `connect` on the browser machine;
+`unavailable`, with a sanitized reason when requests are paused. After reviewing
+the limit or permission in ChatGPT, explicitly retry:
+
+```sh
+docker exec sub-wave-controller node_modules/.bin/tsx scripts/chatgpt-plan-auth.ts retry /run/subwave-chatgpt-plan
+```
+
+A reauthentication needs `connect` on the browser machine;
 never run that command concurrently with active controller refreshes against
 the same session. Disconnect using the CLI, and if remote revocation could not
 be confirmed, remove the app from ChatGPT settings.

@@ -251,7 +251,9 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
       break;
     }
     case 'chatgpt-plan': {
-      model = createPlanModel(id, () => planSession().getAuthorizedCredential(), fetch, token => planSession().markReauthRequired(token));
+      model = createPlanModel(id, () => planSession().getAuthorizedCredential(), fetch,
+        token => planSession().markReauthRequired(token),
+        (token, reason) => planSession().blockRequests(token, reason));
       break;
     }
     case 'openai-compatible': {

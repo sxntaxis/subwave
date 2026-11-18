@@ -4,6 +4,12 @@ import type { LanguageModelV4, LanguageModelV4CallOptions, LanguageModelV4Conten
 import { readPlanCompletion, PlanStreamError } from './chatgpt-plan-sse.js';
 
 const NAMESPACE = 'subwave';
+const ADMISSION_CODES = new Set([
+  'subscription_sharing_user_not_eligible',
+  'subscription_sharing_route_not_supported',
+  'chatpass_v2_scope_not_authorized',
+  'chatpass_v2_invalid_authorization_context',
+]);
 type Obj = Record<string, unknown>;
 const record = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 
@@ -137,6 +143,7 @@ export function createPlanModel(
   credential: () => Promise<string>,
   fetchImpl: typeof fetch = fetch,
   onUnauthorized?: (rejectedToken: string) => Promise<void>,
+  onBlock?: (rejectedToken: string, reason: 'subscription_sharing_usage_limit_exceeded' | 'admission_denied') => Promise<void>,
 ): LanguageModelV4 {
   let quotaUntil = 0;
   let unavailableUntil = 0;
@@ -161,18 +168,44 @@ export function createPlanModel(
       // Admission refusals and missing models do not improve by asking the
       // identical question again in djObject's recovery path or on every track.
       if (response.status === 403 || response.status === 404) {
-        unavailableUntil = Date.now() + 15 * 60_000;
+        let persisted = false;
+        if (response.status === 403 && onBlock) {
+          try { await onBlock(token, 'admission_denied'); persisted = true; } catch { /* use local backoff */ }
+        }
+        unavailableUntil = persisted ? 0 : Date.now() + 15 * 60_000;
         unavailableStatus = response.status;
         unavailableCode = code;
       }
-      if (code === 'subscription_sharing_usage_limit_exceeded' || code === 'subscription_sharing_usage_unavailable') quotaUntil = Date.now() + 15 * 60_000;
+      if (code === 'subscription_sharing_usage_limit_exceeded') {
+        let persisted = false;
+        if (onBlock) {
+          try { await onBlock(token, 'subscription_sharing_usage_limit_exceeded'); persisted = true; } catch { /* use local backoff */ }
+        }
+        quotaUntil = persisted ? 0 : Date.now() + 15 * 60_000;
+      } else if (code === 'subscription_sharing_usage_unavailable') quotaUntil = Date.now() + 15 * 60_000;
       throw new PlanStreamError(code, response.status);
     }
     if (!response.body) throw new PlanStreamError('missing_stream');
     try {
       return planResult(await readPlanCompletion(response.body, signal));
     } catch (error) {
-      if (error instanceof PlanStreamError && (error.code === 'subscription_sharing_usage_limit_exceeded' || error.code === 'subscription_sharing_usage_unavailable')) quotaUntil = Date.now() + 15 * 60_000;
+      if (error instanceof PlanStreamError && error.code === 'subscription_sharing_usage_limit_exceeded') {
+        let persisted = false;
+        if (onBlock) {
+          try { await onBlock(token, 'subscription_sharing_usage_limit_exceeded'); persisted = true; } catch { /* use local backoff */ }
+        }
+        quotaUntil = persisted ? 0 : Date.now() + 15 * 60_000;
+      } else if (error instanceof PlanStreamError && ADMISSION_CODES.has(error.code)) {
+        let persisted = false;
+        if (onBlock) {
+          try { await onBlock(token, 'admission_denied'); persisted = true; } catch { /* use local backoff */ }
+        }
+        if (!persisted) {
+          unavailableUntil = Date.now() + 15 * 60_000;
+          unavailableStatus = 403;
+          unavailableCode = error.code;
+        }
+      } else if (error instanceof PlanStreamError && error.code === 'subscription_sharing_usage_unavailable') quotaUntil = Date.now() + 15 * 60_000;
       throw error;
     }
   };

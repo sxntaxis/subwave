@@ -60,4 +60,5 @@ working-tree snapshot is under
 `/mnt/Tokyo/Lab/.tmp/opencode/subwave-chatgpt-baseline-44842565`.
 
 Focused provider tests cover refresh rotation and restart using deterministic
-fixtures. A real token renewal after expiry has not yet been observed.
+fixtures. A one-time check also verified a real OAuth token renewal after the
+controller restart.

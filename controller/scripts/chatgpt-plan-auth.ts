@@ -113,12 +113,19 @@ async function connect(session: PlanSession) {
 }
 
 async function main() {
-  if (!isAbsolute(directory) || !['connect', 'status', 'disconnect', 'models', 'probe', 'activate'].includes(command)) {
-    throw new Error('Usage: tsx scripts/chatgpt-plan-auth.ts <connect|status|disconnect|models|probe|activate> </absolute/private/directory> [model]');
+  if (!isAbsolute(directory) || !['connect', 'status', 'disconnect', 'models', 'probe', 'activate', 'retry'].includes(command)) {
+    throw new Error('Usage: tsx scripts/chatgpt-plan-auth.ts <connect|status|disconnect|models|probe|activate|retry> </absolute/private/directory> [model]');
   }
   const session = new PlanSession(directory);
   if (command === 'connect') await connect(session);
-  else if (command === 'status') console.log(`ChatGPT plan: ${(await session.status()).status}`);
+  else if (command === 'status') {
+    const state = await session.status();
+    console.log(`ChatGPT plan: ${state.status}${state.error ? ` (${state.error})` : ''}`);
+  }
+  else if (command === 'retry') {
+    await session.retryRequests();
+    console.log('ChatGPT plan refusal cleared; the next request will retry.');
+  }
   else if (command === 'disconnect') {
     const result = await session.disconnect();
     console.log(result.revoked ? 'Disconnected and revoked.' : 'Disconnected locally; remote revocation was not confirmed. Disconnect the app in ChatGPT Settings.');
@@ -134,7 +141,7 @@ async function main() {
   } else if (command === 'probe') {
     const modelId = process.argv[4] || '';
     if (!modelId || modelId.length > 100) throw new Error('Provide an account-available model ID.');
-    const model = createPlanModel(modelId, () => session.getAuthorizedCredential(), fetch, token => session.markReauthRequired(token));
+    const model = createPlanModel(modelId, () => session.getAuthorizedCredential(), fetch, token => session.markReauthRequired(token), (token, reason) => session.blockRequests(token, reason));
     const result = await generateText({ model, prompt: 'Reply with the word OK.', maxRetries: 0, abortSignal: AbortSignal.timeout(45_000) });
     if (!result.text.trim()) throw new Error('The model returned an empty response.');
     console.log(`ChatGPT plan model ${modelId}: response completed.`);

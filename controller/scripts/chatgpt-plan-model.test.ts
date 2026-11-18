@@ -91,6 +91,29 @@ test('permission refusal does not repeatedly contact the plan endpoint', async (
   assert.equal(calls, 1);
 });
 
+test('a persisted subscription limit blocks future requests until operator retry', async () => {
+  let blocked = false;
+  let calls = 0;
+  const fakeFetch: typeof fetch = async () => {
+    calls++;
+    return new Response('data: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}\n\n');
+  };
+  const model = createPlanModel('fixture', async () => {
+    if (blocked) throw new Error('session blocked');
+    return 'session-fixture';
+  }, fakeFetch, undefined, async (_token, reason) => {
+    assert.equal(reason, 'subscription_sharing_usage_limit_exceeded');
+    blocked = true;
+  });
+  const options = { prompt: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'test' }] }] };
+  await assert.rejects(model.doGenerate(options));
+  await assert.rejects(model.doGenerate(options), /session blocked/);
+  assert.equal(calls, 1);
+  blocked = false;
+  await assert.rejects(model.doGenerate(options));
+  assert.equal(calls, 2, 'explicit retry reopens the request');
+});
+
 test('specific forced tool is isolated and provider tools are refused', () => {
   const body = planRequest('fixture', {
     prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }],

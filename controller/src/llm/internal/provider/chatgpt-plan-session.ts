@@ -31,6 +31,7 @@ export interface PlanSessionRecord {
   pending?: Credentials;
   pendingReceivedAt?: number;
   reauthRequired?: boolean;
+  blockedReason?: 'subscription_sharing_usage_limit_exceeded' | 'admission_denied';
 }
 type VerifyIdentity = (token: string, clientId: string, receivedAt?: number) => Promise<string>;
 
@@ -67,11 +68,13 @@ function parseRecord(value: unknown): PlanSessionRecord {
   if (v.pending && (typeof v.pendingReceivedAt !== 'number' || !Number.isSafeInteger(v.pendingReceivedAt) ||
       v.pendingReceivedAt <= 0 || v.pendingReceivedAt > Date.now() + 5_000)) throw new PlanStreamError('invalid_session');
   if (v.reauthRequired !== undefined && typeof v.reauthRequired !== 'boolean') throw new PlanStreamError('invalid_session');
+  if (v.blockedReason !== undefined && v.blockedReason !== 'subscription_sharing_usage_limit_exceeded' && v.blockedReason !== 'admission_denied') throw new PlanStreamError('invalid_session');
   return {
     version: 1, clientId: v.clientId, subject: v.subject,
     credentials: credentials(v.credentials),
     ...(v.pending ? { pending: credentials(v.pending), pendingReceivedAt: v.pendingReceivedAt } : {}),
     ...(v.reauthRequired ? { reauthRequired: true } : {}),
+    ...(v.blockedReason ? { blockedReason: v.blockedReason } : {}),
   };
 }
 
@@ -150,11 +153,12 @@ export class PlanSession {
     await this.#locked(async () => { await this.#write(parsed); });
   }
 
-  async status(): Promise<{ status: 'connected' | 'reauth_required' | 'disconnected' | 'unavailable' }> {
+  async status(): Promise<{ status: 'connected' | 'reauth_required' | 'disconnected' | 'unavailable'; error?: string }> {
     try {
       return await this.#locked(async () => {
         const saved = await this.#read();
         if (saved.reauthRequired || !saved.credentials.scopes.includes(SHARING_SCOPE)) return { status: 'reauth_required' };
+        if (saved.blockedReason) return { status: 'unavailable', error: saved.blockedReason };
         if (saved.pending) return { status: 'unavailable' };
         return { status: 'connected' };
       });
@@ -219,6 +223,7 @@ export class PlanSession {
     return this.#locked(async () => {
       const saved = await this.#read();
       if (saved.reauthRequired) throw new PlanStreamError('reauth_required');
+      if (saved.blockedReason) throw new PlanStreamError(saved.blockedReason, saved.blockedReason === 'admission_denied' ? 403 : 429);
       if (saved.pending) await this.#finishRotation(saved);
       if (!saved.credentials.scopes.includes(SHARING_SCOPE)) throw new PlanStreamError('sharing_not_enabled');
       const now = Date.now();
@@ -237,6 +242,23 @@ export class PlanSession {
       const saved = await this.#read();
       if (saved.credentials.accessToken !== rejectedToken) return;
       saved.reauthRequired = true;
+      await this.#write(saved);
+    });
+  }
+
+  async blockRequests(rejectedToken: string, reason: 'subscription_sharing_usage_limit_exceeded' | 'admission_denied'): Promise<void> {
+    await this.#locked(async () => {
+      const saved = await this.#read();
+      if (saved.credentials.accessToken !== rejectedToken) return;
+      saved.blockedReason = reason;
+      await this.#write(saved);
+    });
+  }
+
+  async retryRequests(): Promise<void> {
+    await this.#locked(async () => {
+      const saved = await this.#read();
+      delete saved.blockedReason;
       await this.#write(saved);
     });
   }

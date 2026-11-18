@@ -120,7 +120,7 @@ interface LlmSectionProps extends SectionProps {
   refresh: () => void;
 }
 export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch, refresh, fieldErrors }: LlmSectionProps) {
-  const planStatus = useAdminQuery<{ status: string }>({
+  const planStatus = useAdminQuery<{ status: string; error?: string }>({
     key: ['llm', 'chatgpt-plan', 'status'],
     adminFetch,
     enabled: form.llm.provider === 'chatgpt-plan' || (form.llm.fallback.enabled && form.llm.fallback.provider === 'chatgpt-plan'),
@@ -436,6 +436,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           {form.llm.provider === 'chatgpt-plan' && (
             <div className="field-hint">
               ChatGPT plan session: <strong>{planStatus.isLoading ? 'checking' : planStatus.data?.status ?? 'unavailable'}</strong>.
+              {planStatus.data?.error && <> Reason: <code>{planStatus.data.error}</code>. Review usage and use the CLI retry command when ready.</>}
               Connect or reconnect using the local authorization command in the ChatGPT plan runbook.
               This is separate from the metered OpenAI API. Existing embeddings may still have their own charges.{' '}
               <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage ChatGPT usage</a>.

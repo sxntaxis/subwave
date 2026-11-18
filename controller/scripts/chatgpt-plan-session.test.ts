@@ -107,3 +107,19 @@ test('a late unauthorized response cannot invalidate a newer session', async () 
     assert.equal((await session.status()).status, 'reauth_required');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('quota and admission refusals persist across restart until an explicit retry', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'plan-session-'));
+  try {
+    const deps = { verifyIdentity: async () => 'fixture-subject' };
+    const session = new PlanSession(dir, deps);
+    await session.install({ ...base, credentials: { ...base.credentials, expiresAt: Date.now() + 3600_000 } });
+    await session.blockRequests('old-token', 'subscription_sharing_usage_limit_exceeded');
+    const restarted = new PlanSession(dir, deps);
+    assert.deepEqual(await restarted.status(), { status: 'unavailable', error: 'subscription_sharing_usage_limit_exceeded' });
+    await assert.rejects(restarted.getAuthorizedCredential(), { code: 'subscription_sharing_usage_limit_exceeded' });
+    await restarted.retryRequests();
+    assert.equal(await restarted.getAuthorizedCredential(), 'old-token');
+    assert.equal((await restarted.status()).status, 'connected');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

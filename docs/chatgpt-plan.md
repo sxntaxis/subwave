@@ -102,6 +102,12 @@ prior image and original Compose file list are in
 private directory is a sensitive snapshot, not a file to publish or restore
 wholesale over newer station changes.
 
+The web image was intentionally not rebuilt: this checkout has unrelated
+pre-existing web lint failures and undeployed web edits. The newer Settings UI
+connection status and model picker are in source, but are not in the running
+web image. Use the controller CLI above for connection status, discovery and
+activation until a separately verified web deployment is ready.
+
 The previous primary was OpenRouter model `deepseek/deepseek-v4-flash-0731`.
 Switching back to it may incur OpenRouter charges. To roll back code, first
 select that provider and model in admin Settings, then recreate **only** the

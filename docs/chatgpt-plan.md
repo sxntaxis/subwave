@@ -90,3 +90,37 @@ Settings. Restore the prior controller image and Compose configuration if
 rolling back code. Keep the pinned embedding provider and index unchanged; do
 not delete or rebuild the library. For this installation the before-state
 provider and image are recorded in the protected deployment snapshot.
+
+### This installation
+
+The active controller override is `~/.config/subwave-deploy/chatgpt-plan.yml`.
+Its credential-free image build context is
+`~/.config/subwave-deploy/chatgpt-plan-build`; it layers the provider onto the
+pre-deployment controller image, preserving customizations in that image. The
+prior image and original Compose file list are in
+`~/.config/subwave-deploy/live-images.json`. `live-settings.json` in the same
+private directory is a sensitive snapshot, not a file to publish or restore
+wholesale over newer station changes.
+
+The previous primary was OpenRouter model `deepseek/deepseek-v4-flash-0731`.
+Switching back to it may incur OpenRouter charges. To roll back code, first
+select that provider and model in admin Settings, then recreate **only** the
+controller with the original Compose file list:
+
+```sh
+python3 - <<'PY'
+import json, subprocess
+from pathlib import Path
+info = json.loads((Path.home() / '.config/subwave-deploy/live-images.json').read_text())
+files = info['sub-wave-controller']['compose_files'].split(',')
+cmd = ['docker', 'compose']
+for file in files:
+    cmd.extend(['-f', file])
+cmd.extend(['up', '-d', '--no-deps', '--no-build', '--pull', 'never', 'controller'])
+subprocess.run(cmd, check=True)
+PY
+```
+
+This leaves the pinned OpenRouter embedding configuration and existing library
+index in place. The original Compose list includes operator-managed override
+files under `/mnt/Tokyo/Lab/.tmp/opencode`; preserve those files.

@@ -54,7 +54,9 @@ provider overlay added; broadcast and web images were not rebuilt. The
 operator-owned controller override is at
 `~/.config/subwave-deploy/chatgpt-plan.yml`, and the separate private credential
 directory is `~/.config/subwave-chatgpt-plan`. Earlier deployment overrides
-remain required too. The prior image and settings snapshot are recorded under
+remain required too. Protected copies of the prior image metadata and settings
+snapshot are under `~/.config/subwave-deploy/`; the preserved pre-existing
+working-tree snapshot is under
 `/mnt/Tokyo/Lab/.tmp/opencode/subwave-chatgpt-baseline-44842565`.
 
 Focused provider tests cover refresh rotation and restart using deterministic

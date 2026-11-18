@@ -284,6 +284,11 @@ const QUOTA_RE = /usage limit|quota|exceeded your current|insufficient[ _]?(quot
 // DJ Brain's monthly cap: a 429 that does not move until the month rolls.
 const BRAIN_CAP_CODE = 'monthly_cap';
 const BRAIN_CAP_RE = /monthly [\w-]+ budget reached|overage runaway ceiling reached|no cloud-voice budget/i;
+const PLAN_REFUSALS = new Set([
+  'subscription_sharing_usage_limit_exceeded', 'subscription_sharing_usage_unavailable',
+  'sign_in_required', 'reauth_required', 'sharing_not_enabled', 'account_mismatch',
+  'session_directory_unconfigured', 'invalid_session', 'unsafe_session_file', 'unsafe_session_directory',
+]);
 
 // The upstream's machine-readable error code, when the SDK preserved the body.
 // Preferred over message-sniffing, which a reword would defeat.
@@ -311,7 +316,14 @@ export function isQuotaOrAuthError(err: ErrorLike | null | undefined): boolean {
   // Monthly cap: by code first, message second.
   if (upstreamErrorCode(err) === BRAIN_CAP_CODE) return true;
   if (BRAIN_CAP_RE.test(msg)) return true;
+  if (err.name === 'PlanStreamError' && typeof err.code === 'string' && PLAN_REFUSALS.has(err.code)) return true;
   return false;
+}
+
+export function isPlanFailure(err: ErrorLike | null | undefined): boolean {
+  if (!err) return false;
+  err = unwrapSdkError(err);
+  return err.name === 'PlanStreamError' || err.cause?.name === 'PlanStreamError';
 }
 
 // A reachable gateway relayed a SATURATED upstream (#671). Kept tight so it

@@ -24,7 +24,7 @@ import { withFailover } from '../core/failover.js';
 import { withTransientRetry, withDeadline } from '../core/retry.js';
 import { stripThinking, extractJson, usageOf, perfOf, warningsOf, flattenToolCalls, failureDiagnostics, renderTerminalPrompt } from '../core/pure.js';
 import type { StepLike, ToolCallLike, ToolCallSummary, TokenUsage } from '../core/pure.js';
-import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, runDiscoverySteps } from '../provider/capabilities.js';
+import { capabilitiesFor, needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, runDiscoverySteps } from '../provider/capabilities.js';
 import type { Leg } from '../provider/legs.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { agentPlan } from './plan.js';
@@ -189,6 +189,7 @@ export async function djAgent({
   // with the full `seen` context.
   validate,
 }: DjAgentOptions): Promise<{ object: unknown; steps: number; toolCalls: ToolCallSummary[] }> {
+  let sharedDeadlineAt: number | undefined;
   return withFailover(
     kind,
     (err) => ({ system, messages, ...failureDiagnostics(err) }),
@@ -203,7 +204,10 @@ export async function djAgent({
       // attributes to the path actually attempted.
       let lastVia = 'ai-sdk:agent';
       // One shared wall-clock ceiling for every attempt below.
-      const deadlineAt = timeoutMs ? Date.now() + timeoutMs : undefined;
+      if (timeoutMs && capabilitiesFor(leg.cfg.provider).sharedFailoverDeadline && sharedDeadlineAt == null) {
+        sharedDeadlineAt = Date.now() + timeoutMs;
+      }
+      const deadlineAt = sharedDeadlineAt ?? (timeoutMs ? Date.now() + timeoutMs : undefined);
       try {
         // No discovery tools + a model that ignores JSON mode: no loop to run,
         // and ToolLoopAgent + Output.object would throw NoObjectGeneratedError.

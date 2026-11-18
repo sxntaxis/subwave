@@ -11,7 +11,7 @@
 
 import { primaryLeg, fallbackLeg } from '../provider/legs.js';
 import { record } from '../telemetry/log.js';
-import { isUnreachable, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited } from './pure.js';
+import { isUnreachable, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, isPlanFailure } from './pure.js';
 
 // Centralised success/failure record writers. Every LLM call goes through one
 // of each. The required-shape args (kind/started/via/sampling/usage for
@@ -54,7 +54,8 @@ function recordFailure({ kind, started, via, model, error, extra = {} }: any) {
 // Tee a one-line preview of the failed model output to the console so failures
 // are visible in `docker logs` without grepping /debug JSON. Truncated to avoid
 // dumping multi-kilobyte reasoning blocks into the terminal.
-function logFailurePreview(kind: string, err: any) {
+function logFailurePreview(kind: string, err: any, model?: string) {
+  if (model?.startsWith('chatgpt-plan:')) return;
   if (typeof err?.text !== 'string' || !err.text.trim()) return;
   const preview = err.text.replace(/\s+/g, ' ').trim().slice(0, 240);
   console.log(`[${kind}] raw model output (truncated): ${preview}`);
@@ -106,7 +107,7 @@ export async function withFailover<T>(
       recordSuccess({ kind, started, via: `${r.via}:pinned`, model: leg.label, sampling: r.sampling, usage: r.usage, perf: r.perf, warnings: r.warnings, extra: r.extra });
       return r.value;
     } catch (err: any) {
-      logFailurePreview(kind, err);
+      logFailurePreview(kind, err, leg.label);
       recordFailure({ kind, started, via: `${err?.__via || 'ai-sdk'}:pinned`, model: leg.label, error: err?.message, extra: failExtra(err) });
       throw err;
     }
@@ -122,9 +123,14 @@ export async function withFailover<T>(
     const quotaOrAuth = isQuotaOrAuthError(err);
     const upstreamOverloaded = isUpstreamOverloaded(err);
     const rateLimited = isRateLimited(err);
-    const backup = (isUnreachable(err) || quotaOrAuth || upstreamOverloaded || rateLimited) ? fallbackLeg() : null;
+    const candidate = (isUnreachable(err) || quotaOrAuth || upstreamOverloaded || rateLimited || isPlanFailure(err)) ? fallbackLeg() : null;
+    // Subscription failure must not silently become metered API usage. Only an
+    // explicitly configured local Ollama model is eligible for automatic rescue.
+    const backup = primary.cfg.provider === 'chatgpt-plan' && candidate &&
+      (candidate.cfg.provider !== 'ollama' || /:cloud$/i.test(candidate.label))
+      ? null : candidate;
     if (!backup) {
-      logFailurePreview(kind, err);
+      logFailurePreview(kind, err, primary.label);
       recordFailure({ kind, started: primaryStarted, via: primaryVia, model: primary.label, error: err?.message, extra: failExtra(err) });
       throw err;
     }
@@ -138,7 +144,7 @@ export async function withFailover<T>(
       recordSuccess({ kind, started: backupStarted, via: r.via, model: backup.label, sampling: r.sampling, usage: r.usage, perf: r.perf, warnings: r.warnings, extra: r.extra });
       return r.value;
     } catch (err2: any) {
-      logFailurePreview(kind, err2);
+      logFailurePreview(kind, err2, backup.label);
       recordFailure({ kind, started: backupStarted, via: err2?.__via || 'ai-sdk', model: backup.label, error: err2?.message, extra: failExtra(err2) });
       throw err2;
     }

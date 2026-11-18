@@ -21,6 +21,11 @@ import { probeFishKey } from '../../llm/speech.js';
 // Mounted onto the parent settings router in ../settings.ts.
 export const router = express.Router();
 
+router.get('/settings/llm/chatgpt-plan/status', requireAdmin, async (_req, res) => {
+  try { res.json(await llmProvider.planSession().status()); }
+  catch { res.json({ status: 'unavailable' }); }
+});
+
 // Distill a raw provider/SDK error into a one-line actionable message.
 function briefLlmError(err: unknown): string {
   const e = err as { message?: string; toString(): string } | null | undefined;
@@ -356,6 +361,11 @@ router.get('/settings/llm/models', requireAdmin, async (req, res) => {
     let models: string[] = [];
 
     switch (provider) {
+      case 'chatgpt-plan': {
+        if (scope === 'embedding') throw new Error('ChatGPT plan does not provide embeddings');
+        models = await llmProvider.planModels(ctrl.signal);
+        break;
+      }
       case 'ollama': {
         const url = ollamaUrl || config.ollama.url || 'http://localhost:11434';
         const r = await fetch(`${url}/api/tags`, { signal: ctrl.signal });
@@ -554,5 +564,3 @@ router.post('/settings/embedding/probe', requireAdmin, async (req, res) => {
     res.json({ ok: false, dim: null, code: 'unknown', message: (err as { message?: string })?.message || 'probe failed' });
   }
 });
-
-

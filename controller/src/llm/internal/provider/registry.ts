@@ -13,6 +13,8 @@ import { config } from '../../../config.js';
 import * as settings from '../../../settings.js';
 import { recordRawRequest, rawDebugEnabled } from '../telemetry/raw-debug.js';
 import { capabilitiesFor, appliedRepeatPenalty, appliedNumCtx } from './capabilities.js';
+import { createPlanModel } from './chatgpt-plan-model.js';
+import { planSession } from './chatgpt-plan.js';
 
 // Built clients, keyed by a signature covering every field captured at
 // construction, so a settings edit is picked up with no explicit invalidation.
@@ -246,6 +248,10 @@ export function languageModel(cfg: any = llmCfg(), opts: { forceNoThink?: boolea
     case 'openai': {
       const provider = createOpenAI({ fetch: debugFetch, ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}) });
       model = provider(id);
+      break;
+    }
+    case 'chatgpt-plan': {
+      model = createPlanModel(id, () => planSession().getAuthorizedCredential(), fetch, token => planSession().markReauthRequired(token));
       break;
     }
     case 'openai-compatible': {

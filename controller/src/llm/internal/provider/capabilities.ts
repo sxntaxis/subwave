@@ -51,6 +51,7 @@ export interface ProviderCapabilities {
   // derived as discoverySteps + 1, so a run always makes exactly one forced-done
   // attempt before the recovery cascade. Extra done steps make compliance worse.
   discoverySteps?: number;
+  sharedFailoverDeadline?: boolean;
 }
 
 // Floor is the historical global value and what every forced-tool provider keeps.
@@ -90,6 +91,13 @@ const CAPS: Record<string, ProviderCapabilities> = {
         ? (reasoning ? 'medium' : /^gpt-5\.\d/i.test(modelId) ? 'none' : 'minimal')
         : undefined,
     discoverySteps: NATIVE_DISCOVERY_STEPS,
+  },
+  'chatgpt-plan': {
+    objectStrategy: 'tool',
+    repeatPenaltyApplies: false,
+    reasoningLevel: NONE,
+    discoverySteps: NATIVE_DISCOVERY_STEPS,
+    sharedFailoverDeadline: true,
   },
   // openai-compatible and locca serve the same local GGUF model class as ollama:
   // under native Output.object they emit a schema-valid object without exploring,

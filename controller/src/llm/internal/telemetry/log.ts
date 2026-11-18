@@ -60,6 +60,7 @@ export function record(call: any) {
 
   // Durable, trace-correlated event. The ring buffer above is lost on restart
   // and uncorrelated; this lands on the unified events.jsonl timeline.
+  const plan = typeof call.model === 'string' && call.model.startsWith('chatgpt-plan:');
   logEvent('llm', {
     kind: call.kind,
     ok: call.ok,
@@ -72,12 +73,12 @@ export function record(call: any) {
     perf: call.perf || undefined,
     warnings: call.warnings || undefined,
     error: call.error || null,
-    system: cap(call.system),
-    prompt: cap(call.user),
-    messages: Array.isArray(call.messages)
+    system: plan ? undefined : cap(call.system),
+    prompt: plan ? undefined : cap(call.user),
+    messages: !plan && Array.isArray(call.messages)
       ? call.messages.map((m: any) => ({ role: m.role, content: cap(m.content, 2000) }))
       : undefined,
-    response: cap(call.response),
+    response: plan ? undefined : cap(call.response),
     steps: call.steps,
     toolCount: Array.isArray(call.toolCalls) ? call.toolCalls.length : undefined,
   });
@@ -87,7 +88,7 @@ export function record(call: any) {
     logEvent('tool', {
       kind: call.kind,
       name: tc.name,
-      args: cap(JSON.stringify(tc.args ?? null), 1000),
+      args: plan ? undefined : cap(JSON.stringify(tc.args ?? null), 1000),
       // Picker tools return either a bare track array or, when empty, a
       // { tracks: [], note, rule } hint object — count both shapes so an
       // empty-with-hint result still logs resultCount: 0 (the log analyzer

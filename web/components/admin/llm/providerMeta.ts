@@ -1,7 +1,7 @@
 // Single source of truth for the LLM provider picker, shared by the Settings LLM
 // tab and the onboarding wizard. No React, no DOM -- safe to unit-import.
 
-export type ProviderKind = 'local' | 'self-hosted' | 'cloud';
+export type ProviderKind = 'local' | 'self-hosted' | 'cloud' | 'plan';
 
 export interface ProviderMeta {
   id: string;
@@ -25,6 +25,7 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: 'openai-compatible', label: 'OpenAI-compatible', blurb: 'llama.cpp · vLLM · LM Studio',   kind: 'self-hosted' },
   { id: 'anthropic',         label: 'Anthropic',         blurb: 'Claude · cloud',                 kind: 'cloud', envVar: 'ANTHROPIC_API_KEY' },
   { id: 'openai',            label: 'OpenAI',            blurb: 'GPT · cloud',                    kind: 'cloud', envVar: 'OPENAI_API_KEY' },
+  { id: 'chatgpt-plan',      label: 'ChatGPT plan',      blurb: 'Sign in with ChatGPT · plan usage', kind: 'plan' },
   { id: 'google',            label: 'Google',            blurb: 'Gemini · cloud',                 kind: 'cloud', envVar: 'GOOGLE_GENERATIVE_AI_API_KEY' },
   { id: 'deepseek',          label: 'DeepSeek',          blurb: 'Chat & reasoner · cloud',        kind: 'cloud', envVar: 'DEEPSEEK_API_KEY' },
   { id: 'openrouter',        label: 'OpenRouter',        blurb: 'Multi-vendor aggregator',        kind: 'cloud', envVar: 'OPENROUTER_API_KEY' },
@@ -51,6 +52,7 @@ export const LLM_PROVIDER_LABELS: Record<string, string> = {
   'openai-compatible': 'OpenAI-compatible (llama.cpp, vLLM, LM Studio)',
   anthropic: 'Anthropic (Claude)',
   openai: 'OpenAI (GPT)',
+  'chatgpt-plan': 'ChatGPT plan (subscription)',
   google: 'Google (Gemini)',
   deepseek: 'DeepSeek',
   openrouter: 'OpenRouter (multi-vendor aggregator)',
@@ -80,6 +82,8 @@ export function providerStatus(
   const meta = PROVIDER_META[id];
   if (!meta) return { label: '', tone: 'ok' };
   switch (meta.kind) {
+    case 'plan':
+      return { label: 'sign-in', tone: 'ok' };
     case 'local':
       return { label: 'local', tone: 'ok' };
     case 'self-hosted':

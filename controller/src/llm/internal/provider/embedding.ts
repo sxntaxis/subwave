@@ -40,7 +40,8 @@ function embeddingCfg() {
     // provider uniformly -- including openai-compatible/locca, which can't safely
     // grab a provider-conventional env var (createOpenAI would otherwise reach
     // for OPENAI_API_KEY against an arbitrary self-hosted server).
-    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY || llm.apiKey || '',
+    apiKey: s.apiKey || process.env.EMBEDDING_API_KEY ||
+      (llm.provider === 'chatgpt-plan' && s.provider ? settings.llmKeyFor(s.provider) : llm.apiKey) || '',
     ollamaUrl: s.ollamaUrl || llm.ollamaUrl || '',
     baseUrl: s.baseUrl || llm.baseUrl || '',
   };

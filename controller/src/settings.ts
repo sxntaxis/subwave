@@ -1740,6 +1740,7 @@ export async function update(patch) {
     if (e.provider !== undefined) {
       const v = String(e.provider).trim();
       // '' means "follow settings.llm.provider".
+      if (v === 'chatgpt-plan') throw new Error('ChatGPT plan does not provide embeddings; select the existing embedding provider.');
       if (v && !LLM_PROVIDERS.includes(v)) {
         throw new Error(
           `embedding.provider must be empty or one of: ${LLM_PROVIDERS.join(', ')}`,
@@ -1864,6 +1865,20 @@ export async function update(patch) {
       if (en.originalYear !== undefined) {
         next.embedding.enrichment.originalYear = !!en.originalYear;
       }
+    }
+  }
+  // The subscription is chat-only. Before changing the primary, pin a formerly
+  // inherited embedding transport to the existing provider and endpoint. This
+  // is not a re-embed and must also cover direct settings API callers.
+  if (next.llm.provider === 'chatgpt-plan' && !next.embedding.provider) {
+    if (cur.llm.provider === 'chatgpt-plan') {
+      throw new Error('Select the existing embedding provider before using ChatGPT plan.');
+    }
+    next.embedding.provider = cur.embedding.provider || cur.llm.provider;
+    if (!next.embedding.ollamaUrl && cur.llm.ollamaUrl) next.embedding.ollamaUrl = cur.llm.ollamaUrl;
+    const oldBase = cur.embedding.baseUrl || cur.llm.baseUrl;
+    if (oldBase) {
+      next.embedding.providerBaseUrls = { ...next.embedding.providerBaseUrls, [next.embedding.provider]: oldBase };
     }
   }
   // Re-derived on EVERY update, not just when `embedding` was patched: the leg

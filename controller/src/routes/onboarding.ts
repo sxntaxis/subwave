@@ -19,7 +19,7 @@ import {
   normalizeNavidromeCredentials,
   type LlmProbeInput,
 } from '../schemas/onboarding.js';
-import { DEFAULT_LOCCA_BASE_URL, DEFAULT_REQUESTY_BASE_URL, OPENROUTER_APP_HEADERS, noThinkFetch } from '../llm/provider.js';
+import { DEFAULT_LOCCA_BASE_URL, DEFAULT_REQUESTY_BASE_URL, OPENROUTER_APP_HEADERS, noThinkFetch, languageModel } from '../llm/provider.js';
 import * as settings from '../settings.js';
 import * as jingles from '../broadcast/jingles.js';
 import { queue } from '../broadcast/queue.js';
@@ -70,6 +70,9 @@ router.post('/onboarding/test-llm', requireAdmin, validateBody(llmProbeSchema), 
         break;
       case 'openai':
         m = createOpenAI(apiKey ? { apiKey } : {})(model);
+        break;
+      case 'chatgpt-plan':
+        m = languageModel({ provider, model });
         break;
       case 'openai-compatible':
         // noThinkFetch so a thinking model returns visible content, not reasoning.

@@ -33,3 +33,4 @@ export {
   embeddingTextPrefixes,
 } from './internal/provider/embedding.js';
 export type { EmbeddingCfg, EmbeddingTextPrefixes } from './internal/provider/embedding.js';
+export { planModels, planSession } from './internal/provider/chatgpt-plan.js';

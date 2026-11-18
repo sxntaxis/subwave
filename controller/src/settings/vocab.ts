@@ -235,6 +235,7 @@ export const LLM_PROVIDERS = [
   'requesty',
   'anthropic',
   'openai',
+  'chatgpt-plan',
   'google',
   'deepseek',
   'gateway',
@@ -855,6 +856,8 @@ export interface NormalizedShow {
   id: string;
   name: string;
   topic: string;
+  /** Optional listener-facing copy; internal prompts continue to use topic. */
+  publicDescription?: string;
   personaId: string;
   guestPersonaIds: string[];
   banter: boolean;

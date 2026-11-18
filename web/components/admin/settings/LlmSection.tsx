@@ -3,7 +3,7 @@
 import type { ChangeEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
-import { adminResponse } from '../../../lib/admin-query';
+import { adminJson, adminResponse, useAdminQuery } from '../../../lib/admin-query';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
 import { V3AlertDialog } from '../../ui/alert-dialog';
 import { Input } from '../../ui/input';
@@ -120,6 +120,12 @@ interface LlmSectionProps extends SectionProps {
   refresh: () => void;
 }
 export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch, refresh, fieldErrors }: LlmSectionProps) {
+  const planStatus = useAdminQuery<{ status: string }>({
+    key: ['llm', 'chatgpt-plan', 'status'],
+    adminFetch,
+    enabled: form.llm.provider === 'chatgpt-plan' || (form.llm.fallback.enabled && form.llm.fallback.provider === 'chatgpt-plan'),
+    request: (fetcher, signal) => adminJson(fetcher, '/settings/llm/chatgpt-plan/status', undefined, signal),
+  });
   const [primaryKeyInput, setPrimaryKeyInput] = useState('');
   const [fallbackKeyInput, setFallbackKeyInput] = useState('');
   const [primaryKeyTest, setPrimaryKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
@@ -176,6 +182,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const primaryDiscoveryEnabled =
     form.llm.provider === 'ollama'
+    || form.llm.provider === 'chatgpt-plan'
     || form.llm.provider === 'locca'
     || (form.llm.provider === 'openai-compatible' && !!primaryBaseUrl.trim())
     || (form.llm.provider === 'openrouter')
@@ -199,6 +206,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
   const fallbackDiscoveryEnabled =
     form.llm.fallback.enabled && (
       form.llm.fallback.provider === 'ollama'
+      || form.llm.fallback.provider === 'chatgpt-plan'
       || form.llm.fallback.provider === 'locca'
       || (form.llm.fallback.provider === 'openai-compatible' && !!fallbackBaseUrl.trim())
       || (form.llm.fallback.provider === 'openrouter')
@@ -424,6 +432,15 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 : 'The provider every LLM call routes through. Switching reroutes instantly on save, no redeploy.'}
             </div>
           </div>
+
+          {form.llm.provider === 'chatgpt-plan' && (
+            <div className="field-hint">
+              ChatGPT plan session: <strong>{planStatus.isLoading ? 'checking' : planStatus.data?.status ?? 'unavailable'}</strong>.
+              Connect or reconnect using the local authorization command in the ChatGPT plan runbook.
+              This is separate from the metered OpenAI API. Existing embeddings may still have their own charges.{' '}
+              <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage ChatGPT usage</a>.
+            </div>
+          )}
 
           {form.llm.provider === 'ollama' && (
             <div className="field">

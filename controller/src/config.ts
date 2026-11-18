@@ -20,6 +20,8 @@ export const STATE_DIR = resolveActiveStationDir(STATE_ROOT);
 // then resolves the cache under STATE_DIR.
 export const STEMS_DIR = envStr('SUBWAVE_STEMS_DIR', '');
 export const COYOTE_SOCKET_PATH = envStr('COYOTE_SOCKET_PATH', '/coyote-ipc/coyote.sock');
+// Explicit dedicated private mount; never put SIWC credentials in STATE_DIR.
+export const CHATGPT_PLAN_DIR = envStr('SUBWAVE_CHATGPT_PLAN_DIR', '');
 
 // Repo-bundled static audio (studio bed, emergency clip, default SFX). Compose
 // passes SOUNDS_DIR=/sounds; native dev falls back to the repo-local sounds/ dir.

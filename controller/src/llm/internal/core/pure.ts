@@ -26,6 +26,7 @@ interface ErrorLike {
   usage?: unknown;
   steps?: unknown;
   response?: { steps?: unknown; messages?: unknown };
+  providerDiagnostic?: unknown;
 }
 
 // Providers populate different subsets (a local Ollama box often omits them
@@ -491,8 +492,63 @@ export function renderTerminalPrompt(
 
 // Diagnostic info off an AI SDK structured-output error. Best-effort: every
 // field is optional and missing ones are skipped.
-export function failureDiagnostics(err: ErrorLike | null | undefined): Record<string, unknown> {
+const PLAN_TERMINAL_EVENTS = new Set([
+  'response.incomplete', 'response.failed', 'error', 'stream_ended_without_terminal',
+]);
+const PLAN_INCOMPLETE_REASONS = new Set(['max_output_tokens', 'content_filter', 'unknown']);
+const PLAN_FAILURE_CLASSES = new Set([
+  'provider_response_incomplete', 'provider_response_failed', 'provider_error',
+  'stream_ended_without_terminal',
+]);
+
+function findPlanProviderDiagnostic(err: ErrorLike | null | undefined): Record<string, unknown> | undefined {
+  const seen = new Set<unknown>();
+  let current: ErrorLike | undefined | null = err;
+  for (let depth = 0; current && depth < 8 && !seen.has(current); depth++) {
+    seen.add(current);
+    const raw = current.providerDiagnostic as Record<string, unknown> | undefined;
+    if (raw?.provider === 'chatgpt-plan' && PLAN_TERMINAL_EVENTS.has(String(raw.terminalEventKind))) {
+      const model = typeof raw.model === 'string' && /^[A-Za-z0-9._:/-]{1,100}$/.test(raw.model)
+        ? raw.model : 'unknown';
+      const errorCode = typeof raw.providerErrorCode === 'string' &&
+        /^[A-Za-z0-9_.-]{1,80}$/.test(raw.providerErrorCode) ? raw.providerErrorCode : null;
+      const status = Number.isInteger(raw.providerStatus) && Number(raw.providerStatus) >= 100 &&
+        Number(raw.providerStatus) <= 599 ? Number(raw.providerStatus) : null;
+      return {
+        provider: 'chatgpt-plan',
+        model,
+        classification: PLAN_FAILURE_CLASSES.has(String(raw.classification))
+          ? raw.classification : 'provider_error',
+        terminalEventKind: raw.terminalEventKind,
+        incompleteReason: PLAN_INCOMPLETE_REASONS.has(String(raw.incompleteReason))
+          ? raw.incompleteReason : 'unknown',
+        providerErrorCode: errorCode,
+        providerStatus: status,
+        elapsedMs: Number.isFinite(raw.elapsedMs)
+          ? Math.min(600_000, Math.max(0, Number(raw.elapsedMs))) : null,
+        toolCallCount: Number.isInteger(raw.toolCallCount)
+          ? Math.min(1000, Math.max(0, Number(raw.toolCallCount))) : null,
+        retryRecoveryAttempted: raw.retryRecoveryAttempted === true,
+      };
+    }
+    current = current.cause ?? current.lastError
+      ?? (Array.isArray(current.errors) ? current.errors[current.errors.length - 1] : undefined);
+  }
+  return undefined;
+}
+
+export function failureDiagnostics(
+  err: ErrorLike | null | undefined,
+  retryRecoveryAttempted?: boolean,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  const providerDiagnostic = findPlanProviderDiagnostic(err);
+  if (providerDiagnostic) {
+    out.providerDiagnostic = {
+      ...providerDiagnostic,
+      ...(retryRecoveryAttempted === undefined ? {} : { retryRecoveryAttempted }),
+    };
+  }
   if (typeof err?.text === 'string') out.responseText = err.text;
   if (err?.finishReason) out.finishReason = err.finishReason;
   if (err?.usage) out.usage = usageOf({ usage: err.usage as TokenUsage });

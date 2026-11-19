@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateText, isStepCount, tool } from 'ai';
 import { z } from 'zod';
 import { createPlanModel, planRequest } from '../src/llm/internal/provider/chatgpt-plan-model.js';
+import { failureDiagnostics } from '../src/llm/internal/core/pure.js';
 
 function completed(output: unknown[]) {
   const event = { type: 'response.completed', response: { status: 'completed', output, usage: { input_tokens: 12, output_tokens: 8 } } };
@@ -63,6 +64,46 @@ test('a failed stream never causes the SDK to execute a partial tool call', asyn
     tools: { search: tool({ inputSchema: z.object({}), execute: async () => { executions++; return 'wrong'; } }) },
   }));
   assert.equal(executions, 0);
+});
+
+test('incomplete response diagnostics are bounded, contextual, and do not retry', async () => {
+  let calls = 0;
+  const fakeFetch: typeof fetch = async () => {
+    calls++;
+    return new Response(
+      'data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens","private":"secret"},"error":{"message":"private provider detail"}}}\n\n',
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    );
+  };
+  const model = createPlanModel('gpt-6-luna', async () => 'session-fixture', fakeFetch);
+  const err = await model.doGenerate({
+    prompt: [{
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolName: 'search',
+        toolCallId: 'private-call-id',
+        input: { credential: 'must-not-leak' },
+      }],
+    }],
+  } as any).then(
+    () => assert.fail('incomplete provider response must reject'),
+    error => error as Error & { providerDiagnostic?: Record<string, unknown> },
+  );
+  const diagnostic = err.providerDiagnostic!;
+  assert.equal(diagnostic.provider, 'chatgpt-plan');
+  assert.equal(diagnostic.model, 'gpt-6-luna');
+  assert.equal(diagnostic.classification, 'provider_response_incomplete');
+  assert.equal(diagnostic.terminalEventKind, 'response.incomplete');
+  assert.equal(diagnostic.incompleteReason, 'max_output_tokens');
+  assert.equal(diagnostic.providerErrorCode, null);
+  assert.equal(diagnostic.providerStatus, null);
+  assert.equal(diagnostic.toolCallCount, 1);
+  assert.equal(diagnostic.retryRecoveryAttempted, false);
+  assert.equal(typeof diagnostic.elapsedMs, 'number');
+  assert.equal(JSON.stringify(failureDiagnostics(err, false)).includes('must-not-leak'), false);
+  assert.equal(JSON.stringify(failureDiagnostics(err, false)).includes('private'), false);
+  assert.equal(calls, 1, 'classification does not make another provider request');
 });
 
 test('subscription quota prevents immediate repeated requests', async () => {

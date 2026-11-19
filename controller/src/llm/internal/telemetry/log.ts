@@ -32,7 +32,8 @@ function logSuccess(call: any) {
 }
 
 export function record(call: any) {
-  recentCalls.unshift(call);
+  const { providerDiagnostic, ...ringCall } = call;
+  recentCalls.unshift(ringCall);
   if (recentCalls.length > MAX_CALLS) recentCalls.length = MAX_CALLS;
   // Metadata only: prompts and responses stay in /debug and events.jsonl.
   // One line per success makes long-running container logs attributable by
@@ -73,6 +74,7 @@ export function record(call: any) {
     perf: call.perf || undefined,
     warnings: call.warnings || undefined,
     error: call.error || null,
+    providerDiagnostic: providerDiagnostic || undefined,
     system: plan ? undefined : cap(call.system),
     prompt: plan ? undefined : cap(call.user),
     messages: !plan && Array.isArray(call.messages)

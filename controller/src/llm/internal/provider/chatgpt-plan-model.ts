@@ -158,6 +158,11 @@ export function createPlanModel(
     options.abortSignal?.throwIfAborted();
     const timeout = AbortSignal.timeout(90_000);
     const signal = options.abortSignal ? AbortSignal.any([options.abortSignal, timeout]) : timeout;
+    const providerStartedAt = Date.now();
+    const toolCallCount = Math.min(1000, options.prompt.reduce((count, message) =>
+      count + (Array.isArray(message.content)
+        ? message.content.filter(part => part.type === 'tool-call').length
+        : 0), 0));
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body), signal,
@@ -189,6 +194,26 @@ export function createPlanModel(
     try {
       return planResult(await readPlanCompletion(response.body, signal));
     } catch (error) {
+      if (error instanceof PlanStreamError && error.terminalEventKind) {
+        error.providerDiagnostic = {
+          provider: 'chatgpt-plan',
+          model: /^[A-Za-z0-9._:/-]{1,100}$/.test(modelId) ? modelId : 'unknown',
+          classification: error.terminalEventKind === 'response.incomplete'
+            ? 'provider_response_incomplete'
+            : error.terminalEventKind === 'response.failed'
+              ? 'provider_response_failed'
+              : error.terminalEventKind === 'error'
+                ? 'provider_error'
+                : 'stream_ended_without_terminal',
+          terminalEventKind: error.terminalEventKind,
+          incompleteReason: error.incompleteReason,
+          providerErrorCode: error.providerErrorCode,
+          providerStatus: error.statusCode ?? null,
+          elapsedMs: Math.min(600_000, Math.max(0, Date.now() - providerStartedAt)),
+          toolCallCount,
+          retryRecoveryAttempted: false,
+        };
+      }
       if (error instanceof PlanStreamError && error.code === 'subscription_sharing_usage_limit_exceeded') {
         let persisted = false;
         if (onBlock) {

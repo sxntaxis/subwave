@@ -192,7 +192,10 @@ export async function djAgent({
   let sharedDeadlineAt: number | undefined;
   return withFailover(
     kind,
-    (err) => ({ system, messages, ...failureDiagnostics(err) }),
+    (err) => ({
+      system, messages,
+      ...failureDiagnostics(err, err?.__via ? err.__via !== 'ai-sdk:agent' : undefined),
+    }),
     async (leg: Leg) => {
       const toolCount = tools ? Object.keys(tools).length : 0;
       const plan = agentPlan(leg.cfg, schema, toolCount);

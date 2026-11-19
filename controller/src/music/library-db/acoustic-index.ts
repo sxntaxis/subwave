@@ -2,6 +2,12 @@
 // caller explicitly constructs an index for an enabled selection path.
 import { fork, type ChildProcess } from 'node:child_process';
 import { getDbNonce, requireDb } from './handle.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const probeScope = new AsyncLocalStorage<{ starts: number; lookups: number }>();
+export function withAcousticProbeForTest<T>(probe: { starts: number; lookups: number }, fn: () => T): T {
+  return probeScope.run(probe, fn);
+}
 
 export interface IndexedAcousticRow {
   id: string;
@@ -23,6 +29,8 @@ export interface IndexMetrics {
 type Pending = { resolve: (rows: IndexedAcousticRow[] | null) => void; timer: ReturnType<typeof setTimeout>; expired: boolean };
 
 export function createAcousticIndex(path: string) {
+  const probe = probeScope.getStore();
+  if (probe) probe.starts++;
   const metrics: IndexMetrics = { ready: false, metadataRows: 0, vectorRows: 0, invalidRows: 0,
     vectorBytes: 0, openMs: 0, metadataMs: 0, vectorMs: 0, rssBytes: 0 };
   const pending = new Map<number, Pending>();
@@ -113,6 +121,8 @@ let sharedNonce: string | null = null;
 let failures = 0, retryAt = 0;
 const retryDelays = [5_000, 30_000, 120_000];
 export function getSharedAcousticIndex() {
+  const probe = probeScope.getStore();
+  if (probe) probe.lookups++;
   const nonce = getDbNonce();
   if (shared && sharedNonce !== nonce) {
     shared.close(); shared = null; failures = 0; retryAt = 0;

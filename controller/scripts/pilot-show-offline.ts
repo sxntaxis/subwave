@@ -7,6 +7,7 @@ import { mergePlaylistTracks } from '../src/music/show-playlist.js';
 import { isStationArchive } from '../src/music/subsonic.js';
 import { buildPickerContext, pickerScope } from '../src/llm/internal/tools/picker/scope.js';
 import playlistTool from '../src/llm/internal/tools/picker/tools/show-playlist-tracks.js';
+import assert from 'node:assert/strict';
 
 async function main() {
   const [schedulePath, navPath, mirrorPath] = process.argv.slice(2);
@@ -34,16 +35,27 @@ async function main() {
       } else pool = all.map(norm);
       const eligible = applyStrictLocks(pool, { genres: show.genres, eras: show.eras,
         moods: show.moods, energies: show.energies, vocals: show.vocals }, { starve: true });
-      const source = eligible.filter((x: any) => x.duration > 120).slice(0, 65);
+      const source = eligible.filter((x: any) => x.duration > 120);
       if (source.length < 2) { console.log(JSON.stringify({ id, unavailable: true, missing })); continue; }
-      const anchor = source[0].id, candidates = source.slice(1);
-      const lock = new Set(candidates.map((x: any) => x.id));
+      // Derived from the entire independently filtered show pool, never from
+      // the sampled candidates passed to the tool.
+      const authoritative = new Set(source.map((x: any) => x.id));
+      const lock = new Set(pool.map((x: any) => x.id));
+      for (const seed of [771, 991, 2027]) {
+      let sampleState = seed;
+      const sample = source.map((value: any) => {
+        sampleState = sampleState * 16807 % 2147483647;
+        return { value, rank: sampleState };
+      }).sort((a: any, b: any) => a.rank - b.rank).slice(0, 65).map((x: any) => x.value);
+      const anchor = sample[0].id, candidates = sample.slice(1);
+      const negative = all.map(norm).find((x: any) => !authoritative.has(x.id));
+      assert.ok(negative && !authoritative.has(negative.id), 'negative control must be outside the independent show set');
       async function run(on: boolean) {
         const ctx = buildPickerContext(pickerScope({ playlistTracks: candidates,
           ...(show.playlistStrict ? { playlistLock: lock } : {}),
           genreLock: show.genres, ...(on ? { selection: { predecessorId: anchor, recentAiredIds: [] } } : {}) }),
         async (ids, timeout) => index.lookup(ids, timeout));
-        let state = 771; const old = Math.random;
+        let state = seed; const old = Math.random;
         Math.random = () => { state = state * 16807 % 2147483647; return (state - 1) / 2147483646; };
         try {
           const t = performance.now();
@@ -55,13 +67,16 @@ async function main() {
         } finally { Math.random = old; }
       }
       const off = await run(false), on = await run(true);
-      console.log(JSON.stringify({ id, source: candidates.length, rawPool: pool.length, missing,
+      assert.ok([...off.ids, ...on.ids].every((x: string) => authoritative.has(x)), 'show hard eligibility violated');
+      assert.deepEqual(off.ids, off.seen); assert.deepEqual(on.ids, on.seen);
+      console.log(JSON.stringify({ id, seed, source: candidates.length, strictLock: show.playlistStrict ? lock.size : null, rawPool: pool.length, missing,
         eligible: eligible.length, off: off.ids.length, on: on.ids.length,
         changed: on.ids.filter((x: string) => !off.ids.includes(x)).length,
-        violations: on.ids.filter((x: string) => !lock.has(x)).length,
+        violations: on.ids.filter((x: string) => !authoritative.has(x)).length,
         seenMatches: JSON.stringify(on.ids) === JSON.stringify(on.seen),
         offArtists: off.artists, onArtists: on.artists, offMs: off.ms, onMs: on.ms,
         provenance: 'offline hypothetical anchor; DB-backed playlist membership, not Subsonic API' }));
+      }
     }
   } finally { index.close(); mirror.close(); nav.close(); }
 }

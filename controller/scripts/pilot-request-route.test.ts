@@ -4,6 +4,8 @@ import { requestAgent } from '../src/broadcast/dj-agent/agents.js';
 import { pickerScope } from '../src/llm/internal/tools/picker/scope.js';
 import { withAgentRunnerForTest } from '../src/llm/internal/agent-factory.js';
 import type { djAgent } from '../src/llm/internal/strategy/agent.js';
+import { withAcousticProbeForTest } from '../src/music/library-db/acoustic-index.js';
+import { buildPickerContext } from '../src/llm/internal/tools/picker/scope.js';
 
 test('actual requestAgent.run offers identical request candidates with flag off and on', async () => {
   const songs = Array.from({ length: 18 }, (_, i) => ({
@@ -29,8 +31,11 @@ test('actual requestAgent.run offers identical request candidates with flag off 
     try {
       const scope = pickerScope({ playlistTracks: songs, playlistLock: new Set(songs.map(s => s.id)),
         excludedIds: new Set(['fixture-1']), selection: { predecessorId: 'fixture-anchor', recentAiredIds: [] } });
-      const result = await withAgentRunnerForTest(fake, () => requestAgent.run({ scope, messages: [] }));
-      return { offered, seen: [...result.extras.seen.keys()], object: result.object, draws, calls };
+      const probe = { starts: 0, lookups: 0 };
+      const result = await withAcousticProbeForTest(probe,
+        () => withAgentRunnerForTest(fake, () => requestAgent.run({ scope, messages: [] })));
+      assert.deepEqual(probe, { starts: 0, lookups: 0 });
+      return { offered, seen: [...result.extras.seen.keys()], object: result.object, draws, calls, probe };
     } finally {
       if (previous === undefined) delete process.env.PICKER_VNEXT_AGENT;
       else process.env.PICKER_VNEXT_AGENT = previous;
@@ -38,4 +43,8 @@ test('actual requestAgent.run offers identical request candidates with flag off 
     }
   }
   assert.deepEqual(await run('0'), await run('1'));
+  const probe = { starts: 0, lookups: 0 };
+  const ctx = buildPickerContext(pickerScope({ selection: { predecessorId: 'anchor', recentAiredIds: [] } }));
+  await withAcousticProbeForTest(probe, () => ctx.collectAsync(songs));
+  assert.equal(probe.lookups, 1, 'positive control must reach the acoustic bridge');
 });

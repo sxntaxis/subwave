@@ -22,6 +22,7 @@ import { parseKeyRanges, parsePaceSpans } from '../../../../music/library-db/row
 import { endingKeyFrom, openingKeyFrom } from '../../../../music/mix.js';
 import { scoreSelection, type AcousticEvidence } from '../../../../music/selection-score.js';
 import { composeSelection } from '../../../../music/selection-compose.js';
+import type { PickerSelectionObservation } from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
@@ -33,6 +34,8 @@ export function withPickerSeedFixtureForTest<T>(fixture: SeedFixture, fn: () => 
 export interface PickerScope {
   // Set exclusively by the autonomous picker after validating its predecessor.
   selection?: { predecessorId: string; recentAiredIds: string[] };
+  // Private opt-in audit observer; receives bounded counters only.
+  selectionAudit?: (observation: PickerSelectionObservation) => void;
   // Optional attempt-local accumulator. The track picker supplies this so it
   // can snapshot the same IDs exposed through PickerExtras even if the agent
   // rejects/throws before returning extras. Not prompt/tool data.
@@ -210,7 +213,14 @@ export function buildPickerContext(
 
   const attempt = scope.selection ? createSelectionAttempt() : null;
   const collectAsync: PickerContext['collectAsync'] = (list, cap = 8, opts = {}) => {
-    if (!attempt || !scope.selection) return Promise.resolve(collect(list, cap, opts));
+    if (!attempt || !scope.selection) {
+      const accepted = collect(list, cap, opts);
+      scope.selectionAudit?.({
+        reason: 'no_eligible_context', eligibleCandidates: Array.isArray(list) ? list.length : 0,
+        offeredCandidates: accepted.length,
+      });
+      return Promise.resolve(accepted);
+    }
     const selection = scope.selection;
     return attempt.transaction(async () => {
       // Exactly one shuffle: the very same pool supplies both ranked and
@@ -228,16 +238,31 @@ export function buildPickerContext(
       });
       const baseline = () => filterPickerCandidates(eligible, { maxPerArtist, cap });
       let accepted = baseline();
-      if (eligible.length && eligible.length <= 256) {
-        const rows = await attempt.lookup(
+      let reason: PickerSelectionObservation['reason'] = 'no_eligible_context';
+      let lookupMs: number | undefined;
+      if (eligible.length > 256) {
+        reason = 'candidate_ceiling';
+      } else if (eligible.length) {
+        let acousticIndex: ReturnType<typeof getSharedAcousticIndex> = null;
+        try { if (!readAcoustics) acousticIndex = getSharedAcousticIndex(); } catch {}
+        if (!readAcoustics && !acousticIndex) {
+          reason = 'index_unavailable';
+        } else {
+          const lookup = await attempt.lookupObserved(
           eligible.map(s => s.id), [selection.predecessorId, ...selection.recentAiredIds],
           async (ids, timeout) => {
             if (readAcoustics) return readAcoustics(ids, timeout);
-            const index = getSharedAcousticIndex();
-            return index ? index.lookup(ids, timeout) : null;
+            return acousticIndex ? acousticIndex.lookup(ids, timeout) : null;
           },
         );
-        try { if (rows) {
+          lookupMs = lookup.elapsedMs;
+          reason = lookup.reason === 'candidate_ceiling' ? 'candidate_ceiling'
+            : lookup.reason === 'deadline_or_budget' ? 'deadline_or_budget'
+              : lookup.reason === 'no_eligible_context' ? 'no_eligible_context'
+                : lookup.reason === 'index_unavailable' ? 'index_unavailable'
+                  : 'missing_predecessor_evidence';
+          try { if (lookup.rows) {
+          const rows = lookup.rows;
           const byId = new Map(rows.map(row => [row.id, row]));
           const evidence = (row: IndexedAcousticRow | undefined): AcousticEvidence | null => {
             if (!row?.track) return null;
@@ -260,12 +285,37 @@ export function buildPickerContext(
               return { value: s, id: s.id, artistKey: artistKey(s), baselineIndex: i, utility: score.utility, acoustic, flow: score.flow };
             });
             // Missing evidence must not turn MMR into a different baseline.
-            if (ranked.some(item => item.flow !== null)) accepted = composeSelection(ranked, cap, maxPerArtist);
+            if (ranked.some(item => item.flow !== null)) {
+              accepted = composeSelection(ranked, cap, maxPerArtist);
+              const baselineIds = baseline().map(s => s.id);
+              const acceptedIds = accepted.map(s => s.id);
+              const baselineSet = new Set(baselineIds);
+              const membershipChanged = baselineSet.size !== new Set(acceptedIds).size
+                || acceptedIds.some(id => !baselineSet.has(id));
+              reason = membershipChanged ? 'scored_membership_change' : 'scored_no_membership_change';
+              scope.selectionAudit?.({
+                reason, eligibleCandidates: eligible.length, offeredCandidates: accepted.length,
+                lookupMs, orderedShortlistChanged: baselineIds.length !== acceptedIds.length
+                  || baselineIds.some((id, i) => acceptedIds[i] !== id),
+              });
+              return accepted.map(s => {
+                const value = slim(s);
+                seen.set(s.id, value);
+                return value;
+              });
+            }
+            reason = 'missing_flow';
           }
-        } } catch {
+          }
+          } catch {
           // Malformed optional evidence must not lose an otherwise valid tool.
+            reason = 'scorer_exception';
+          }
         }
       }
+      scope.selectionAudit?.({
+        reason, eligibleCandidates: eligible.length, offeredCandidates: accepted.length, lookupMs,
+      });
       return accepted.map(s => {
         const value = slim(s);
         seen.set(s.id, value);

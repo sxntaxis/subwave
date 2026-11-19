@@ -13,8 +13,35 @@ test('off mode performs no candidate capture or write', () => {
     enabled: false, attemptId: 'trace-fixture', now: NOW, write: event => events.push(event),
   });
   audit.captureCandidates(['one', 'two']);
+  audit.captureSelection({
+    reason: 'scored_membership_change', eligibleCandidates: 2, offeredCandidates: 1,
+  });
   audit.finish({ outcome: 'success', chosenId: 'one' });
   assert.deepEqual(events, []);
+});
+
+test('private selection audit aggregates score versus baseline and separates acoustic search calls', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'trace-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.captureSelection({
+    reason: 'scored_membership_change', eligibleCandidates: 20, offeredCandidates: 8,
+    lookupMs: 13, orderedShortlistChanged: true,
+  });
+  audit.captureSelection({
+    reason: 'index_unavailable', eligibleCandidates: 12, offeredCandidates: 8,
+  });
+  audit.finish({ outcome: 'success', toolCalls: 5, acousticSearchToolCalls: 1 });
+  assert.deepEqual(events[0].selection, {
+    scored: 1, baseline: 1,
+    reasons: { scored_membership_change: 1, index_unavailable: 1 },
+    eligible_candidates: 32, offered_candidates: 16, lookup_ms: 13,
+    ordered_shortlists_changed: 1,
+  });
+  assert.equal(events[0].tool_calls, 5);
+  assert.equal(events[0].acoustic_search_tool_calls, 1);
+  assert.equal(JSON.stringify(events[0]).includes('fixture-track-id'), false);
 });
 
 test('agent, pool and auto refresh retain ordered unique IDs and safe outcome fields', () => {

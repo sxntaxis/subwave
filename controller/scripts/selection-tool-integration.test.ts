@@ -21,7 +21,11 @@ const read = async (ids: readonly string[]) => ids.map(id =>
 
 async function run(enabled: boolean, acoustic = read) {
   const seen = new Map<string, any>();
-  const scope = pickerScope({ seen, playlistTracks: songs, ...(enabled ? { selection } : {}) });
+  const observations: any[] = [];
+  const scope = pickerScope({
+    seen, playlistTracks: songs,
+    ...(enabled ? { selection, selectionAudit: (observation: any) => observations.push(observation) } : {}),
+  });
   const ctx = buildPickerContext(scope, acoustic);
   const tool = playlistTool.build(ctx) as any;
   const oldRandom = Math.random;
@@ -29,7 +33,7 @@ async function run(enabled: boolean, acoustic = read) {
   Math.random = () => 1 - (draw++ / 100);
   try {
     const result = await tool.execute({}, { toolCallId: 'test', messages: [] });
-    return { ids: result.map((x: any) => x.id), seen, draws: draw };
+      return { ids: result.map((x: any) => x.id), seen, draws: draw, observations };
   } finally { Math.random = oldRandom; }
 }
 
@@ -43,6 +47,12 @@ test('real playlist tool scores before its twelve-track cap; OFF keeps baseline 
   assert.equal(off.draws, 18);
   assert.equal(on.draws, off.draws);
   assert.deepEqual([...on.seen.keys()], on.ids);
+  assert.equal(on.observations.length, 1);
+  assert.equal(on.observations[0].reason, 'scored_membership_change');
+  assert.equal(on.observations[0].eligibleCandidates, 18);
+  assert.equal(on.observations[0].offeredCandidates, 12);
+  assert.equal(on.observations[0].orderedShortlistChanged, true);
+  assert.equal(off.observations.length, 0);
 });
 
 test('cold and failed evidence preserve exactly the same shuffled baseline', async () => {
@@ -51,8 +61,11 @@ test('cold and failed evidence preserve exactly the same shuffled baseline', asy
   const failed = await run(true, async () => { throw new Error('index unavailable'); });
   assert.deepEqual(cold.ids, off.ids);
   assert.deepEqual(failed.ids, off.ids);
+  assert.equal(cold.observations[0].reason, 'index_unavailable');
+  assert.equal(failed.observations[0].reason, 'index_unavailable');
   const missing = await run(true, async ids => ids.map(id => ({ id, track: null, vector: null })));
   assert.deepEqual(missing.ids, off.ids);
+  assert.equal(missing.observations[0].reason, 'missing_predecessor_evidence');
 });
 
 test('rhythmic and atmospheric evidence independently change the pre-cap sample', async () => {
@@ -158,10 +171,11 @@ test('a stalled lookup falls back at the attempt deadline without re-shuffling',
   const stalled = await run(true, () => new Promise(() => {}));
   assert.deepEqual(stalled.ids, off.ids);
   assert.equal(stalled.draws, off.draws);
+  assert.equal(stalled.observations[0].reason, 'deadline_or_budget');
   assert.ok(performance.now() - started < 1500);
 });
 
 test('request tool builder explicitly clears the autonomous selection scope', () => {
   const agents = readFileSync(new URL('../src/broadcast/dj-agent/agents.ts', import.meta.url), 'utf8');
-  assert.match(agents, /requestAgent[\s\S]*?buildPickerTools\(\{[\s\S]*?\.\.\.scope,\s*selection:\s*undefined/);
+  assert.match(agents, /requestAgent[\s\S]*?buildPickerTools\(\{[\s\S]*?\.\.\.scope,\s*selection:\s*undefined,\s*selectionAudit:\s*undefined/);
 });

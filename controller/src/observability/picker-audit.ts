@@ -9,12 +9,36 @@ export type PickerAuditOutcome =
   | 'success' | 'empty' | 'rejected' | 'repaired' | 'repicked'
   | 'fallback' | 'collision' | 'error';
 
+export type PickerSelectionReason =
+  | 'no_eligible_context' | 'index_unavailable' | 'deadline_or_budget'
+  | 'missing_predecessor_evidence' | 'missing_flow' | 'candidate_ceiling'
+  | 'scorer_exception' | 'scored_no_membership_change' | 'scored_membership_change';
+
+export interface PickerSelectionObservation {
+  reason: PickerSelectionReason;
+  eligibleCandidates: number;
+  offeredCandidates: number;
+  lookupMs?: number | null;
+  orderedShortlistChanged?: boolean;
+}
+
+export interface PickerSelectionAudit {
+  scored: number;
+  baseline: number;
+  reasons: Partial<Record<PickerSelectionReason, number>>;
+  eligible_candidates: number;
+  offered_candidates: number;
+  lookup_ms: number;
+  ordered_shortlists_changed: number;
+}
+
 export interface PickerAuditResult {
   outcome: PickerAuditOutcome;
   chosenId?: string | null;
   fallbackPath?: 'pool' | 'auto_playlist' | null;
   fallbackReason?: string | null;
   toolCalls?: number | null;
+  acousticSearchToolCalls?: number | null;
 }
 
 export interface PickerAuditEvent {
@@ -30,6 +54,8 @@ export interface PickerAuditEvent {
   fallback_path?: 'pool' | 'auto_playlist';
   fallback_reason?: string;
   tool_calls?: number;
+  selection?: PickerSelectionAudit;
+  acoustic_search_tool_calls?: number;
 }
 
 const ENABLED = process.env.SUBWAVE_PICKER_AUDIT === '1';
@@ -110,6 +136,7 @@ export interface PickerAuditRecorder {
   setShowId(id: string | null | undefined): void;
   setShowAt(at: Date | string | null | undefined): void;
   captureCandidates(ids: Iterable<string | null | undefined>): void;
+  captureSelection(observation: PickerSelectionObservation): void;
   finish(result: PickerAuditResult): void;
 }
 
@@ -129,6 +156,11 @@ export function createPickerAuditRecorder(
     : (typeof showAt === 'string' ? showAt : null);
   let resolvedShowId = showId ?? null;
   const candidates: string[] = [];
+  const selection: PickerSelectionAudit = {
+    scored: 0, baseline: 0, reasons: {}, eligible_candidates: 0,
+    offered_candidates: 0, lookup_ms: 0, ordered_shortlists_changed: 0,
+  };
+  let hasSelection = false;
   let finished = false;
   return {
     setShowId(id) { resolvedShowId = id ?? null; },
@@ -144,6 +176,20 @@ export function createPickerAuditRecorder(
         seen.add(id);
         candidates.push(id);
       }
+    },
+    captureSelection(observation) {
+      if (!options.enabled || finished) return;
+      hasSelection = true;
+      const reason = observation.reason;
+      selection.reasons[reason] = Math.min(1000, (selection.reasons[reason] ?? 0) + 1);
+      if (reason === 'scored_membership_change' || reason === 'scored_no_membership_change') selection.scored++;
+      else selection.baseline++;
+      selection.eligible_candidates = Math.min(100_000, selection.eligible_candidates + Math.max(0, Math.floor(observation.eligibleCandidates)));
+      selection.offered_candidates = Math.min(100_000, selection.offered_candidates + Math.max(0, Math.floor(observation.offeredCandidates)));
+      if (typeof observation.lookupMs === 'number' && Number.isFinite(observation.lookupMs)) {
+        selection.lookup_ms = Math.min(600_000, selection.lookup_ms + Math.max(0, observation.lookupMs));
+      }
+      if (observation.orderedShortlistChanged) selection.ordered_shortlists_changed++;
     },
     finish(result) {
       if (!options.enabled || finished) return;
@@ -162,6 +208,9 @@ export function createPickerAuditRecorder(
         ...(result.fallbackPath ? { fallback_path: result.fallbackPath } : {}),
         ...(result.fallbackReason ? { fallback_reason: result.fallbackReason.slice(0, 80) } : {}),
         ...(typeof result.toolCalls === 'number' && Number.isInteger(result.toolCalls) && result.toolCalls >= 0 ? { tool_calls: result.toolCalls } : {}),
+        ...(typeof result.acousticSearchToolCalls === 'number' && Number.isInteger(result.acousticSearchToolCalls)
+          && result.acousticSearchToolCalls >= 0 ? { acoustic_search_tool_calls: Math.min(1000, result.acousticSearchToolCalls) } : {}),
+        ...(hasSelection ? { selection } : {}),
       };
       try { options.write(event); } catch { /* diagnostics never affect a pick */ }
     },

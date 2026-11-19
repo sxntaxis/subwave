@@ -69,6 +69,7 @@ export const requestAgent = defineAgent<RequestRunArgs, PickerExtras>({
     const { tools, seen } = buildPickerTools({
       ...scope,
       selection: undefined,
+      selectionAudit: undefined,
       resolveReferences: settings.get().llm?.requestWebResolve ?? false,
     });
     return { tools, extras: { seen } };
@@ -76,4 +77,3 @@ export const requestAgent = defineAgent<RequestRunArgs, PickerExtras>({
   // Same native-path acceptance as pickerAgent.
   validateObject: (object, extras) => !!(object?.id && extras?.seen?.has(object.id)),
 });
-

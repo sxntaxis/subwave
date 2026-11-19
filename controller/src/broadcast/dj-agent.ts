@@ -255,6 +255,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     ...(auditSeen ? { seen: auditSeen } : {}),
+    ...(process.env.PICKER_VNEXT_AGENT === '1' && pickerAuditEnabled()
+      ? { selectionAudit: observation => audit.captureSelection(observation) } : {}),
     ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
       target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,
       at => settings.resolveActiveShow(at)?.id ?? null,
@@ -292,6 +294,9 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     throw error;
   }
   const { steps, toolCalls, extras } = run;
+  const acousticSearchToolCalls = toolCalls.filter(call =>
+    call.name === 'tracksThatSoundLikeThis' || call.name === 'searchBySound'
+      || call.name === 'tracksTowardJourney').length;
   if (pickerAuditEnabled()) audit.captureCandidates(extras.seen.keys());
   let object = run.object;
 
@@ -482,7 +487,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
   if (queued === 'stale') {
-    audit.finish({ outcome: 'collision', chosenId: song.id ?? null, toolCalls: toolCalls.length });
+    audit.finish({ outcome: 'collision', chosenId: song.id ?? null, toolCalls: toolCalls.length, acousticSearchToolCalls });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
@@ -520,6 +525,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     outcome: decisionPath === 'agent_repaired' ? 'repaired' : decisionPath === 'agent_repick' ? 'repicked' : 'success',
     chosenId: song.id ?? null,
     toolCalls: toolCalls.length,
+    acousticSearchToolCalls,
   });
   return true;
   } catch (error) {

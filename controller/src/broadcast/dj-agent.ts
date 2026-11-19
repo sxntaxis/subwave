@@ -54,6 +54,7 @@ import { guardIntro, screenAck, isNamedRequester } from '../util/request-guard.j
 import * as likes from './likes.js';
 import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 import type { PickTarget } from './queue/types.js';
+import { selectionContext } from './dj-agent/selection-context.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
   const show = ctx?.activeShow;
@@ -254,6 +255,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     ...(auditSeen ? { seen: auditSeen } : {}),
+    ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
+      target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,
+      at => settings.resolveActiveShow(at)?.id ?? null,
+    ) } : {}),
     recentIds,
     recentKeys,
     hardRecentIds,

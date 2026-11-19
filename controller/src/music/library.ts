@@ -538,6 +538,13 @@ export function artistPlayStatsFor(artist: string | null | undefined): db.Artist
   return artistPlayStats().get(artist.toLowerCase().trim()) ?? null;
 }
 
+// Read the already-warmed snapshot without running a SQLite refresh. Used by
+// the asynchronous experimental collector so scoring never adds a DB read on
+// the event loop; stale/absent history is only a soft freshness signal.
+export function cachedLastAiredInfo(): AiredIndex {
+  return loaded ? airedIndexCache?.val ?? EMPTY_AIRED_INDEX : EMPTY_AIRED_INDEX;
+}
+
 export function lastAiredInfo(): AiredIndex {
   if (!loaded) return EMPTY_AIRED_INDEX;
   if (airedIndexCache && Date.now() - airedIndexCache.at < AIRED_INDEX_TTL_MS) {

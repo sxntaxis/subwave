@@ -9,7 +9,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'tracksThatSoundLikeThis',
   available: ({ hasAudioEmbeddings }) => hasAudioEmbeddings,
-  build: ({ emptyResult, seedSimilarity, stats }) => tool({
+  build: ({ emptyResult, seedSimilarityAsync, stats }) => tool({
     description: 'Tracks whose ACTUAL SOUND (timbre, instrumentation, production, energy) is closest to a seed track — blind to tags and metadata, so it shines for instrumentals and non-English tracks. Pass the currently-playing song id (best) OR a track title.',
     // No k input: the agent reliably picked a small k (10–20), and audio
     // neighbours cluster tightly + many are recently-played, so that left ~1
@@ -22,7 +22,7 @@ export default definePickerTool({
     execute: async ({ songId }) => {
       try {
         await library.load();
-        const { tracks, matched, fellBack } = await seedSimilarity(songId, 'audio');
+        const { tracks, matched, fellBack } = await seedSimilarityAsync(songId, 'audio');
         if (tracks.length) {
           return fellBack
             ? { tracks, note: `the seed has no audio fingerprint yet (audio analysis covers ${stats.withAudioEmbedding ?? 0} of ${stats.total} tracks so far), so these come from the mood/lyric index instead — they match the seed's tags and words, not its sound` }

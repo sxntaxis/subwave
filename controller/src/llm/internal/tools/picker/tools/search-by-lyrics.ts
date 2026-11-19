@@ -12,7 +12,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'searchByLyrics',
   available: ({ hasTextEmbeddings, hasEmbeddingProvider }) => hasTextEmbeddings && hasEmbeddingProvider,
-  build: ({ collect, emptyResult, knnExclude, textIndexDegraded }) => tool({
+  build: ({ collectAsync, emptyResult, knnExclude, textIndexDegraded }) => tool({
     description: 'Semantic lyric / theme search over the library — for thematic picks the mood vocab can\'t express, e.g. "songs about hometown", "tracks with hopeful lyrics", "feeling stuck".'
       + (textIndexDegraded
           ? ' NOTE: few tracks in this index carry lyric excerpts, so matches are mostly metadata text rather than actual lyrics — treat results loosely.'
@@ -30,7 +30,7 @@ export default definePickerTool({
         const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
         if (!vec) return { error: 'embedding query failed' };
         const list = await library.tracksByVectorAsync(vec, 60, { excludeIds: knnExclude });
-        const out = collect(list);
+        const out = await collectAsync(list);
         return out.length ? out : emptyResult(list.length, 'no thematic match in the lyric index — choose from your other tool results this round');
       }
       catch (err) { return { error: (err as Error).message }; }

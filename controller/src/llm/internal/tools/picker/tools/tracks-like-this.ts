@@ -14,7 +14,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'tracksLikeThis',
   available: ({ hasTextEmbeddings }) => hasTextEmbeddings,
-  build: ({ emptyResult, seedSimilarity, stats, textIndexDegraded }) => tool({
+  build: ({ emptyResult, seedSimilarityAsync, stats, textIndexDegraded }) => tool({
     description: 'Tracks whose mood + lyrics + metadata embed closest to a seed track — the library\'s own semantic similarity. Pass the currently-playing song id (best) OR a track title.'
       // Degraded-index honesty (#1246): with mostly label-only vectors this
       // tool ranks by artist/album TEXT while calling itself semantic — the
@@ -34,7 +34,7 @@ export default definePickerTool({
     execute: async ({ songId }) => {
       try {
         await library.load();
-        const { tracks, matched, fellBack } = await seedSimilarity(songId, 'text');
+        const { tracks, matched, fellBack } = await seedSimilarityAsync(songId, 'text');
         if (tracks.length) {
           // Say which index answered. Without this the model reads audio
           // neighbours as mood/lyric matches and reasons about them on the

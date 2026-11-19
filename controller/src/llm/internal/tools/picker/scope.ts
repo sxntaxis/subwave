@@ -10,14 +10,22 @@
 
 import * as library from '../../../../music/library.js';
 import * as embeddings from '../../../../music/embeddings.js';
-import { filterPickerCandidates } from '../../../../music/recency.js';
+import { artistKey, filterPickerCandidates } from '../../../../music/recency.js';
 import { applyStrictLocks, type VocalMode } from '../../../../music/show-filter.js';
 import { applyTrackFloor } from '../../../../music/track-floor.js';
 import { freshnessBiasedOrder } from '../../../../music/airing.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../../../util/pick-seed.js';
 import { slim } from './slim.js';
+import { createSelectionAttempt } from './selection-attempt.js';
+import { getSharedAcousticIndex, type IndexedAcousticRow } from '../../../../music/library-db/acoustic-index.js';
+import { parseKeyRanges, parsePaceSpans } from '../../../../music/library-db/rows.js';
+import { endingKeyFrom, openingKeyFrom } from '../../../../music/mix.js';
+import { scoreSelection, type AcousticEvidence } from '../../../../music/selection-score.js';
+import { composeSelection } from '../../../../music/selection-compose.js';
 
 export interface PickerScope {
+  // Set exclusively by the autonomous picker after validating its predecessor.
+  selection?: { predecessorId: string; recentAiredIds: string[] };
   // Optional attempt-local accumulator. The track picker supplies this so it
   // can snapshot the same IDs exposed through PickerExtras even if the agent
   // rejects/throws before returning extras. Not prompt/tool data.
@@ -102,8 +110,10 @@ export interface PickerContext {
   // id choice against this.
   seen: Map<string, any>;
   collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
+  collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number }): Promise<any[]>;
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
   seedSimilarity(songId: string, primary: 'audio' | 'text'): { tracks: any[]; matched: number; fellBack: boolean };
+  seedSimilarityAsync(songId: string, primary: 'audio' | 'text'): Promise<{ tracks: any[]; matched: number; fellBack: boolean }>;
   // Id-level union of the recency sets, pushed INTO KNN queries. The key-based
   // sets can't ride along (vec0 rows carry only ids); collect() catches those
   // post-hoc.
@@ -118,7 +128,11 @@ export interface PickerContext {
   textIndexDegraded: boolean;
 }
 
-export function buildPickerContext(scope: PickerScope): PickerContext {
+export function buildPickerContext(
+  scope: PickerScope,
+  readAcoustics?: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>,
+  seedFixture?: { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean },
+): PickerContext {
   const {
     recentIds, recentKeys, hardRecentIds, hardRecentKeys,
     genreLock, eraLock, moodLock, energyLock, vocalLock,
@@ -187,6 +201,72 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     return out;
   };
 
+  const attempt = scope.selection ? createSelectionAttempt() : null;
+  const collectAsync: PickerContext['collectAsync'] = (list, cap = 8, opts = {}) => {
+    if (!attempt || !scope.selection) return Promise.resolve(collect(list, cap, opts));
+    const selection = scope.selection;
+    return attempt.transaction(async () => {
+      // Exactly one shuffle: the very same pool supplies both ranked and
+      // fail-open results. Restrictions precede scoring and caps.
+      let pool = applyStrictLocks(freshnessBiasedOrder((list || []) as any[], library.cachedLastAiredInfo(), Date.now()), {
+        genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
+      }, { starve: true });
+      pool = applyTrackFloor(pool, minTrackSec, { starve: true });
+      if (playlistLock) pool = pool.filter((s: any) => s?.id && playlistLock.has(s.id));
+      if (excludedIds) pool = pool.filter((s: any) => s?.id && !excludedIds.has(s.id));
+      const maxPerArtist = opts.maxPerArtist ?? (playlistLock ? Infinity : 3);
+      const eligible = filterPickerCandidates(pool, {
+        recentIds, recentKeys, hardRecentIds, hardRecentKeys,
+        seenIds: new Set(seen.keys()), maxPerArtist: Infinity, cap: Infinity,
+      });
+      const baseline = () => filterPickerCandidates(eligible, { maxPerArtist, cap });
+      let accepted = baseline();
+      if (eligible.length && eligible.length <= 256) {
+        const rows = await attempt.lookup(
+          eligible.map(s => s.id), [selection.predecessorId, ...selection.recentAiredIds],
+          async (ids, timeout) => {
+            if (readAcoustics) return readAcoustics(ids, timeout);
+            const index = getSharedAcousticIndex();
+            return index ? index.lookup(ids, timeout) : null;
+          },
+        );
+        try { if (rows) {
+          const byId = new Map(rows.map(row => [row.id, row]));
+          const evidence = (row: IndexedAcousticRow | undefined): AcousticEvidence | null => {
+            if (!row?.track) return null;
+            const track = row.track;
+            const ranges = track.key_ranges_json ? parseKeyRanges(track.key_ranges_json) : null;
+            return { bpm: track.bpm, key: track.musical_key,
+              keyStart: openingKeyFrom(ranges, track.musical_key),
+              keyEnd: endingKeyFrom(ranges, track.duration_sec == null ? null : track.duration_sec * 1000, track.musical_key),
+              pace: track.pace_json ? parsePaceSpans(track.pace_json) : null, vector: row.vector };
+          };
+          const predecessor = evidence(byId.get(selection.predecessorId));
+          if (predecessor) {
+            const aired = selection.recentAiredIds.map(id => evidence(byId.get(id))).filter((x): x is AcousticEvidence => x !== null);
+            const playlistIds = new Set((scope.playlistTracks ?? []).map(s => s.id));
+            const ranked = eligible.map((s, i) => {
+              const acoustic = evidence(byId.get(s.id));
+              const score = scoreSelection({ enabled: true, sameShow: true, anchorReliable: true, predecessor,
+                recentAired: aired, candidate: acoustic ?? {}, baselineRank: i, candidateCount: eligible.length,
+                softBoundPlaylistMember: !playlistLock && playlistIds.has(s.id) });
+              return { value: s, id: s.id, artistKey: artistKey(s), baselineIndex: i, utility: score.utility, acoustic, flow: score.flow };
+            });
+            // Missing evidence must not turn MMR into a different baseline.
+            if (ranked.some(item => item.flow !== null)) accepted = composeSelection(ranked, cap, maxPerArtist);
+          }
+        } } catch {
+          // Malformed optional evidence must not lose an otherwise valid tool.
+        }
+      }
+      return accepted.map(s => {
+        const value = slim(s);
+        seen.set(s.id, value);
+        return value;
+      });
+    });
+  };
+
   // On an empty tool result, say WHY and what to try next: a bare [] draws a
   // fabricated id. `matched` is the pre-recency-filter count, so the note can
   // distinguish "nothing matches" from "matches exist but were all filtered" —
@@ -210,8 +290,8 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
   // here. Tools whose backing index is empty are conditionally registered —
   // offering a dead tool spends the discovery call on a guaranteed-empty result.
   const stats = library.stats();
-  const hasTextEmbeddings = (stats.withEmbedding ?? 0) > 0;
-  const hasAudioEmbeddings = (stats.withAudioEmbedding ?? 0) > 0;
+  const hasTextEmbeddings = seedFixture?.text ?? (stats.withEmbedding ?? 0) > 0;
+  const hasAudioEmbeddings = seedFixture?.audio ?? (stats.withAudioEmbedding ?? 0) > 0;
   const hasEmbeddingProvider = embeddings.isAvailable();
   // Same 50% threshold the coverage UI calls similarityThin.
   const labelShare = library.labelOnlyShare();
@@ -230,7 +310,7 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     const K = 60;
     const audioFirst = primary === 'audio';
     const lookup = (which: 'audio' | 'text') =>
-      which === 'audio'
+      seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
         ? library.tracksLikeThisAudio(songId, K, { excludeIds: knnExclude })
         : library.tracksLikeThis(songId, K, { excludeIds: knnExclude });
     const list = lookup(primary);
@@ -251,5 +331,23 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     return { tracks: [] as any[], matched: 0, fellBack: false };
   };
 
-  return { scope, seen, collect, emptyResult, seedSimilarity, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
+  const seedSimilarityAsync: PickerContext['seedSimilarityAsync'] = async (songId, primary) => {
+    if (!attempt) return seedSimilarity(songId, primary);
+    const lookup = (which: 'audio' | 'text') => seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
+      ? library.tracksLikeThisAudio(songId, 60, { excludeIds: knnExclude })
+      : library.tracksLikeThis(songId, 60, { excludeIds: knnExclude });
+    const list = lookup(primary);
+    if (list.length) return { tracks: await collectAsync(list), matched: list.length, fellBack: false };
+    const other = primary === 'audio' ? 'text' : 'audio';
+    if (primary === 'audio' ? hasTextEmbeddings : hasAudioEmbeddings) {
+      const alt = lookup(other);
+      if (alt.length) {
+        const tracks = await collectAsync(alt);
+        if (tracks.length) return { tracks, matched: alt.length, fellBack: true };
+      }
+    }
+    return { tracks: [], matched: 0, fellBack: false };
+  };
+
+  return { scope, seen, collect, collectAsync, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

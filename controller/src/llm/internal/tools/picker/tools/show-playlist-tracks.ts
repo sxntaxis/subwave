@@ -10,13 +10,13 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'showPlaylistTracks',
   available: ({ scope }) => !!(scope.playlistTracks && scope.playlistTracks.length),
-  build: ({ collect, emptyResult, scope }) => tool({
+  build: ({ collectAsync, emptyResult, scope }) => tool({
     description: "Tracks from the show's pinned playlist(s) — the operator's hand-picked selection for this show. Prefer these: call this first and choose from what it returns. Takes no input.",
     inputSchema: z.object({}),
     execute: async () => {
       try {
         const playlistTracks = scope.playlistTracks ?? [];
-        const out = collect(playlistTracks, 12);
+        const out = await collectAsync(playlistTracks, 12);
         // The show's mandated source must never return a bare [] — with the
         // strict music locks also applied here, an un-tagged playlist can
         // filter to empty, and pickSystem simultaneously tells the model

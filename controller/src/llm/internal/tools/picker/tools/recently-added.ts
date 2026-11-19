@@ -5,7 +5,7 @@ import { definePickerTool } from '../defs.js';
 
 export default definePickerTool({
   name: 'recentlyAdded',
-  build: ({ collect }) => tool({
+  build: ({ collectAsync }) => tool({
     description: 'A sample of tracks from recently-added albums — "new in the crates". Takes no seed, so results are unrelated to what is on air: reach for it when the set has earned a reset, not when holding a flow.',
     inputSchema: z.object({}),
     execute: async () => {
@@ -15,7 +15,7 @@ export default definePickerTool({
         for (const a of albums.slice(0, 5)) {
           try { out.push(...(await subsonic.getAlbum(a.id)).slice(0, 3)); } catch {}
         }
-        return collect(out);
+        return await collectAsync(out);
       } catch (err) { return { error: (err as Error).message }; }
     },
   }),

@@ -5,7 +5,7 @@ import { definePickerTool } from '../defs.js';
 
 export default definePickerTool({
   name: 'tracksByMood',
-  build: ({ collect, emptyResult }) => tool({
+  build: ({ collectAsync, emptyResult }) => tool({
     description: 'Songs carrying an editorial track mood or an operator-configured audio/context mood. Editorial semantic moods are fixed: serene, warm, bright, playful, bittersweet, melancholic, dark, tense, wonder. Audio/context moods come from the station steering vocabulary and remain a separate signal. Optionally narrow by energy. An empty result names which filter emptied it: "no tracks tagged X" is a coverage gap, not an empty library.',
     inputSchema: z.object({
       mood: z.string(),
@@ -22,7 +22,7 @@ export default definePickerTool({
         await library.load();
         const moodRows = library.songsByMood(mood);
         const rows = energy ? moodRows.filter((r: any) => r.energy === energy) : moodRows;
-        const out = collect(rows);
+        const out = await collectAsync(rows);
         if (out.length) return out;
         // Empty for three distinct reasons — tell the model which, so a
         // tag-coverage gap never reads as an empty library (observed:

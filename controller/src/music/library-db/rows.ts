@@ -100,7 +100,7 @@ export function parseOutroJson(s: string): TrackOutro | null {
 }
 
 // Parse a key_ranges_json column into TrackKeyRange[] or null. Empty/malformed → null.
-function parseKeyRanges(s: string): TrackKeyRange[] | null {
+export function parseKeyRanges(s: string): TrackKeyRange[] | null {
   try {
     const v = JSON.parse(s);
     if (!Array.isArray(v)) return null;
@@ -195,4 +195,3 @@ export function normaliseYear(y: unknown): number | null {
   }
   return null;
 }
-

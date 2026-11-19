@@ -19,6 +19,14 @@
 //     used to resolve the agent's chosen id to a full song object).
 
 import { djAgent } from './strategy/agent.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+// An isolated runner override for offline tests. Normal calls always use the
+// production strategy; the scope cannot leak to concurrent asynchronous runs.
+const runnerScope = new AsyncLocalStorage<typeof djAgent>();
+export function withAgentRunnerForTest<T>(runner: typeof djAgent, fn: () => T): T {
+  return runnerScope.run(runner, fn);
+}
 
 // TArgs is the run-argument shape this agent accepts — the same object
 // buildSystem and buildTools are handed. Naming it makes the hand-off from the
@@ -107,7 +115,7 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         ? def.buildTools(toolArgs)
         : { tools: undefined, extras: undefined };
       const extras = built.extras as TExtras;
-      const result = await djAgent({
+      const result = await (runnerScope.getStore() ?? djAgent)({
         system,
         messages,
         tools: built.tools,

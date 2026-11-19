@@ -48,6 +48,16 @@ export interface PickerAuditResult {
   acousticSearchToolCalls?: number | null;
 }
 
+export interface PickerEssentiaAudit {
+  availability: 'available' | 'unavailable' | 'not_checked';
+  profiled_candidates_exposed: number | 'not_invoked';
+  trait_tool_invocations: number;
+  trait_candidates_exposed: number;
+  trait_result: 'returned' | 'empty' | 'unavailable' | 'error_or_timeout' | 'not_invoked';
+  chosen_had_exposed_profile: boolean | null;
+  chosen_from_trait_result: boolean | null;
+}
+
 export interface PickerAuditEvent {
   schema_version: 1;
   timestamp: string;
@@ -63,6 +73,7 @@ export interface PickerAuditEvent {
   tool_calls?: number;
   selection?: PickerSelectionAudit;
   acoustic_search_tool_calls?: number;
+  essentia?: PickerEssentiaAudit;
 }
 
 const ENABLED = process.env.SUBWAVE_PICKER_AUDIT === '1';
@@ -145,6 +156,10 @@ export interface PickerAuditRecorder {
   captureCandidates(ids: Iterable<string | null | undefined>): void;
   captureSelection(observation: PickerSelectionObservation): void;
   expectSelectionObservation(): void;
+  setEssentiaAvailability(available: boolean): void;
+  captureProfileExposure(ids: Iterable<string | null | undefined>): void;
+  noteTraitInvocation(): void;
+  captureTraitResult(ids: Iterable<string | null | undefined>, status: PickerEssentiaAudit['trait_result']): void;
   finish(result: PickerAuditResult): void;
 }
 
@@ -203,6 +218,12 @@ export function createPickerAuditRecorder(
   };
   let hasSelection = false;
   let selectionExpected = false;
+  let essentiaAvailability: PickerEssentiaAudit['availability'] = 'not_checked';
+  let profileObserved = false;
+  const profileIds = new Set<string>();
+  const traitIds = new Set<string>();
+  let traitInvocations = 0;
+  let traitResult: PickerEssentiaAudit['trait_result'] = 'not_invoked';
   let finished = false;
   return {
     setShowId(id) { resolvedShowId = id ?? null; },
@@ -236,6 +257,24 @@ export function createPickerAuditRecorder(
     expectSelectionObservation() {
       if (options.enabled && !finished) selectionExpected = true;
     },
+    setEssentiaAvailability(available) {
+      if (options.enabled && !finished) essentiaAvailability = available ? 'available' : 'unavailable';
+    },
+    captureProfileExposure(ids) {
+      if (!options.enabled || finished) return;
+      profileObserved = true;
+      for (const id of ids) if (profileIds.size < 100_000 && typeof id === 'string' && id) profileIds.add(id);
+    },
+    noteTraitInvocation() {
+      if (!options.enabled || finished) return;
+      traitInvocations = Math.min(1000, traitInvocations + 1);
+      if (traitResult === 'not_invoked') traitResult = 'empty';
+    },
+    captureTraitResult(ids, status) {
+      if (!options.enabled || finished) return;
+      traitResult = status;
+      for (const id of ids) if (traitIds.size < 100_000 && typeof id === 'string' && id) traitIds.add(id);
+    },
     finish(result) {
       if (!options.enabled || finished) return;
       finished = true;
@@ -255,6 +294,19 @@ export function createPickerAuditRecorder(
         ...(typeof result.toolCalls === 'number' && Number.isInteger(result.toolCalls) && result.toolCalls >= 0 ? { tool_calls: result.toolCalls } : {}),
         ...(typeof result.acousticSearchToolCalls === 'number' && Number.isInteger(result.acousticSearchToolCalls)
           && result.acousticSearchToolCalls >= 0 ? { acoustic_search_tool_calls: Math.min(1000, result.acousticSearchToolCalls) } : {}),
+        ...(path === 'agent' ? { essentia: {
+          availability: essentiaAvailability,
+          profiled_candidates_exposed: profileObserved ? profileIds.size : 'not_invoked',
+          trait_tool_invocations: traitInvocations,
+          trait_candidates_exposed: traitIds.size,
+          trait_result: traitResult,
+          chosen_had_exposed_profile: ['success', 'repaired', 'repicked'].includes(result.outcome)
+            && typeof result.chosenId === 'string' && profileObserved
+            ? profileIds.has(result.chosenId) : null,
+          chosen_from_trait_result: ['success', 'repaired', 'repicked'].includes(result.outcome)
+            && typeof result.chosenId === 'string'
+            ? traitInvocations > 0 ? traitIds.has(result.chosenId) : false : null,
+        } } : {}),
         ...(hasSelection ? { selection } : selectionExpected ? {
           selection: { status: 'not_invoked', reasons: { collector_not_invoked: 1 } },
         } : {}),

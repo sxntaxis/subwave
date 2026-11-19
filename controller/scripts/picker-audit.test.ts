@@ -44,6 +44,41 @@ test('private selection audit aggregates score versus baseline and separates aco
   assert.equal(JSON.stringify(events[0]).includes('fixture-track-id'), false);
 });
 
+test('Essentia summary counts observed distinct exposures and correlates only successful Agent choices', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'trace-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.setEssentiaAvailability(true);
+  audit.captureProfileExposure(['one', 'one', 'two']);
+  audit.noteTraitInvocation();
+  audit.captureTraitResult(['two', 'two'], 'returned');
+  audit.finish({ outcome: 'repicked', chosenId: 'two' });
+  assert.deepEqual(events[0].essentia, {
+    availability: 'available',
+    profiled_candidates_exposed: 2,
+    trait_tool_invocations: 1,
+    trait_candidates_exposed: 1,
+    trait_result: 'returned',
+    chosen_had_exposed_profile: true,
+    chosen_from_trait_result: true,
+  });
+  assert.equal(JSON.stringify(events[0].essentia).includes('one'), false);
+
+  const failed: PickerAuditEvent[] = [];
+  const rejected = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: null, now: NOW, write: event => failed.push(event),
+  });
+  rejected.setEssentiaAvailability(false);
+  rejected.captureProfileExposure([]);
+  rejected.noteTraitInvocation();
+  rejected.captureTraitResult([], 'unavailable');
+  rejected.finish({ outcome: 'fallback', chosenId: 'pool-choice', fallbackPath: 'pool' });
+  assert.equal(failed[0].essentia?.chosen_had_exposed_profile, null);
+  assert.equal(failed[0].essentia?.chosen_from_trait_result, null);
+  assert.equal(failed[0].essentia?.profiled_candidates_exposed, 0);
+});
+
 test('an expected but uncalled collector is explicit, never a zero-score claim', () => {
   const events: PickerAuditEvent[] = [];
   const audit = createPickerAuditRecorder('agent', null, null, {
@@ -81,6 +116,15 @@ test('agent, pool and auto refresh retain ordered unique IDs and safe outcome fi
       chosen_id: 'two',
       outcome: 'repaired',
       tool_calls: 3,
+      ...(path === 'agent' ? { essentia: {
+        availability: 'not_checked',
+        profiled_candidates_exposed: 'not_invoked',
+        trait_tool_invocations: 0,
+        trait_candidates_exposed: 0,
+        trait_result: 'not_invoked',
+        chosen_had_exposed_profile: null,
+        chosen_from_trait_result: false,
+      } } : {}),
     });
   }
 });
@@ -98,6 +142,7 @@ test('each selector path records a bounded terminal outcome, including failures'
       assert.equal(events[0].path, path);
       assert.equal(events[0].outcome, outcome);
       assert.deepEqual(events[0].candidate_ids, outcome === 'error' ? [] : ['fixture-a']);
+      if (path === 'agent') assert.equal(events[0].essentia?.chosen_had_exposed_profile, null);
     }
   }
 });

@@ -9,6 +9,7 @@ const library = await import('../src/music/library.js');
 const db = await import('../src/music/library-db.js');
 const { buildPickerContext, pickerScope } = await import('../src/llm/internal/tools/picker/scope.js');
 const { withEssentiaReaderForTest } = await import('../src/music/essentia-evidence.js');
+const { createPickerAuditRecorder } = await import('../src/observability/picker-audit.js');
 const playlistTool = (await import('../src/llm/internal/tools/picker/tools/show-playlist-tracks.js')).default;
 const traitTool = (await import('../src/llm/internal/tools/picker/tools/find-by-audio-traits.js')).default;
 await library.load();
@@ -25,10 +26,26 @@ const selection = { predecessorId: 'anchor', recentAiredIds: [] };
 const options = { toolCallId: 'fixture', messages: [] };
 
 test('trait discovery directly yields selectable profiles and respects locks', async () => {
+  const availabilityEvents: any[] = [];
+  const availabilityOnly = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'availability-fixture', write: event => availabilityEvents.push(event),
+  });
+  const events: any[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'fixture', write: event => events.push(event),
+  });
   await withEssentiaReaderForTest(reader, async () => {
+    const availabilityContext = buildPickerContext(pickerScope({
+      essentiaDiscovery: true, essentiaAudit: availabilityOnly,
+    }), async () => null);
+    assert.equal(traitTool.available?.(availabilityContext), true);
+    availabilityOnly.finish({ outcome: 'rejected' });
+    assert.equal(availabilityEvents[0].essentia.trait_tool_invocations, 0);
+    assert.equal(availabilityEvents[0].essentia.trait_result, 'not_invoked');
+
     const ctx = buildPickerContext(pickerScope({
       selection, essentiaDiscovery: true, playlistLock: new Set(['allowed', 'recent', 'excluded']),
-      hardRecentIds: new Set(['recent']), excludedIds: new Set(['excluded']),
+      hardRecentIds: new Set(['recent']), excludedIds: new Set(['excluded']), essentiaAudit: audit,
     }), async () => null);
     assert.equal(traitTool.available?.(ctx), true);
     const result = await (traitTool.build(ctx) as any).execute({ arousal: 'high' }, options);
@@ -36,6 +53,16 @@ test('trait discovery directly yields selectable profiles and respects locks', a
     assert.equal(ctx.seen.get('allowed').id, result[0].id);
     assert.equal(ctx.seen.get('allowed').audio_profile, undefined);
     assert.equal(result[0].audio_profile.arousal_1_9, 7);
+    audit.finish({ outcome: 'success', chosenId: 'allowed' });
+    assert.deepEqual(events[0].essentia, {
+      availability: 'available',
+      profiled_candidates_exposed: 1,
+      trait_tool_invocations: 1,
+      trait_candidates_exposed: 1,
+      trait_result: 'returned',
+      chosen_had_exposed_profile: true,
+      chosen_from_trait_result: true,
+    });
   });
 });
 

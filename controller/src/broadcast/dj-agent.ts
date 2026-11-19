@@ -262,6 +262,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const scope = pickerScope({
     essentiaDiscovery: true,
     ...(auditSeen ? { seen: auditSeen } : {}),
+    ...(pickerAuditEnabled() ? { essentiaAudit: audit } : {}),
     ...(selectionAudit ? { selectionAudit } : {}),
     ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
       target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,

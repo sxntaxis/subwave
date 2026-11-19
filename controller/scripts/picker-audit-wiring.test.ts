@@ -41,23 +41,28 @@ async function runThroughAgent({
   request = false,
   selection = predecessor,
   observeSelection = true,
+  playlist = songs,
+  invokeTools = true,
   reader,
   audit,
 }: {
   request?: boolean;
   selection?: typeof predecessor | null;
   observeSelection?: boolean;
+  playlist?: typeof songs;
+  invokeTools?: boolean;
   reader: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>;
   audit: ReturnType<typeof createPickerAuditRecorder>;
 }) {
   const selectionAudit = bindPickerSelectionAudit(audit, observeSelection);
   const scope = pickerScope({
-    playlistTracks: songs,
+    playlistTracks: playlist,
     ...(selection ? { selection } : {}),
     ...(selectionAudit ? { selectionAudit } : {}),
   });
   let chosenId: string | undefined;
   const runner = async ({ tools }: any) => {
+    if (!invokeTools) return { object: null, steps: 1, toolCalls: [] };
     await tools.tracksThatSoundLikeThis.execute({ songId: 'fixture-anchor' }, {
       toolCallId: 'fixture-sound', messages: [],
     });
@@ -165,6 +170,38 @@ test('real Agent tool construction persists scored and baseline outcomes private
     });
     assert.equal(missingPredecessor.selection?.reasons.no_eligible_context, 2);
     assert.equal(missingPredecessor.acoustic_search_tool_calls, 1);
+
+    const unchanged = await persistedAttempt(directory, 'unchanged-attempt', async audit => {
+      const result = await runThroughAgent({
+        audit, playlist: songs.slice(0, 12),
+        reader: async ids => ids.map(id => acousticRow(id, true)),
+      });
+      finishAgentPickerAudit(audit, { ...result, outcome: 'success' });
+    });
+    assert.equal(unchanged.selection?.status, 'observed');
+    assert.equal(unchanged.selection?.scored, 1);
+    assert.equal(unchanged.selection?.reasons.scored_no_membership_change, 1);
+
+    const timeout = await persistedAttempt(directory, 'timeout-attempt', async audit => {
+      const result = await runThroughAgent({
+        audit, reader: async () => new Promise(() => {}),
+      });
+      finishAgentPickerAudit(audit, { ...result, outcome: 'success' });
+    });
+    assert.equal(timeout.selection?.status, 'observed');
+    assert.equal(timeout.selection?.baseline, 1);
+    assert.equal(timeout.selection?.reasons.deadline_or_budget, 1);
+
+    const noTool = await persistedAttempt(directory, 'no-tool-attempt', async audit => {
+      const result = await runThroughAgent({
+        audit, invokeTools: false, reader: async () => { throw new Error('unexpected'); },
+      });
+      finishAgentPickerAudit(audit, { ...result, outcome: 'empty' });
+    });
+    assert.deepEqual(noTool.selection, {
+      status: 'not_invoked', reasons: { collector_not_invoked: 1 },
+    });
+    assert.equal(noTool.acoustic_search_tool_calls, 0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

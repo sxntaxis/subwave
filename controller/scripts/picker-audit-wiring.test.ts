@@ -5,9 +5,10 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { withAgentRunnerForTest } from '../src/llm/internal/agent-factory.js';
 import {
-  pickerScope, withPickerAcousticReaderForTest,
+  pickerScope, withPickerAcousticReaderForTest, withPickerSeedFixtureForTest,
 } from '../src/llm/internal/tools/picker/scope.js';
 import { pickerAgent, requestAgent } from '../src/broadcast/dj-agent/agents.js';
+import { selectionContext } from '../src/broadcast/dj-agent/selection-context.js';
 import {
   appendPickerAuditEvent, bindPickerSelectionAudit, createPickerAuditRecorder, finishAgentPickerAudit,
   type PickerAuditEvent,
@@ -30,10 +31,11 @@ const acousticRow = (id: string, preferred: boolean): IndexedAcousticRow => ({
   },
   vector: new Float32Array(preferred ? [1, 0] : [-1, 0]),
 });
-const predecessor = {
-  predecessorId: 'fixture-anchor',
-  recentAiredIds: [],
-};
+const current = { track: { id: 'fixture-anchor' }, startedAt: new Date().toISOString() };
+const predecessor = selectionContext(
+  { kind: 'current', item: current } as any, current as any, [], [], new Date(), 'show',
+  () => 'show',
+)!;
 
 async function runThroughAgent({
   request = false,
@@ -56,6 +58,9 @@ async function runThroughAgent({
   });
   let chosenId: string | undefined;
   const runner = async ({ tools }: any) => {
+    await tools.tracksThatSoundLikeThis.execute({ songId: 'fixture-anchor' }, {
+      toolCallId: 'fixture-sound', messages: [],
+    });
     const result = await tools.showPlaylistTracks.execute({}, {
       toolCallId: 'fixture-tool-call', messages: [],
     });
@@ -63,12 +68,23 @@ async function runThroughAgent({
     return {
       object: { id: chosenId, reason: 'fixture' },
       steps: 1,
-      toolCalls: [{ name: 'tracksThatSoundLikeThis' }],
+      toolCalls: [{ name: 'tracksThatSoundLikeThis' }, { name: 'showPlaylistTracks' }],
     };
   };
   const agent = request ? requestAgent : pickerAgent;
-  const result = await withPickerAcousticReaderForTest(reader, () =>
-    withAgentRunnerForTest(runner as any, () => agent.run({ messages: [], scope } as any)));
+  const oldRandom = Math.random;
+  let draw = 0;
+  Math.random = () => 1 - (draw++ / 100);
+  let result;
+  try {
+    result = await withPickerSeedFixtureForTest(
+      { audio: true, text: true, lookup: () => [] },
+      () => withPickerAcousticReaderForTest(reader, () =>
+        withAgentRunnerForTest(runner as any, () => agent.run({ messages: [], scope } as any))),
+    );
+  } finally {
+    Math.random = oldRandom;
+  }
   return {
     chosenId,
     candidateIds: [...(result.extras?.seen?.keys?.() ?? [])],
@@ -147,7 +163,7 @@ test('real Agent tool construction persists scored and baseline outcomes private
         ...result, outcome: 'success', chosenId: result.chosenId,
       });
     });
-    assert.equal(missingPredecessor.selection?.reasons.no_eligible_context, 1);
+    assert.equal(missingPredecessor.selection?.reasons.no_eligible_context, 2);
     assert.equal(missingPredecessor.acoustic_search_tool_calls, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -398,7 +398,15 @@ export function buildPickerContext(
   };
 
   const seedSimilarityAsync: PickerContext['seedSimilarityAsync'] = async (songId, primary) => {
-    if (!attempt) return seedSimilarity(songId, primary);
+    if (!attempt) {
+      const result = seedSimilarity(songId, primary);
+      scope.selectionAudit?.({
+        reason: 'no_eligible_context',
+        eligibleCandidates: result.matched,
+        offeredCandidates: result.tracks.length,
+      });
+      return result;
+    }
     const lookup = (which: 'audio' | 'text') => seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
       ? library.tracksLikeThisAudio(songId, 60, { excludeIds: knnExclude })
       : library.tracksLikeThis(songId, 60, { excludeIds: knnExclude });

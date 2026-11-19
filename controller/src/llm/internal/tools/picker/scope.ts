@@ -27,8 +27,17 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
+const acousticReaderFixture = new AsyncLocalStorage<
+  (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>
+>();
 export function withPickerSeedFixtureForTest<T>(fixture: SeedFixture, fn: () => T): T {
   return seedFixtureScope.run(fixture, fn);
+}
+export function withPickerAcousticReaderForTest<T>(
+  reader: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>,
+  fn: () => T,
+): T {
+  return acousticReaderFixture.run(reader, fn);
 }
 
 export interface PickerScope {
@@ -140,7 +149,7 @@ export interface PickerContext {
 
 export function buildPickerContext(
   scope: PickerScope,
-  readAcoustics?: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>,
+  readAcoustics = acousticReaderFixture.getStore(),
   seedFixture: SeedFixture | undefined = seedFixtureScope.getStore(),
 ): PickerContext {
   const {

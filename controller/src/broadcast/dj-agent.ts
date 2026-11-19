@@ -25,7 +25,9 @@ import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
-import { beginPickerAudit, pickerAuditEnabled } from '../observability/picker-audit.js';
+import {
+  beginPickerAudit, bindPickerSelectionAudit, finishAgentPickerAudit, pickerAuditEnabled,
+} from '../observability/picker-audit.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
 import { showNoRepeatGuard } from '../music/show-recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
@@ -161,6 +163,10 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
   const audit = beginPickerAudit('agent', null, showAt);
   const auditSeen = pickerAuditEnabled() ? new Map<string, any>() : undefined;
+  const vnextAudit = process.env.PICKER_VNEXT_AGENT === '1' && pickerAuditEnabled();
+  const selectionAudit = bindPickerSelectionAudit(audit, vnextAudit);
+  let toolCallCount: number | undefined;
+  let acousticSearchToolCalls: number | undefined;
   try {
   await library.load();
   const stats = library.stats();
@@ -255,8 +261,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     ...(auditSeen ? { seen: auditSeen } : {}),
-    ...(process.env.PICKER_VNEXT_AGENT === '1' && pickerAuditEnabled()
-      ? { selectionAudit: observation => audit.captureSelection(observation) } : {}),
+    ...(selectionAudit ? { selectionAudit } : {}),
     ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
       target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,
       at => settings.resolveActiveShow(at)?.id ?? null,
@@ -290,11 +295,15 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     });
   } catch (error) {
     if (auditSeen) audit.captureCandidates(auditSeen.keys());
-    audit.finish({ outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed' });
+    audit.finish({
+      outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed',
+      toolCalls: toolCallCount, acousticSearchToolCalls,
+    });
     throw error;
   }
   const { steps, toolCalls, extras } = run;
-  const acousticSearchToolCalls = toolCalls.filter(call =>
+  toolCallCount = toolCalls.length;
+  acousticSearchToolCalls = toolCalls.filter(call =>
     call.name === 'tracksThatSoundLikeThis' || call.name === 'searchBySound'
       || call.name === 'tracksTowardJourney').length;
   if (pickerAuditEnabled()) audit.captureCandidates(extras.seen.keys());
@@ -356,6 +365,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       fallbackPath: 'pool',
       fallbackReason: failure.kind,
       toolCalls: toolCalls.length,
+      acousticSearchToolCalls,
     });
     // The verdict rides ON the error so the caller's catch can tell a model
     // that can't drive the harness (what the breaker catches) from tools that
@@ -393,11 +403,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // The pool rescue enqueues, links and records its own session turn, so a
   // rescued slot is a filled slot — runTrackEvent must treat it as done.
   if (guarded.kind === 'rescued') {
-    audit.finish({ outcome: 'fallback', fallbackPath: 'pool', fallbackReason: 'artist_guard_pool_rescue', toolCalls: toolCalls.length });
+    audit.finish({ outcome: 'fallback', fallbackPath: 'pool', fallbackReason: 'artist_guard_pool_rescue', toolCalls: toolCalls.length, acousticSearchToolCalls });
     return true;
   }
   if (guarded.kind === 'stale') {
-    audit.finish({ outcome: 'collision', chosenId: null, toolCalls: toolCalls.length });
+    audit.finish({ outcome: 'collision', chosenId: null, toolCalls: toolCalls.length, acousticSearchToolCalls });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
@@ -492,7 +502,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     return 'stale';
   }
   if (queued !== 'queued') {
-    audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length });
+    audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length, acousticSearchToolCalls });
     return false;
   }
   session.appendTurn({
@@ -521,16 +531,19 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     selectionPath: 'agent',
     fallback: false,
   });
-  audit.finish({
-    outcome: decisionPath === 'agent_repaired' ? 'repaired' : decisionPath === 'agent_repick' ? 'repicked' : 'success',
+  finishAgentPickerAudit(audit, {
+    candidateIds: extras.seen.keys(),
     chosenId: song.id ?? null,
-    toolCalls: toolCalls.length,
-    acousticSearchToolCalls,
+    outcome: decisionPath === 'agent_repaired' ? 'repaired' : decisionPath === 'agent_repick' ? 'repicked' : 'success',
+    toolCalls,
   });
   return true;
   } catch (error) {
     if (auditSeen) audit.captureCandidates(auditSeen.keys());
-    audit.finish({ outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_attempt_failed' });
+    audit.finish({
+      outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_attempt_failed',
+      toolCalls: toolCallCount, acousticSearchToolCalls,
+    });
     throw error;
   }
 }

@@ -49,6 +49,7 @@ import randomSongs from './tools/random-songs.js';
 import showPlaylistTracks from './tools/show-playlist-tracks.js';
 import tracksTowardJourney from './tools/tracks-toward-journey.js';
 import identifyRequestedTrack from './tools/identify-requested-track.js';
+import findByAudioTraits from './tools/find-by-audio-traits.js';
 
 // Registration order — this is the order the model sees the tools in, so keep
 // it stable rather than alphabetising: it matches the historical object literal.
@@ -70,6 +71,7 @@ export const PICKER_TOOLS: readonly PickerToolModule[] = [
   randomSongs,
   showPlaylistTracks,
   tracksTowardJourney,
+  findByAudioTraits,
   identifyRequestedTrack,
 ];
 

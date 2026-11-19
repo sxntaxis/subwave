@@ -70,6 +70,7 @@ export const requestAgent = defineAgent<RequestRunArgs, PickerExtras>({
       ...scope,
       selection: undefined,
       selectionAudit: undefined,
+      essentiaDiscovery: false,
       resolveReferences: settings.get().llm?.requestWebResolve ?? false,
     });
     return { tools, extras: { seen } };

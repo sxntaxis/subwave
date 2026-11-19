@@ -373,6 +373,23 @@ export function errReason(err: ErrorLike | null | undefined): string {
 
 // Flatten a tool-loop result's discovery trail for /debug. Excludes the
 // synthetic `done` tool — that is the schema-emit signal, not a discovery action.
+// Essentia profiles are private to the original tool response. The discovery
+// trail is also logged and rendered into the terminal recovery prompt, so it
+// must retain candidate identities while omitting those profiles.
+function stripPrivateAudioProfiles(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const items = value.map(stripPrivateAudioProfiles);
+    return items.some((item, i) => item !== value[i]) ? items : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+  const entries = Object.entries(value);
+  const filtered = entries.filter(([key]) => key !== 'audio_profile')
+    .map(([key, item]) => [key, stripPrivateAudioProfiles(item)] as const);
+  return filtered.length !== entries.length || filtered.some((entry, i) => entry[1] !== entries[i][1])
+    ? Object.fromEntries(filtered) : value;
+}
+
 export function flattenToolCalls(result: { steps?: StepLike[] } | null | undefined): ToolCallSummary[] {
   return (result?.steps || []).flatMap((s) => {
     const results = s.toolResults || [];
@@ -381,7 +398,7 @@ export function flattenToolCalls(result: { steps?: StepLike[] } | null | undefin
       .map((c, i) => ({
         name: c.toolName,
         args: c.input ?? c.args ?? null,
-        result: results[i]?.output ?? results[i]?.result ?? null,
+        result: stripPrivateAudioProfiles(results[i]?.output ?? results[i]?.result ?? null),
       }));
   });
 }

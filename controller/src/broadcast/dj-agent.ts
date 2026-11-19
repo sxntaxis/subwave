@@ -260,6 +260,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // to the discovery tools without being unpacked on the way (see PickerRunArgs
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
+    essentiaDiscovery: true,
     ...(auditSeen ? { seen: auditSeen } : {}),
     ...(selectionAudit ? { selectionAudit } : {}),
     ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(

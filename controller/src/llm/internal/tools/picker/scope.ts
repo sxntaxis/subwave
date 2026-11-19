@@ -24,6 +24,7 @@ import { scoreSelection, type AcousticEvidence } from '../../../../music/selecti
 import { composeSelection } from '../../../../music/selection-compose.js';
 import type { PickerSelectionObservation } from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { enrichEssentia, getEssentiaReader, type EssentiaReader } from '../../../../music/essentia-evidence.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -41,6 +42,8 @@ export function withPickerAcousticReaderForTest<T>(
 }
 
 export interface PickerScope {
+  // Set only by the autonomous track picker; requests remain isolated.
+  essentiaDiscovery?: boolean;
   // Set exclusively by the autonomous picker after validating its predecessor.
   selection?: { predecessorId: string; recentAiredIds: string[] };
   // Private opt-in audit observer; receives bounded counters only.
@@ -125,6 +128,7 @@ export function pickerScope(partial: Partial<PickerScope> = {}): PickerScope {
 // builder, and the index-coverage flags the conditional tools gate on.
 export interface PickerContext {
   scope: PickerScope;
+  essentia: EssentiaReader | null;
   // id → slim song across all tool calls; the picker resolves the agent's final
   // id choice against this.
   seen: Map<string, any>;
@@ -159,6 +163,7 @@ export function buildPickerContext(
   } = scope;
 
   const seen = scope.seen ?? new Map<string, any>();
+  const essentia = scope.essentiaDiscovery ? getEssentiaReader() : null;
 
   // Pushed into every KNN query so a heavily-aired cluster answers with its next
   // neighbours out instead of thinning toward empty.
@@ -221,7 +226,7 @@ export function buildPickerContext(
   };
 
   const attempt = scope.selection ? createSelectionAttempt() : null;
-  const collectAsync: PickerContext['collectAsync'] = (list, cap = 8, opts = {}) => {
+  const collectSelection: PickerContext['collectAsync'] = (list, cap = 8, opts = {}) => {
     if (!attempt || !scope.selection) {
       const accepted = collect(list, cap, opts);
       scope.selectionAudit?.({
@@ -332,6 +337,8 @@ export function buildPickerContext(
       });
     });
   };
+  const collectAsync: PickerContext['collectAsync'] = async (list, cap = 8, opts = {}) =>
+    enrichEssentia(essentia, await collectSelection(list, cap, opts));
 
   // On an empty tool result, say WHY and what to try next: a bare [] draws a
   // fabricated id. `matched` is the pre-recency-filter count, so the note can
@@ -407,7 +414,10 @@ export function buildPickerContext(
   };
 
   const seedSimilarityAsync: PickerContext['seedSimilarityAsync'] = async (songId, primary) => {
-    if (!attempt) return seedSimilarity(songId, primary);
+    if (!attempt) {
+      const result = seedSimilarity(songId, primary);
+      return { ...result, tracks: await enrichEssentia(essentia, result.tracks) };
+    }
     const lookup = (which: 'audio' | 'text') => seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
       ? library.tracksLikeThisAudio(songId, 60, { excludeIds: knnExclude })
       : library.tracksLikeThis(songId, 60, { excludeIds: knnExclude });
@@ -424,5 +434,5 @@ export function buildPickerContext(
     return { tracks: [], matched: 0, fellBack: false };
   };
 
-  return { scope, seen, collect, collectAsync, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
+  return { scope, essentia, seen, collect, collectAsync, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

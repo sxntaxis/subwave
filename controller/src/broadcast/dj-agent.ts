@@ -576,11 +576,18 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
   // run's current waypoint vector, drifting the pool toward the destination.
   const audit = beginPickerAudit('pool', ctx?.activeShow?.id, showAt);
+  const poolVnext = process.env.PICKER_VNEXT_POOL === '1';
+  const poolSelectionAudit = bindPickerSelectionAudit(audit, poolVnext && pickerAuditEnabled());
+  const poolSelection = poolVnext ? selectionContext(
+    target, queue.current, queue.upcoming, queue.history, showAt, ctx?.activeShow?.id ?? null,
+    at => settings.resolveActiveShow(at)?.id ?? null,
+  ) : undefined;
   let result;
   try {
     result = await picker.pickViaPool(queue, ctx, rankTarget, audioWaypoint, {
       ...opts,
       ...(pickerAuditEnabled() ? { onAuditCandidates: ids => audit.captureCandidates(ids) } : {}),
+      ...(poolVnext ? { poolVnext, selection: poolSelection, selectionAudit: poolSelectionAudit } : {}),
     }, current);
   } catch (error) {
     audit.finish({ outcome: 'error', fallbackReason: 'pool_candidate_build_or_model_error' });

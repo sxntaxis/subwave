@@ -19,6 +19,9 @@ import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool 
 import { showNoRepeatGuard } from './show-recency.js';
 import * as likes from '../broadcast/likes.js';
 import { poolAnchor } from './picker-anchor.js';
+import { composePoolSelection } from './pool-selection.js';
+import type { PickerSelectionObservation } from '../observability/picker-audit.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 // Raw Subsonic child, slimTrack library row, or Last.fm stub. A structural
 // superset of show-filter's FilterTrack and recency's CandidateLike.
@@ -75,6 +78,14 @@ interface QueueEntry {
 }
 
 const CANDIDATE_CAP = 18;
+type PoolFixture = {
+  build: typeof buildCandidates;
+  pick: typeof dj.pickNextTrack;
+};
+const poolFixture = new AsyncLocalStorage<PoolFixture>();
+export function withPoolPickerFixtureForTest<T>(fixture: PoolFixture, fn: () => T): T {
+  return poolFixture.run(fixture, fn);
+}
 const HISTORY_DEPTH = 4;
 
 // Per-source caps so the LLM sees a balanced mix rather than 15 similar songs.
@@ -640,7 +651,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void } = {}, explicitCurrent?: Candidate | null) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
@@ -704,12 +715,16 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     const key = artistRootKey({ artist: opts.avoidArtist });
     if (key) blockedArtists.add(key);
   }
-  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await buildCandidates(ctx.dominantMood, recentIds, recentKeys, recentArtists, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, minTrackSec, noRepeat.exhaustive);
+  const build = poolFixture.getStore()?.build ?? buildCandidates;
+  const { candidates: rawCandidates, sources, strictInfo, playlistInfo } = await build(ctx.dominantMood, recentIds, recentKeys, recentArtists, recentAlbums, currentTrack, rankTarget, audioWaypoint, showFilter, hardRecentIds, hardRecentKeys, playlistPool, playlistStrict, blockedArtists, strictGenreResolution, minTrackSec, noRepeat.exhaustive);
 
   // Excluded playlists: hard drop, no never-starve fallback.
-  const candidates = excludedIds
+  const eligibleCandidates = excludedIds
     ? rawCandidates.filter((t) => t?.id && !excludedIds.has(t.id))
     : rawCandidates;
+  const candidates = opts.poolVnext
+    ? await composePoolSelection(eligibleCandidates, opts.selection, opts.selectionAudit)
+    : eligibleCandidates;
   // Observe precisely the final list, immediately before its existing model
   // boundary. The callback is best-effort and performs no candidate work.
   try { opts.onAuditCandidates?.(candidates.map((c) => c?.id)); } catch {}
@@ -778,7 +793,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   let pickRaw;
   try {
     // Same show-brief plumbing as the agent picker, whose fallback this is.
-    pickRaw = await dj.pickNextTrack({
+    const pick = poolFixture.getStore()?.pick ?? dj.pickNextTrack;
+    pickRaw = await pick({
       show: activeShow
         ? {
             name: activeShow.name,

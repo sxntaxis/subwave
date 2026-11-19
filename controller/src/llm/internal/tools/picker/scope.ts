@@ -22,6 +22,13 @@ import { parseKeyRanges, parsePaceSpans } from '../../../../music/library-db/row
 import { endingKeyFrom, openingKeyFrom } from '../../../../music/mix.js';
 import { scoreSelection, type AcousticEvidence } from '../../../../music/selection-score.js';
 import { composeSelection } from '../../../../music/selection-compose.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
+const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
+export function withPickerSeedFixtureForTest<T>(fixture: SeedFixture, fn: () => T): T {
+  return seedFixtureScope.run(fixture, fn);
+}
 
 export interface PickerScope {
   // Set exclusively by the autonomous picker after validating its predecessor.
@@ -131,7 +138,7 @@ export interface PickerContext {
 export function buildPickerContext(
   scope: PickerScope,
   readAcoustics?: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>,
-  seedFixture?: { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean },
+  seedFixture: SeedFixture | undefined = seedFixtureScope.getStore(),
 ): PickerContext {
   const {
     recentIds, recentKeys, hardRecentIds, hardRecentKeys,

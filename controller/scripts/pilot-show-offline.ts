@@ -48,10 +48,15 @@ async function main() {
         return { value, rank: sampleState };
       }).sort((a: any, b: any) => a.rank - b.rank).slice(0, 65).map((x: any) => x.value);
       const anchor = sample[0].id, candidates = sample.slice(1);
-      const negative = all.map(norm).find((x: any) => !authoritative.has(x.id));
+      const negative = all.map(norm).find((x: any) => !authoritative.has(x.id)
+        && (show.playlistStrict ? !lock.has(x.id)
+          : applyStrictLocks([x], { genres: show.genres }, { starve: true }).length === 0));
       assert.ok(negative && !authoritative.has(negative.id), 'negative control must be outside the independent show set');
+      // The tool must reject an actual out-of-show candidate, not merely be
+      // checked against an input from which every negative was pre-removed.
+      const negativeCandidates = [...candidates, negative];
       async function run(on: boolean) {
-        const ctx = buildPickerContext(pickerScope({ playlistTracks: candidates,
+        const ctx = buildPickerContext(pickerScope({ playlistTracks: negativeCandidates,
           ...(show.playlistStrict ? { playlistLock: lock } : {}),
           genreLock: show.genres, ...(on ? { selection: { predecessorId: anchor, recentAiredIds: [] } } : {}) }),
         async (ids, timeout) => index.lookup(ids, timeout));
@@ -67,12 +72,13 @@ async function main() {
         } finally { Math.random = old; }
       }
       const off = await run(false), on = await run(true);
+      assert.ok(!off.ids.includes(negative.id) && !on.ids.includes(negative.id), 'ineligible negative leaked');
       assert.ok([...off.ids, ...on.ids].every((x: string) => authoritative.has(x)), 'show hard eligibility violated');
       assert.deepEqual(off.ids, off.seen); assert.deepEqual(on.ids, on.seen);
       console.log(JSON.stringify({ id, seed, source: candidates.length, strictLock: show.playlistStrict ? lock.size : null, rawPool: pool.length, missing,
         eligible: eligible.length, off: off.ids.length, on: on.ids.length,
         changed: on.ids.filter((x: string) => !off.ids.includes(x)).length,
-        violations: on.ids.filter((x: string) => !authoritative.has(x)).length,
+        violations: on.ids.filter((x: string) => !authoritative.has(x)).length, negativeRejected: true,
         seenMatches: JSON.stringify(on.ids) === JSON.stringify(on.seen),
         offArtists: off.artists, onArtists: on.artists, offMs: off.ms, onMs: on.ms,
         provenance: 'offline hypothetical anchor; DB-backed playlist membership, not Subsonic API' }));

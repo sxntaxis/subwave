@@ -375,18 +375,27 @@ export function buildPickerContext(
   const seedSimilarity = (songId: string, primary: 'audio' | 'text') => {
     const K = 60;
     const audioFirst = primary === 'audio';
+    const collectSeed = (list: any[]) => {
+      const tracks = collect(list);
+      if (!attempt) scope.selectionAudit?.({
+        reason: 'no_eligible_context',
+        eligibleCandidates: list.length,
+        offeredCandidates: tracks.length,
+      });
+      return tracks;
+    };
     const lookup = (which: 'audio' | 'text') =>
       seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
         ? library.tracksLikeThisAudio(songId, K, { excludeIds: knnExclude })
         : library.tracksLikeThis(songId, K, { excludeIds: knnExclude });
     const list = lookup(primary);
-    if (list.length) return { tracks: collect(list), matched: list.length, fellBack: false };
+    if (list.length) return { tracks: collectSeed(list), matched: list.length, fellBack: false };
     const other = audioFirst ? 'text' : 'audio';
     const otherIndexed = audioFirst ? hasTextEmbeddings : hasAudioEmbeddings;
     if (otherIndexed) {
       const alt = lookup(other);
       if (alt.length) {
-        const rescued = collect(alt);
+        const rescued = collectSeed(alt);
         // Only report the rescue if something SURVIVED the recency/lock filters.
         // A raw alt count with empty tracks would render emptyResult's matched>0
         // note about an index the model never asked, glued to a "no embedding
@@ -398,15 +407,7 @@ export function buildPickerContext(
   };
 
   const seedSimilarityAsync: PickerContext['seedSimilarityAsync'] = async (songId, primary) => {
-    if (!attempt) {
-      const result = seedSimilarity(songId, primary);
-      scope.selectionAudit?.({
-        reason: 'no_eligible_context',
-        eligibleCandidates: result.matched,
-        offeredCandidates: result.tracks.length,
-      });
-      return result;
-    }
+    if (!attempt) return seedSimilarity(songId, primary);
     const lookup = (which: 'audio' | 'text') => seedFixture ? seedFixture.lookup(songId, which) : which === 'audio'
       ? library.tracksLikeThisAudio(songId, 60, { excludeIds: knnExclude })
       : library.tracksLikeThis(songId, 60, { excludeIds: knnExclude });

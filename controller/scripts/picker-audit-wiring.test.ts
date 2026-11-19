@@ -43,6 +43,8 @@ async function runThroughAgent({
   observeSelection = true,
   playlist = songs,
   invokeTools = true,
+  soundMatches = false,
+  soundOnly = false,
   reader,
   audit,
 }: {
@@ -51,6 +53,8 @@ async function runThroughAgent({
   observeSelection?: boolean;
   playlist?: typeof songs;
   invokeTools?: boolean;
+  soundMatches?: boolean;
+  soundOnly?: boolean;
   reader: (ids: readonly string[], timeoutMs: number) => Promise<IndexedAcousticRow[] | null>;
   audit: ReturnType<typeof createPickerAuditRecorder>;
 }) {
@@ -66,6 +70,7 @@ async function runThroughAgent({
     await tools.tracksThatSoundLikeThis.execute({ songId: 'fixture-anchor' }, {
       toolCallId: 'fixture-sound', messages: [],
     });
+    if (soundOnly) return { object: null, steps: 1, toolCalls: [{ name: 'tracksThatSoundLikeThis' }] };
     const result = await tools.showPlaylistTracks.execute({}, {
       toolCallId: 'fixture-tool-call', messages: [],
     });
@@ -83,7 +88,7 @@ async function runThroughAgent({
   let result;
   try {
     result = await withPickerSeedFixtureForTest(
-      { audio: true, text: true, lookup: () => [] },
+      { audio: true, text: true, lookup: () => soundMatches ? songs.slice(0, 2) : [] },
       () => withPickerAcousticReaderForTest(reader, () =>
         withAgentRunnerForTest(runner as any, () => agent.run({ messages: [], scope } as any))),
     );
@@ -161,7 +166,8 @@ test('real Agent tool construction persists scored and baseline outcomes private
 
     const missingPredecessor = await persistedAttempt(directory, 'no-anchor-attempt', async audit => {
       const result = await runThroughAgent({
-        audit, selection: null, reader: async () => { throw new Error('must not query'); },
+        audit, selection: null, soundMatches: true,
+        reader: async () => { throw new Error('must not query'); },
       });
       assert.ok(result.chosenId);
       finishAgentPickerAudit(audit, {
@@ -202,6 +208,18 @@ test('real Agent tool construction persists scored and baseline outcomes private
       status: 'not_invoked', reasons: { collector_not_invoked: 1 },
     });
     assert.equal(noTool.acoustic_search_tool_calls, 0);
+
+    const emptySound = await persistedAttempt(directory, 'empty-sound-attempt', async audit => {
+      const result = await runThroughAgent({
+        audit, selection: null, soundOnly: true,
+        reader: async () => { throw new Error('unexpected'); },
+      });
+      finishAgentPickerAudit(audit, { ...result, outcome: 'empty' });
+    });
+    assert.deepEqual(emptySound.selection, {
+      status: 'not_invoked', reasons: { collector_not_invoked: 1 },
+    });
+    assert.equal(emptySound.acoustic_search_tool_calls, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

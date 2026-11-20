@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
@@ -16,7 +17,9 @@ class ProjectionTest(unittest.TestCase):
             audio = Path(directory) / 'fixture.audio'
             audio.write_bytes(b'fixture')
             stat = audio.stat()
-            source = sqlite3.connect(':memory:')
+            source_path = Path(directory) / 'source.sqlite'
+            index_path = Path(directory) / 'index.sqlite'
+            source = sqlite3.connect(source_path)
             source.executescript('''
               CREATE TABLE source_inventory(track_id TEXT PRIMARY KEY,source_path TEXT,nav_missing INTEGER,path_status TEXT);
               CREATE TABLE track_analysis(analysis_id INTEGER PRIMARY KEY,track_id TEXT,source_size INTEGER,
@@ -48,7 +51,7 @@ class ProjectionTest(unittest.TestCase):
             ])
             source.commit()
             source.execute('PRAGMA query_only=ON')
-            target = sqlite3.connect(':memory:')
+            target = sqlite3.connect(index_path)
             target.executescript(index.SCHEMA)
             self.assertEqual(index.advance(source, target, 1, models), 1)
             self.assertEqual(target.execute('SELECT ready FROM evidence').fetchone()[0], 0)
@@ -61,6 +64,23 @@ class ProjectionTest(unittest.TestCase):
                              ('unavailable', 'source_missing'))
             self.assertEqual(target.execute('SELECT count(*) FROM windows').fetchone()[0], 2)
             self.assertEqual(index.advance(source, target, 1, models), 0)
+            script = '''
+import { readMusicEvidence } from './src/music/music-evidence-index-v2-reader.mjs';
+const result = readMusicEvidence(process.argv[1], process.argv[2], process.argv[3], ['song']);
+console.log(JSON.stringify(result));
+'''
+            def read():
+                out = subprocess.check_output(['node', '--input-type=module', '-e', script,
+                                               str(index_path), str(source_path), index._v1.models_hash(models)],
+                                              cwd=Path(__file__).resolve().parent.parent, text=True)
+                return json.loads(out)
+            result = read()
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0][0], 'song')
+            self.assertEqual(result[0][1]['windows'][0]['outputs'][0]['validity'], 'outside_declared_range')
+            self.assertNotIn(str(audio), json.dumps(result))
+            audio.write_bytes(b'changed-size')
+            self.assertEqual(read(), [])
             with self.assertRaises(ValueError):
                 index.advance(source, target, 1, {'other': {}})
 

@@ -3,6 +3,7 @@
 import Database from 'better-sqlite3';
 import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { rankMusicCandidates } from './music-joint-ranking.mjs';
 
 function stableJson(value) {
   if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
@@ -10,6 +11,93 @@ function stableJson(value) {
     return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stableJson(value[key])).join(',') + '}';
   }
   return JSON.stringify(value);
+}
+
+const HEADS = {
+  arousal: ['deam-msd-musicnn-2', 'arousal', 1, 9],
+  valence: ['deam-msd-musicnn-2', 'valence', 1, 9],
+  danceability: ['danceability-discogs-effnet-1', 'danceable', 0, 1],
+  voice: ['voice_instrumental-discogs-effnet-1', 'voice', 0, 1],
+  timbre: ['timbre-discogs-effnet-1', 'bright', 0, 1],
+};
+const LABEL_HEADS = {
+  mood: 'mtg_jamendo_moodtheme-discogs-effnet-1',
+  instrument: 'mtg_jamendo_instrument-discogs-effnet-1',
+};
+
+/** Jointly rank indexed summaries before any shortlist cap. */
+export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, request) {
+  const { preferences, requiredFamilies = [], eligibleIds = null, limit = 8 } = request ?? {};
+  if (!Array.isArray(preferences) || !preferences.length || preferences.length > 16
+      || !Array.isArray(requiredFamilies) || requiredFamilies.length > 7
+      || !Number.isInteger(limit) || limit < 1 || limit > 12
+      || (eligibleIds !== null && (!Array.isArray(eligibleIds) || eligibleIds.length > 128
+          || new Set(eligibleIds).size !== eligibleIds.length
+          || eligibleIds.some(id => typeof id !== 'string' || !id || id.length > 256)))) return null;
+  if (eligibleIds?.length === 0) return { results: [], rankedCount: 0, rejectedFreshness: 0 };
+  const specs = [];
+  for (const p of preferences) {
+    if (!p || Object.keys(p).some(k => !['family', 'key', 'direction', 'weight'].includes(k))
+        || !['high', 'low'].includes(p.direction)
+        || (p.weight !== undefined && (!Number.isFinite(p.weight) || p.weight <= 0 || p.weight > 10))) return null;
+    let spec;
+    if (Object.hasOwn(HEADS, p.family) && p.key === 'value') spec = HEADS[p.family];
+    else if (Object.hasOwn(LABEL_HEADS, p.family) && typeof p.key === 'string'
+        && /^[a-z]{1,32}$/.test(p.key)) spec = [LABEL_HEADS[p.family], p.key, 0, 1];
+    else return null;
+    specs.push({ p, model: spec[0], label: spec[1], min: spec[2], max: spec[3] });
+  }
+  if (requiredFamilies.some(f => typeof f !== 'string' || !specs.some(s => s.p.family === f))) return null;
+  let db;
+  try {
+    db = new Database(indexPath, { readonly: true, fileMustExist: true, timeout: 50 });
+    db.pragma('query_only = ON');
+    const contract = db.prepare('SELECT version,models_sha256 FROM contract WHERE id=1').get();
+    if (!contract || contract.version !== 3 || contract.models_sha256 !== expectedModelsHash) return null;
+    const predicates = specs.map(() => '(h.model_id=? AND h.class_name=?)').join(' OR ');
+    const parameters = specs.flatMap(s => [s.model, s.label]);
+    let scope = '';
+    if (eligibleIds) {
+      scope = ` AND e.track_id IN (${eligibleIds.map(() => '?').join(',')})`;
+      parameters.push(...eligibleIds);
+    }
+    // Explicit ceilings fail open; never silently truncate before joint ranking.
+    const rows = db.prepare(`SELECT e.track_id,e.analysis_id,h.model_id,h.class_name,h.mean
+      FROM evidence e JOIN head_summary h ON h.analysis_id=e.analysis_id
+      WHERE e.ready=1 AND (${predicates})${scope} LIMIT 800001`).all(...parameters);
+    if (rows.length > 800000) return null;
+    const candidates = new Map();
+    for (const row of rows) {
+      const entry = candidates.get(row.track_id) ?? { id: row.track_id, values: {}, analyses: new Set() };
+      entry.analyses.add(row.analysis_id);
+      for (const spec of specs) {
+        if (row.model_id !== spec.model || row.class_name !== spec.label || typeof row.mean !== 'number'
+            || !Number.isFinite(row.mean) || row.mean < spec.min || row.mean > spec.max) continue;
+        entry.values[spec.p.family] ??= {};
+        entry.values[spec.p.family][spec.p.key] = (row.mean - spec.min) / (spec.max - spec.min);
+      }
+      candidates.set(row.track_id, entry);
+    }
+    const ranked = rankMusicCandidates([...candidates.values()].filter(c => c.analyses.size === 1), preferences, requiredFamilies);
+    if (!ranked) return null;
+    const results = [];
+    let rejectedFreshness = 0;
+    for (let offset = 0; offset < ranked.length && results.length < limit; offset += 12) {
+      const batch = ranked.slice(offset, offset + 12);
+      const checked = readMusicEvidence(indexPath, sourcePath, expectedModelsHash, batch.map(x => x.id));
+      if (!checked) return null;
+      const valid = new Set(checked.map(([id]) => id));
+      for (const item of batch) {
+        if (!valid.has(item.id)) rejectedFreshness++;
+        else if (results.length < limit) results.push(item);
+      }
+    }
+    return { results, rankedCount: ranked.length, rejectedFreshness };
+  } catch {
+    return null;
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
 /** Return only independently revalidated records; null means unavailable. */

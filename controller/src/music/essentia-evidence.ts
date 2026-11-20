@@ -14,6 +14,60 @@ export interface EssentiaReader {
   search(preferences: TraitPreferences): Promise<string[] | null>;
 }
 
+export interface JointEvidencePreference {
+  family: 'arousal' | 'valence' | 'danceability' | 'voice' | 'timbre' | 'mood' | 'instrument';
+  key: string;
+  direction: 'high' | 'low';
+  weight?: number;
+}
+export interface JointEvidenceResult {
+  results: Array<{ id: string; tier: 'full' | 'partial'; score: number; evidenceCoverage: number;
+    matchedPreferences: number; requestedPreferences: number }>;
+  rankedCount: number;
+  rejectedFreshness: number;
+}
+
+/** Additive v2 query; timeout/unavailability returns null, never a fabricated result. */
+export function searchJointSocket(
+  path: string,
+  request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
+    eligibleIds?: string[] | null; limit?: number },
+): Promise<JointEvidenceResult | null> {
+  if (inFlight >= 2) return Promise.resolve(null);
+  const message = JSON.stringify({ version: 2, op: 'searchJoint', ...request }) + '\n';
+  if (Buffer.byteLength(message) > 32768) return Promise.resolve(null);
+  inFlight++;
+  return new Promise(resolve => {
+    let done = false;
+    let output = '';
+    const socket = createConnection(path);
+    const finish = (value: JointEvidenceResult | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      inFlight--;
+      socket.destroy();
+      resolve(value);
+    };
+    const deadline = setTimeout(() => finish(null), 1000);
+    socket.on('error', () => finish(null));
+    socket.on('close', () => finish(null));
+    socket.on('connect', () => socket.write(message));
+    socket.on('data', chunk => {
+      output += chunk.toString('utf8');
+      if (Buffer.byteLength(output) > 2 * 1024 * 1024) return finish(null);
+      const end = output.indexOf('\n');
+      if (end < 0) return;
+      try {
+        const value = JSON.parse(output.slice(0, end));
+        if (!value || !Array.isArray(value.results) || !Number.isInteger(value.rankedCount)
+            || !Number.isInteger(value.rejectedFreshness)) return finish(null);
+        finish(value);
+      } catch { finish(null); }
+    });
+  });
+}
+
 const fixture = new AsyncLocalStorage<EssentiaReader>();
 export function withEssentiaReaderForTest<T>(reader: EssentiaReader, fn: () => T): T {
   return fixture.run(reader, fn);

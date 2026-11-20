@@ -176,3 +176,75 @@ export function readMusicEvidence(indexPath, sourcePath, expectedModelsHash, ids
     try { index?.close(); } catch {}
   }
 }
+
+/** Classify evidence state without exposing host paths or source-side values.
+ *
+ * A completed analysis whose projection has not arrived is unindexed, not
+ * unanalyzed. Ambiguous identities are never resolved by choosing a row.
+ */
+export function inspectMusicEvidenceStatus(indexPath, sourcePath, expectedModelsHash, ids) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !id || id.length > 256)) return null;
+  let index;
+  let source;
+  try {
+    index = new Database(indexPath, { readonly: true, fileMustExist: true, timeout: 50 });
+    source = new Database(sourcePath, { readonly: true, fileMustExist: true, timeout: 50 });
+    index.defaultSafeIntegers(true);
+    source.defaultSafeIntegers(true);
+    index.pragma('query_only = ON');
+    source.pragma('query_only = ON');
+    const contract = index.prepare('SELECT version,models_sha256 FROM contract WHERE id=1').get();
+    if (!contract || contract.version !== 3n || contract.models_sha256 !== expectedModelsHash) return null;
+    const sourceRows = source.prepare(`SELECT a.analysis_id,a.track_id,a.source_size,a.source_mtime_ns,
+      i.source_path,r.run_id,r.code_version,r.provenance_json FROM track_analysis a
+      JOIN source_inventory i ON i.track_id=a.track_id JOIN analysis_run r ON r.run_id=a.run_id
+      WHERE a.track_id=? AND a.status='complete' AND i.nav_missing=0 AND i.path_status='mapped'`);
+    const indexed = index.prepare('SELECT ready FROM evidence WHERE analysis_id=? AND track_id=?');
+    const valid = readMusicEvidence(indexPath, sourcePath, expectedModelsHash, ids);
+    if (!valid) return null;
+    const evidenceById = new Map(valid);
+    return ids.map(id => {
+      const rows = sourceRows.all(id);
+      if (!rows.length) return { id, status: 'unanalyzed' };
+      if (rows.length !== 1) return { id, status: 'ambiguous_identity' };
+      const row = rows[0];
+      let provenance;
+      try { provenance = JSON.parse(row.provenance_json); } catch { return { id, status: 'provenance_mismatch' }; }
+      if (row.code_version !== 'essentia-window-v1'
+          || createHash('sha256').update(stableJson(provenance.models)).digest('hex') !== expectedModelsHash
+          || provenance.sample_rate !== 16000
+          || provenance.window_policy !== 'up to five non-overlapping 10s windows: start, quartiles, end'
+          || provenance.inference_aggregation !== 'mean over model patches per segment') {
+        return { id, status: 'provenance_mismatch' };
+      }
+      try {
+        const stat = statSync(row.source_path, { bigint: true });
+        if (!stat.isFile() || stat.size !== row.source_size || stat.mtimeNs !== row.source_mtime_ns) {
+          return { id, status: 'stale_source' };
+        }
+      } catch { return { id, status: 'stale_source' }; }
+      const projection = indexed.get(row.analysis_id, id);
+      if (!projection || projection.ready !== 1n) return { id, status: 'unindexed' };
+      const evidence = evidenceById.get(id);
+      if (!evidence) return { id, status: 'integrity_mismatch' };
+      const coverage = {};
+      for (const window of evidence.windows) {
+        for (const output of window.outputs) {
+          const head = coverage[output.modelId] ?? { valid: 0, invalid: 0, missing: 0, total: 0 };
+          head.total++;
+          if (output.validity === 'valid') head.valid++;
+          else if (output.validity === 'source_missing') head.missing++;
+          else head.invalid++;
+          coverage[output.modelId] = head;
+        }
+      }
+      return { id, status: 'indexed', expectedWindows: evidence.expectedWindows, coverage };
+    });
+  } catch {
+    return null;
+  } finally {
+    try { source?.close(); } catch {}
+    try { index?.close(); } catch {}
+  }
+}

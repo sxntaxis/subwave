@@ -81,8 +81,31 @@ console.log(JSON.stringify(result));
             self.assertEqual(result[0][0], 'song')
             self.assertEqual(result[0][1]['windows'][0]['outputs'][0]['validity'], 'outside_declared_range')
             self.assertNotIn(str(audio), json.dumps(result))
+            source.execute('PRAGMA query_only=OFF')
+            source.execute('INSERT INTO source_inventory VALUES(?,?,0,?)', ('waiting', str(audio), 'mapped'))
+            source.execute('INSERT INTO track_analysis VALUES(2,?,?,?,?,?,?)',
+                           ('waiting', stat.st_size, stat.st_mtime_ns, 'complete', '{"segments":1}', 'run'))
+            source.commit()
+            source.execute('PRAGMA query_only=ON')
+            status_script = '''
+import { inspectMusicEvidenceStatus } from './src/music/music-evidence-index-v2-reader.mjs';
+console.log(JSON.stringify(inspectMusicEvidenceStatus(process.argv[1],process.argv[2],process.argv[3],
+  ['song','waiting','not-analyzed'])));
+'''
+            statuses = json.loads(subprocess.check_output(
+                ['node', '--input-type=module', '-e', status_script,
+                 str(index_path), str(source_path), index._v1.models_hash(models)],
+                cwd=Path(__file__).resolve().parent.parent, text=True))
+            self.assertEqual([s['status'] for s in statuses], ['indexed', 'unindexed', 'unanalyzed'])
+            self.assertEqual(statuses[0]['coverage']['deam-msd-musicnn-2'],
+                             {'valid': 1, 'invalid': 1, 'missing': 0, 'total': 2})
             audio.write_bytes(b'changed-size')
             self.assertEqual(read(), [])
+            stale = json.loads(subprocess.check_output(
+                ['node', '--input-type=module', '-e', status_script,
+                 str(index_path), str(source_path), index._v1.models_hash(models)],
+                cwd=Path(__file__).resolve().parent.parent, text=True))
+            self.assertEqual(stale[0]['status'], 'stale_source')
             with self.assertRaises(ValueError):
                 index.advance(source, target, 1, {'other': {}})
 

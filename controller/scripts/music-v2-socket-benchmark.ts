@@ -1,5 +1,5 @@
 // Disposable 28k-record socket benchmark. Never touches a production database.
-import { mkdtempSync, mkdirSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, statSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -74,7 +74,8 @@ index.close();
 writeFileSync(`${indexPath}.ready`, JSON.stringify({ version: 3, ready: true, models_sha256: modelsHash, updated_ms: Date.now() }));
 const socketDir = join(dir, 'socket');
 mkdirSync(socketDir);
-const server = spawn(process.execPath, ['src/music/essentia-socket-server.mjs', socketDir, indexPath, srcPath, indexPath], { cwd: resolve('.') });
+const server = spawn(process.execPath, ['--cpu-prof', `--cpu-prof-dir=${dir}`, '--cpu-prof-name=server.cpuprofile',
+  'src/music/essentia-socket-server.mjs', socketDir, indexPath, srcPath, indexPath], { cwd: resolve('.') });
 const socket = join(socketDir, 'evidence.sock');
 const cases: Record<string, JointEvidencePreference[]> = {
   one: [{ family: 'arousal', key: 'value', direction: 'low' }],
@@ -96,17 +97,37 @@ try {
   for (let i = 0; i < 200 && !existsSync(socket); i++) await new Promise(r => setTimeout(r, 20));
   if (!existsSync(socket)) throw Error('socket did not start');
   for (const [name, preferences] of Object.entries(cases)) {
-    for (const mode of ['cold', 'warm', 'loaded']) {
-      const load = mode === 'loaded' ? new Worker('const end=Date.now()+2000;while(Date.now()<end){}', { eval: true }) : null;
-      const start = performance.now();
-      const result = await searchJointSocket(socket, { preferences, limit: 8 });
-      const elapsed = Math.round(performance.now() - start);
-      console.log(JSON.stringify({ name, mode, elapsedMs: elapsed, success: result !== null,
-        rankedCount: result?.rankedCount ?? null, returned: result?.results.length ?? null,
-        clientRssMiB: Math.round(process.memoryUsage().rss / 1048576) }));
+    for (const mode of ['warm', 'loaded']) {
+      const samples: number[] = [];
+      const load = mode === 'loaded' ? new Worker('const end=Date.now()+12000;while(Date.now()<end){}', { eval: true }) : null;
+      let successes = 0;
+      for (let i = 0; i < 5; i++) {
+        const start = performance.now();
+        const result = await searchJointSocket(socket, { preferences, limit: 8 });
+        samples.push(Math.round(performance.now() - start));
+        if (result?.rankedCount === 28000 && result.results.length === 8) successes++;
+      }
+      samples.sort((a, b) => a - b);
+      const status = readFileSync(`/proc/${server.pid}/status`, 'utf8');
+      const rss = Number(status.match(/^VmRSS:\s+(\d+)/m)?.[1] ?? 0);
+      const io = readFileSync(`/proc/${server.pid}/io`, 'utf8');
+      console.log(JSON.stringify({ name, mode, count: samples.length, successes, samplesMs: samples,
+        p50: samples[2], p95: samples[4], max: samples[4], serverRssMiB: Math.round(rss / 1024),
+        serverReadBytes: Number(io.match(/^read_bytes:\s+(\d+)/m)?.[1] ?? 0) }));
       await load?.terminate();
     }
   }
 } finally {
   server.kill('SIGTERM');
+  await new Promise<void>(resolve => server.once('exit', () => resolve()));
+  const profile = JSON.parse(readFileSync(join(dir, 'server.cpuprofile'), 'utf8'));
+  const nodes = new Map<number, { functionName: string; url: string }>(
+    profile.nodes.map((node: any) => [node.id, node.callFrame]));
+  const counts = new Map<string, number>();
+  for (const id of profile.samples ?? []) {
+    const frame = nodes.get(id);
+    const key = `${frame?.functionName || '(anonymous)'} ${frame?.url || ''}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  console.log('cpu_profile_top', JSON.stringify([...counts].sort((a, b) => b[1] - a[1]).slice(0, 12)));
 }

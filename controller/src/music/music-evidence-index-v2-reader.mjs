@@ -55,26 +55,30 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
     const contract = db.prepare('SELECT version,models_sha256 FROM contract WHERE id=1').get();
     if (!contract || contract.version !== 3 || contract.models_sha256 !== expectedModelsHash) return null;
     const predicates = specs.map(() => '(h.model_id=? AND h.class_name=?)').join(' OR ');
-    const parameters = specs.flatMap(s => [s.model, s.label]);
+    const pivot = specs.map((_, i) =>
+      `MAX(CASE WHEN h.model_id=? AND h.class_name=? THEN h.mean END) AS v${i}`).join(',');
+    const headParameters = specs.flatMap(s => [s.model, s.label]);
+    const parameters = [...headParameters, ...headParameters];
     let scope = '';
     if (eligibleIds) {
       scope = ` AND e.track_id IN (${eligibleIds.map(() => '?').join(',')})`;
       parameters.push(...eligibleIds);
     }
     // Explicit ceilings fail open; never silently truncate before joint ranking.
-    const rows = db.prepare(`SELECT e.track_id,e.analysis_id,h.model_id,h.class_name,h.mean
+    const rows = db.prepare(`SELECT e.track_id,e.analysis_id,COUNT(*) AS matched_rows,${pivot}
       FROM evidence e JOIN head_summary h ON h.analysis_id=e.analysis_id
-      WHERE e.ready=1 AND (${predicates})${scope} LIMIT 800001`).all(...parameters);
-    if (rows.length > 800000) return null;
+      WHERE e.ready=1 AND (${predicates})${scope} GROUP BY e.analysis_id`).all(...parameters);
+    if (rows.reduce((sum, row) => sum + row.matched_rows, 0) > 800000) return null;
     const candidates = new Map();
     for (const row of rows) {
       const entry = candidates.get(row.track_id) ?? { id: row.track_id, values: {}, analyses: new Set() };
       entry.analyses.add(row.analysis_id);
-      for (const spec of specs) {
-        if (row.model_id !== spec.model || row.class_name !== spec.label || typeof row.mean !== 'number'
-            || !Number.isFinite(row.mean) || row.mean < spec.min || row.mean > spec.max) continue;
+      for (let i = 0; i < specs.length; i++) {
+        const spec = specs[i];
+        const mean = row[`v${i}`];
+        if (typeof mean !== 'number' || !Number.isFinite(mean) || mean < spec.min || mean > spec.max) continue;
         entry.values[spec.p.family] ??= {};
-        entry.values[spec.p.family][spec.p.key] = (row.mean - spec.min) / (spec.max - spec.min);
+        entry.values[spec.p.family][spec.p.key] = (mean - spec.min) / (spec.max - spec.min);
       }
       candidates.set(row.track_id, entry);
     }

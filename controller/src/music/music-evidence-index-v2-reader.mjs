@@ -27,6 +27,8 @@ const LABEL_HEADS = {
 
 /** Jointly rank indexed summaries before any shortlist cap. */
 export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, request) {
+  const benchmark = process.env.MUSIC_V2_BENCH_TIMINGS === '1';
+  const started = benchmark ? performance.now() : 0;
   const { preferences, requiredFamilies = [], eligibleIds = null, limit = 8 } = request ?? {};
   if (!Array.isArray(preferences) || !preferences.length || preferences.length > 16
       || !Array.isArray(requiredFamilies) || requiredFamilies.length > 7
@@ -68,6 +70,7 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
     const rows = db.prepare(`SELECT e.track_id,e.analysis_id,COUNT(*) AS matched_rows,${pivot}
       FROM evidence e JOIN head_summary h ON h.analysis_id=e.analysis_id
       WHERE e.ready=1 AND (${predicates})${scope} GROUP BY e.analysis_id`).all(...parameters);
+    const queried = benchmark ? performance.now() : 0;
     if (rows.reduce((sum, row) => sum + row.matched_rows, 0) > 800000) return null;
     const candidates = new Map();
     for (const row of rows) {
@@ -83,6 +86,7 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
       candidates.set(row.track_id, entry);
     }
     const ranked = rankMusicCandidates([...candidates.values()].filter(c => c.analyses.size === 1), preferences, requiredFamilies);
+    const rankedAt = benchmark ? performance.now() : 0;
     if (!ranked) return null;
     const results = [];
     let rejectedFreshness = 0;
@@ -101,6 +105,13 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
         else if (results.length < limit) results.push(item);
       }
     }
+    if (benchmark) process.stderr.write(JSON.stringify({
+      benchmark: 'music-v2',
+      queryMs: +(queried - started).toFixed(2),
+      rankingMs: +(rankedAt - queried).toFixed(2),
+      freshnessMs: +(performance.now() - rankedAt).toFixed(2),
+      checkedCount,
+    }) + '\n');
     return { results, rankedCount: ranked.length, rejectedFreshness, checkedCount,
       verificationLimited: results.length < limit && ranked.length > checkedCount && checkedCount >= freshnessCeiling };
   } catch {

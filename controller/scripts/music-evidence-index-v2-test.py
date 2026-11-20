@@ -49,6 +49,18 @@ class ProjectionTest(unittest.TestCase):
                 (2, 'deam-msd-musicnn-2', 'arousal', 4.0, 'DEAM native [1,9], valence then arousal', None),
                 (2, 'any-other-head', 'unknown', None, 'native', 'unavailable'),
             ])
+            observed_heads = [
+                ('danceability-discogs-effnet-1', 'danceable'),
+                ('voice_instrumental-discogs-effnet-1', 'voice'),
+                ('timbre-discogs-effnet-1', 'bright'),
+                ('mtg_jamendo_moodtheme-discogs-effnet-1', 'calm'),
+                ('engagement_regression-discogs-effnet-1', 'engagement'),
+                ('approachability_regression-discogs-effnet-1', 'approachability'),
+            ]
+            source.executemany('INSERT INTO model_prediction VALUES(?,?,?,?,?,?)', [
+                (sid, model, label, .5, 'model native; see metadata', None)
+                for sid in (1, 2) for model, label in observed_heads
+            ])
             source.commit()
             source.execute('PRAGMA query_only=ON')
             target = sqlite3.connect(index_path)
@@ -63,6 +75,8 @@ class ProjectionTest(unittest.TestCase):
             self.assertEqual(target.execute('SELECT missing_reason,validity FROM outputs WHERE class_name="unknown"').fetchone(),
                              ('unavailable', 'source_missing'))
             self.assertEqual(target.execute('SELECT count(*) FROM windows').fetchone()[0], 2)
+            self.assertEqual(target.execute('SELECT count(DISTINCT model_id) FROM outputs '
+                                            "WHERE model_id != 'any-other-head'").fetchone()[0], 8)
             self.assertEqual(target.execute('SELECT mean,valid_windows,expected_windows FROM head_summary '
                                             'WHERE class_name="arousal"').fetchone(), (None, 1, 2))
             self.assertEqual(index.advance(source, target, 1, models), 0)
@@ -79,7 +93,9 @@ console.log(JSON.stringify(result));
             result = read()
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0][0], 'song')
-            self.assertEqual(result[0][1]['windows'][0]['outputs'][0]['validity'], 'outside_declared_range')
+            deam = next(o for o in result[0][1]['windows'][0]['outputs']
+                        if o['modelId'] == 'deam-msd-musicnn-2')
+            self.assertEqual(deam['validity'], 'outside_declared_range')
             self.assertNotIn(str(audio), json.dumps(result))
             source.execute('PRAGMA query_only=OFF')
             source.execute('INSERT INTO source_inventory VALUES(?,?,0,?)', ('waiting', str(audio), 'mapped'))

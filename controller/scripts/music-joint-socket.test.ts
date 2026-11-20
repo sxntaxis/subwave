@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import Database from 'better-sqlite3';
-import { searchJointSocket } from '../src/music/essentia-evidence.js';
+import { createSocketEssentiaReader, searchJointSocket } from '../src/music/essentia-evidence.js';
 
 test('private socket joint search reaches a rare candidate beyond the primary top 256', async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-socket-'));
@@ -18,6 +18,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
   const staleStat = statSync(staleAudio, { bigint: true });
   const source = join(dir, 'source.sqlite');
   const target = join(dir, 'index.sqlite');
+  const v1Target = join(dir, 'v1-index.sqlite');
   const manifest = join(dir, 'manifest.json');
   const models = { fixture: { sha256: 'fixture' } };
   writeFileSync(manifest, JSON.stringify({ models }));
@@ -56,13 +57,21 @@ test('private socket joint search reaches a rare candidate beyond the primary to
   for (let i = 0; i < 3; i++) {
     execFileSync('python3', ['scripts/music-evidence-index-v2.py', '--source', source, '--index', target,
       '--models-manifest', manifest, '--limit', '100'], { cwd: resolve('.') });
+    execFileSync('python3', ['scripts/essentia-index.py', '--source', source, '--index', v1Target,
+      '--models-manifest', manifest, '--limit', '100'], { cwd: resolve('.') });
   }
   writeFileSync(staleAudio, 'stale fixture has changed');
   const socketDir = join(dir, 'socket');
   execFileSync('mkdir', [socketDir]);
-  const server = spawn(process.execPath, ['src/music/essentia-socket-server.mjs', socketDir, target, source, target], { cwd: resolve('.') });
+  const server = spawn(process.execPath, ['src/music/essentia-socket-server.mjs', socketDir, v1Target, source, target], { cwd: resolve('.') });
   try {
     for (let i = 0; i < 100 && !existsSync(join(socketDir, 'evidence.sock')); i++) await new Promise(r => setTimeout(r, 20));
+    const v1 = createSocketEssentiaReader(join(socketDir, 'evidence.sock'));
+    const v1Profiles = await v1.lookup(['rare-piano']);
+    assert.equal(v1Profiles?.get('rare-piano')?.instruments?.piano, 0.9);
+    const v1Search = await v1.search({ arousal: 'low' });
+    assert.ok(v1Search?.length);
+    assert.ok(v1Search.includes('lead-001'));
     const preferences = [
       { family: 'arousal' as const, key: 'value', direction: 'low' as const },
       { family: 'voice' as const, key: 'value', direction: 'low' as const },

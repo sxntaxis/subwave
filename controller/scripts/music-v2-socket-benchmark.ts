@@ -12,6 +12,13 @@ const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-bench-'))
 const audio = join(dir, 'fixture.audio');
 writeFileSync(audio, 'synthetic');
 const st = statSync(audio, { bigint: true });
+// Select paths from the live inventory read-only; no audio contents are opened.
+// The fixture identity is synthetic and is not asserted to be a Navidrome ID.
+const inventoryDb = new Database('/home/sxntax/.local/share/the-lab-essentia-20261118/essentia-sidecar.sqlite3',
+  { readonly: true, fileMustExist: true, timeout: 1000 });
+const hddPaths = (inventoryDb.prepare("SELECT source_path FROM source_inventory WHERE nav_missing=0 AND path_status='mapped' AND source_path LIKE '/mnt/California/%' LIMIT 36 OFFSET 100").all() as Array<{ source_path: string }>).map(x => x.source_path);
+inventoryDb.close();
+if (hddPaths.length !== 36) throw Error('36 real HDD paths required');
 const models = { fixture: { sha256: 'fixture' } };
 const modelsHash = createHash('sha256').update(JSON.stringify(models)).digest('hex');
 const provenance = JSON.stringify({
@@ -75,7 +82,10 @@ writeFileSync(`${indexPath}.ready`, JSON.stringify({ version: 3, ready: true, mo
 const socketDir = join(dir, 'socket');
 mkdirSync(socketDir);
 const server = spawn(process.execPath, ['--cpu-prof', `--cpu-prof-dir=${dir}`, '--cpu-prof-name=server.cpuprofile',
-  'src/music/essentia-socket-server.mjs', socketDir, indexPath, srcPath, indexPath], { cwd: resolve('.') });
+  'src/music/essentia-socket-server.mjs', socketDir, indexPath, srcPath, indexPath],
+{ cwd: resolve('.'), env: { ...process.env, MUSIC_V2_BENCH_TIMINGS: '1' } });
+let diagnostics = '';
+server.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
 const socket = join(socketDir, 'evidence.sock');
 const cases: Record<string, JointEvidencePreference[]> = {
   one: [{ family: 'arousal', key: 'value', direction: 'low' }],
@@ -117,6 +127,36 @@ try {
       await load?.terminate();
     }
   }
+  for (let cohort = 0; cohort < 3; cohort++) {
+    const sourceWrite = new Database(srcPath);
+    const indexWrite = new Database(indexPath);
+    const updateInventory = sourceWrite.prepare('UPDATE source_inventory SET source_path=? WHERE track_id=?');
+    const updateAnalysis = sourceWrite.prepare('UPDATE track_analysis SET source_size=?,source_mtime_ns=? WHERE track_id=?');
+    const updateEvidence = indexWrite.prepare('UPDATE evidence SET source_path=?,source_size=?,source_mtime_ns=? WHERE track_id=?');
+    let fixtureStatMs = 0;
+    sourceWrite.exec('BEGIN');
+    indexWrite.exec('BEGIN');
+    for (let i = 0; i < 12; i++) {
+      const path = hddPaths[cohort * 12 + i];
+      const begin = performance.now();
+      const sourceStat = statSync(path, { bigint: true });
+      fixtureStatMs += performance.now() - begin;
+      const id = `track-${String(i + 1).padStart(5, '0')}`;
+      updateInventory.run(path, id);
+      updateAnalysis.run(sourceStat.size, sourceStat.mtimeNs, id);
+      updateEvidence.run(path, sourceStat.size, sourceStat.mtimeNs, id);
+    }
+    sourceWrite.exec('COMMIT');
+    indexWrite.exec('COMMIT');
+    sourceWrite.close();
+    indexWrite.close();
+    const begin = performance.now();
+    const result = await searchJointSocket(socket, { preferences: cases.rich, limit: 8 });
+    console.log(JSON.stringify({ name: 'rich', mode: 'hdd-cohort', cohort: cohort + 1,
+      fixtureInitialStatsMs: Math.round(fixtureStatMs), elapsedMs: Math.round(performance.now() - begin),
+      success: result !== null, checkedCount: (result as any)?.checkedCount ?? null,
+      rejectedFreshness: result?.rejectedFreshness ?? null }));
+  }
 } finally {
   server.kill('SIGTERM');
   await new Promise<void>(resolve => server.once('exit', () => resolve()));
@@ -130,4 +170,5 @@ try {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   console.log('cpu_profile_top', JSON.stringify([...counts].sort((a, b) => b[1] - a[1]).slice(0, 12)));
+  console.log('server_timing_samples', diagnostics.split('\n').filter(line => line.includes('"benchmark":"music-v2"')).join(' '));
 }

@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import Database from 'better-sqlite3';
-import { createSocketEssentiaReader, lookupMusicEvidenceSocket, searchJointSocket } from '../src/music/essentia-evidence.js';
+import { createSocketEssentiaReader, lookupMusicEvidenceSocket, searchJointSocket, withEssentiaReaderForTest } from '../src/music/essentia-evidence.js';
+import { searchEligibleCohort } from '../src/music/music-evidence-cohort.js';
 
 test('private socket joint search reaches a rare candidate beyond the primary top 256', async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-socket-'));
@@ -53,6 +54,8 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       }
     }
   })();
+  const earlierOnPrimary = db.prepare("SELECT count(*) AS n FROM model_prediction WHERE model_id='deam-msd-musicnn-2' AND class_name='arousal' AND raw_score<2").get() as { n: number };
+  assert.ok(earlierOnPrimary.n > 256);
   db.close();
   for (let i = 0; i < 3; i++) {
     execFileSync('python3', ['scripts/music-evidence-index-v2.py', '--source', source, '--index', target,
@@ -104,6 +107,126 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     });
     assert.equal(invalid, null);
     assert.equal(await searchJointSocket(join(dir, 'missing.sock'), { preferences }), null);
+
+    // The proxy counts actual wire requests and can drop a particular chunk;
+    // successful requests are forwarded to the real disposable socket server.
+    const proxyPath = join(dir, 'proxy.sock');
+    let jointCalls = 0;
+    let dropJointAt = 0;
+    const proxy = createServer(client => {
+      client.on('error', () => {});
+      client.once('data', chunk => {
+        let request: any;
+        try { request = JSON.parse(chunk.toString('utf8')); } catch { client.destroy(); return; }
+        if (request.version === 2 && request.op === 'searchJoint') {
+          jointCalls++;
+          if (jointCalls === dropJointAt) { client.destroy(); return; }
+        }
+        const upstream = createConnection(join(socketDir, 'evidence.sock'));
+        upstream.on('error', () => client.destroy());
+        upstream.on('connect', () => { upstream.write(chunk); client.pipe(upstream).pipe(client); });
+        client.on('close', () => upstream.destroy());
+      });
+    });
+    await new Promise<void>(resolve => proxy.listen(proxyPath, resolve));
+    const oldState = process.env.STATE_DIR;
+    const oldFlag = process.env.SUBWAVE_MUSIC_EVIDENCE_V2;
+    process.env.STATE_DIR = join(dir, 'state');
+    mkdirSync(process.env.STATE_DIR);
+    process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = '1';
+    try {
+      const library = await import('../src/music/library.js');
+      const libraryDb = await import('../src/music/library-db.js');
+      const { buildPickerContext, pickerScope } = await import('../src/llm/internal/tools/picker/scope.js');
+      const tool = (await import('../src/llm/internal/tools/picker/tools/find-by-audio-traits.js')).default;
+      await library.load();
+      const leads = Array.from({ length: 130 }, (_, i) => `lead-${String(i + 1).padStart(3, '0')}`);
+      for (const id of [...leads, 'rare-piano']) {
+        libraryDb.upsertTrackMeta(id, { title: id, artist: `artist-${id}`, duration: 180 });
+      }
+      const reader = createSocketEssentiaReader(proxyPath);
+      await withEssentiaReaderForTest(reader, async () => {
+        const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, playlistLock: new Set(['rare-piano']) }));
+        const offered = await (tool.build(ctx) as any).execute(
+          { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
+          { toolCallId: 'real-socket', messages: [] },
+        );
+        assert.deepEqual(offered.map((x: any) => x.id), ['rare-piano']);
+        assert.deepEqual([...ctx.seen.keys()], ['rare-piano']);
+        assert.ok(jointCalls > 0);
+      });
+      assert.equal(v1Search.includes('rare-piano'), false);
+
+      for (const id of ['rare-piano', ...leads.slice(0, 4)]) {
+        libraryDb.upsertTrackMeta(id, { title: id, artist: `artist-${id}`, duration: id === 'lead-001' ? 60 : 180,
+          year: 2001, genres: ['Electronic'] });
+      }
+      await withEssentiaReaderForTest(reader, async () => {
+        const seen = new Map([['lead-004', { id: 'lead-004' }]]);
+        const ctx = buildPickerContext(pickerScope({
+          essentiaDiscovery: true, genreLock: ['Electronic'], eraLock: [{ fromYear: 1990, toYear: 2010 }],
+          minTrackSec: 120, excludedIds: new Set(['lead-002']), hardRecentIds: new Set(['lead-003']), seen,
+        }));
+        const offered = await (tool.build(ctx) as any).execute(
+          { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
+          { toolCallId: 'strict-non-playlist', messages: [] },
+        );
+        assert.deepEqual(offered.map((x: any) => x.id), ['rare-piano']);
+        assert.deepEqual([...ctx.seen.keys()].sort(), ['lead-004', 'rare-piano']);
+      });
+
+      for (const id of leads.slice(0, 8)) {
+        libraryDb.upsertTrackMeta(id, { title: id, artist: 'same-artist', duration: 180,
+          year: 2001, genres: ['Electronic'] });
+      }
+      await withEssentiaReaderForTest(reader, async () => {
+        const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, genreLock: ['Electronic'] }));
+        const offered = await (tool.build(ctx) as any).execute(
+          { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
+          { toolCallId: 'artist-cap', messages: [] },
+        );
+        assert.ok(offered.length > 0);
+        assert.ok(offered.filter((x: any) => x.artist === 'same-artist').length <= 3);
+        assert.ok(offered.every((x: any) => ctx.seen.has(x.id)));
+      });
+      libraryDb.upsertTrackMeta('no-analysis', { title: 'no-analysis', artist: 'new-artist', duration: 180 });
+      await withEssentiaReaderForTest(reader, async () => {
+        for (const playlistLock of [new Set<string>(), new Set(['no-analysis'])]) {
+          const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, playlistLock }));
+          const offered = await (tool.build(ctx) as any).execute(
+            { instrument: 'piano' }, { toolCallId: 'no-evidence', messages: [] },
+          );
+          assert.deepEqual(offered.tracks, []);
+          assert.equal(ctx.seen.size, 0);
+        }
+      });
+
+      const merged = await searchEligibleCohort([...leads, 'rare-piano'], preferences, reader.searchJoint!,
+        performance.now() + 5000);
+      assert.equal(merged.status, 'complete');
+      if (merged.status === 'complete') {
+        assert.deepEqual(merged.results.map(x => x.id), ['rare-piano', ...leads.slice(0, 11)]);
+      }
+
+      jointCalls = 0;
+      dropJointAt = 2;
+      await withEssentiaReaderForTest(reader, async () => {
+        const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, playlistLock: new Set([...leads, 'rare-piano']) }));
+        const offered = await (tool.build(ctx) as any).execute(
+          { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
+          { toolCallId: 'dropped-chunk', messages: [] },
+        );
+        assert.equal(jointCalls, 2);
+        assert.deepEqual(offered.tracks, []);
+        assert.match(offered.note, /could not finish/);
+        assert.equal(ctx.seen.size, 0);
+      });
+      console.log('real Agent socket: rare-piano admitted; 131-ID merge matched; second-chunk drop exposed zero IDs');
+    } finally {
+      if (oldState === undefined) delete process.env.STATE_DIR; else process.env.STATE_DIR = oldState;
+      if (oldFlag === undefined) delete process.env.SUBWAVE_MUSIC_EVIDENCE_V2; else process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = oldFlag;
+      proxy.close();
+    }
   } finally {
     server.kill('SIGTERM');
   }

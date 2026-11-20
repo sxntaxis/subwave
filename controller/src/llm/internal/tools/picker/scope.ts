@@ -9,6 +9,7 @@
 // means adding a field here; do not reintroduce a per-field hand-off.
 
 import * as library from '../../../../music/library.js';
+import * as blocklist from '../../../../music/blocklist.js';
 import * as embeddings from '../../../../music/embeddings.js';
 import { artistKey, filterPickerCandidates } from '../../../../music/recency.js';
 import { applyStrictLocks, type VocalMode } from '../../../../music/show-filter.js';
@@ -140,6 +141,7 @@ export interface PickerContext {
   seen: Map<string, any>;
   collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
   collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number }): Promise<any[]>;
+  eligibleEvidenceIds(deadlineMs: number): Promise<{ status: 'complete'; ids: string[] } | { status: 'incomplete' }>;
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
   seedSimilarity(songId: string, primary: 'audio' | 'text'): { tracks: any[]; matched: number; fellBack: boolean };
   seedSimilarityAsync(songId: string, primary: 'audio' | 'text'): Promise<{ tracks: any[]; matched: number; fellBack: boolean }>;
@@ -176,6 +178,41 @@ export function buildPickerContext(
   // neighbours out instead of thinning toward empty.
   const knnExclude: Set<string> = new Set([...recentIds, ...hardRecentIds]);
 
+  // Shared hard-show policy. Order-sensitive variety and `seen` registration
+  // remain in collect/collectSelection, not in this pure restriction stage.
+  const restrict = (list: any[]) => {
+    let pool = applyStrictLocks(list, {
+      genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
+    }, { starve: true });
+    pool = applyTrackFloor(pool, minTrackSec, { starve: true });
+    if (playlistLock) pool = pool.filter((s: any) => s?.id && playlistLock.has(s.id));
+    if (excludedIds) pool = pool.filter((s: any) => s?.id && !excludedIds.has(s.id));
+    return pool;
+  };
+
+  const eligibleEvidenceIds: PickerContext['eligibleEvidenceIds'] = async deadlineMs => {
+    if (!scope.essentiaDiscovery || performance.now() >= deadlineMs) return { status: 'incomplete' };
+    await library.load();
+    if (performance.now() >= deadlineMs) return { status: 'incomplete' };
+    // No source-tool top-N or random sampling is used to derive the cohort.
+    const ids = playlistLock ? [...playlistLock] : library.candidateFilterTracks().map(track => track.id);
+    const tracks: any[] = [];
+    for (let offset = 0; offset < ids.length; offset += 64) {
+      if (performance.now() >= deadlineMs) return { status: 'incomplete' };
+      for (const id of ids.slice(offset, offset + 64)) {
+        const track = library.slimById(id);
+        if (track) tracks.push(track);
+      }
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    if (performance.now() >= deadlineMs) return { status: 'incomplete' };
+    const eligible = filterPickerCandidates(restrict(blocklist.rejectBlocked(tracks)), {
+      recentIds, recentKeys, hardRecentIds, hardRecentKeys, seenIds: new Set(seen.keys()),
+      maxPerArtist: Infinity, cap: Infinity,
+    });
+    return { status: 'complete', ids: eligible.map(track => track.id) };
+  };
+
   // Filter recents, slim, and record into `seen` so the picker can resolve the
   // agent's final id choice to a full track. Drops recently-played tracks (by
   // id/key) and tracks already surfaced this pick; artists are NOT filtered (see
@@ -202,18 +239,13 @@ export function buildPickerContext(
     // top-60 must not reach the model in similarity order, or the cap of 8 pins
     // the same neighbours every pick. Randomness stays dominant; with no play
     // history this is a plain shuffle.
-    let pool = applyStrictLocks(freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()), {
-      genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
-    }, { starve: true });
+    const pool = restrict(freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()));
     // Minimum track length (#1573): hard, and BEFORE the playlist lock, so a
     // pinned playlist's own 40-second interlude drops too — the floor is about
     // what the station will AIR, not which source a track came from.
-    pool = applyTrackFloor(pool, minTrackSec, { starve: true });
-    if (playlistLock) pool = pool.filter((s: any) => s?.id && playlistLock.has(s.id));
     // Blocklisted playlists drop AFTER the playlist lock, so exclusion overrides
     // the anchor. No never-starve: a show that excludes its whole pool leaves
     // `seen` empty and the LLM pick is skipped, with the auto.m3u coast behind it.
-    if (excludedIds) pool = pool.filter((s: any) => s?.id && !excludedIds.has(s.id));
     const accepted = filterPickerCandidates(pool, {
       recentIds,
       recentKeys,
@@ -246,12 +278,7 @@ export function buildPickerContext(
     return attempt.transaction(async () => {
       // Exactly one shuffle: the very same pool supplies both ranked and
       // fail-open results. Restrictions precede scoring and caps.
-      let pool = applyStrictLocks(freshnessBiasedOrder((list || []) as any[], library.cachedLastAiredInfo(), Date.now()), {
-        genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
-      }, { starve: true });
-      pool = applyTrackFloor(pool, minTrackSec, { starve: true });
-      if (playlistLock) pool = pool.filter((s: any) => s?.id && playlistLock.has(s.id));
-      if (excludedIds) pool = pool.filter((s: any) => s?.id && !excludedIds.has(s.id));
+      const pool = restrict(freshnessBiasedOrder((list || []) as any[], library.cachedLastAiredInfo(), Date.now()));
       const maxPerArtist = opts.maxPerArtist ?? (playlistLock ? Infinity : 3);
       const eligible = filterPickerCandidates(pool, {
         recentIds, recentKeys, hardRecentIds, hardRecentKeys,
@@ -450,5 +477,5 @@ export function buildPickerContext(
     return { tracks: [], matched: 0, fellBack: false };
   };
 
-  return { scope, essentia, seen, collect, collectAsync, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
+  return { scope, essentia, seen, collect, collectAsync, eligibleEvidenceIds, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

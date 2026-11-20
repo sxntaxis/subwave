@@ -82,3 +82,20 @@ test('existing playlist results hydrate after admission and request context rema
     assert.equal(traitTool.available?.(withoutPredecessor), true);
   });
 });
+
+test('eligible evidence cohort applies pinned playlist, exclusions, hard recency and seen without registering tracks', async () => {
+  await withEssentiaReaderForTest(reader, async () => {
+    const seen = new Map([['outside', { id: 'outside' }]]);
+    const ctx = buildPickerContext(pickerScope({
+      essentiaDiscovery: true,
+      playlistLock: new Set(['allowed', 'recent', 'excluded', 'outside']),
+      hardRecentIds: new Set(['recent']), excludedIds: new Set(['excluded']), seen,
+    }));
+    const result = await ctx.eligibleEvidenceIds(performance.now() + 5000);
+    assert.deepEqual(result, { status: 'complete', ids: ['allowed'] });
+    assert.deepEqual([...seen.keys()], ['outside']);
+    assert.deepEqual(await ctx.eligibleEvidenceIds(performance.now() - 1), { status: 'incomplete' });
+    const request = buildPickerContext(pickerScope({ resolveReferences: true }));
+    assert.deepEqual(await request.eligibleEvidenceIds(performance.now() + 5000), { status: 'incomplete' });
+  });
+});

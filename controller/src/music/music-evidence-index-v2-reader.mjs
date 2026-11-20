@@ -82,17 +82,23 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
     if (!ranked) return null;
     const results = [];
     let rejectedFreshness = 0;
-    for (let offset = 0; offset < ranked.length && results.length < limit; offset += 12) {
-      const batch = ranked.slice(offset, offset + 12);
+    let checkedCount = 0;
+    // Filesystem probes can block on the music disk: never stat an unbounded
+    // library while handling a single socket request.
+    const freshnessCeiling = 128;
+    for (let offset = 0; offset < Math.min(ranked.length, freshnessCeiling) && results.length < limit; offset += 12) {
+      const batch = ranked.slice(offset, Math.min(offset + 12, freshnessCeiling));
       const checked = readMusicEvidence(indexPath, sourcePath, expectedModelsHash, batch.map(x => x.id));
       if (!checked) return null;
       const valid = new Set(checked.map(([id]) => id));
       for (const item of batch) {
+        checkedCount++;
         if (!valid.has(item.id)) rejectedFreshness++;
         else if (results.length < limit) results.push(item);
       }
     }
-    return { results, rankedCount: ranked.length, rejectedFreshness };
+    return { results, rankedCount: ranked.length, rejectedFreshness, checkedCount,
+      verificationLimited: results.length < limit && ranked.length > checkedCount && checkedCount >= freshnessCeiling };
   } catch {
     return null;
   } finally {

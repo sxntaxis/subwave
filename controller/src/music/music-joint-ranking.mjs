@@ -18,17 +18,21 @@ export function rankMusicCandidates(candidates, preferences, requiredFamilies = 
   for (const candidate of candidates) {
     if (!candidate || typeof candidate.id !== 'string' || !candidate.id || !candidate.values) continue;
     const contributions = [];
+    let requestedCount = 0;
+    let matchedCount = 0;
     let missingRequired = false;
     for (const [family, entries] of families) {
       const present = [];
+      requestedCount += entries.size;
       for (const p of entries.values()) {
         const value = candidate.values[family]?.[p.key];
         if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) continue;
         present.push({ value: p.direction === 'low' ? 1 - value : value, weight: p.weight ?? 1 });
       }
+      matchedCount += present.length;
       // Multiple requested labels in one family make up one bounded vote.
+      if (present.length !== entries.size && requiredFamilies.includes(family)) missingRequired = true;
       if (!present.length) {
-        if (requiredFamilies.includes(family)) missingRequired = true;
         continue;
       }
       const weight = present.reduce((sum, p) => sum + p.weight, 0);
@@ -36,14 +40,14 @@ export function rankMusicCandidates(candidates, preferences, requiredFamilies = 
       contributions.push({ family, value: mean, weight: weight / present.length });
     }
     if (missingRequired || !contributions.length) continue;
-    const complete = contributions.length === families.size;
+    const complete = matchedCount === requestedCount;
     const totalWeight = contributions.reduce((sum, c) => sum + c.weight, 0);
     const score = contributions.some(c => c.value === 0) ? 0
       : Math.exp(contributions.reduce((sum, c) => sum + c.weight * Math.log(c.value), 0) / totalWeight);
     ranked.push({
       id: candidate.id, tier: complete ? 'full' : 'partial', score,
-      evidenceCoverage: contributions.length / families.size,
-      matchedPreferences: contributions.length, requestedPreferences: families.size,
+      evidenceCoverage: matchedCount / requestedCount,
+      matchedPreferences: matchedCount, requestedPreferences: requestedCount,
     });
   }
   ranked.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'full' ? -1 : 1)

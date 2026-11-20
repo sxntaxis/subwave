@@ -63,6 +63,8 @@ class ProjectionTest(unittest.TestCase):
             self.assertEqual(target.execute('SELECT missing_reason,validity FROM outputs WHERE class_name="unknown"').fetchone(),
                              ('unavailable', 'source_missing'))
             self.assertEqual(target.execute('SELECT count(*) FROM windows').fetchone()[0], 2)
+            self.assertEqual(target.execute('SELECT mean,valid_windows,expected_windows FROM head_summary '
+                                            'WHERE class_name="arousal"').fetchone(), (None, 1, 2))
             self.assertEqual(index.advance(source, target, 1, models), 0)
             script = '''
 import { readMusicEvidence } from './src/music/music-evidence-index-v2-reader.mjs';

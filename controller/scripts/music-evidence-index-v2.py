@@ -6,7 +6,6 @@ No audio is decoded and no source database, inventory or file is modified.
 """
 import argparse
 import fcntl
-import hashlib
 import importlib.util
 import json
 import math
@@ -44,6 +43,12 @@ CREATE TABLE IF NOT EXISTS outputs (
   PRIMARY KEY(segment_id,model_id,class_name)
 );
 CREATE INDEX IF NOT EXISTS outputs_head ON outputs(model_id,class_name,segment_id);
+CREATE TABLE IF NOT EXISTS head_summary (
+  analysis_id INTEGER NOT NULL, model_id TEXT NOT NULL, class_name TEXT NOT NULL,
+  mean REAL, minimum REAL, maximum REAL, valid_windows INTEGER NOT NULL,
+  expected_windows INTEGER NOT NULL, PRIMARY KEY(analysis_id,model_id,class_name)
+);
+CREATE INDEX IF NOT EXISTS head_summary_search ON head_summary(model_id,class_name,analysis_id);
 """
 
 
@@ -70,6 +75,17 @@ def validity(model, value, scale, missing):
             return 'unrecognized_scale'
         if not 1 <= value <= 9:
             return 'outside_declared_range'
+    elif model in {
+        'danceability-discogs-effnet-1', 'voice_instrumental-discogs-effnet-1',
+        'timbre-discogs-effnet-1', 'mtg_jamendo_moodtheme-discogs-effnet-1',
+        'mtg_jamendo_instrument-discogs-effnet-1',
+    }:
+        if scale != 'model native; see metadata':
+            return 'unrecognized_scale'
+        if not 0 <= value <= 1:
+            return 'outside_declared_range'
+    elif model not in {'approachability_regression-discogs-effnet-1', 'engagement_regression-discogs-effnet-1'}:
+        return 'unrecognized_head'
     return 'valid'
 
 
@@ -122,6 +138,18 @@ def advance(source, target, limit, models):
                     n = target.execute('SELECT count(*) FROM windows WHERE analysis_id=?', (aid,)).fetchone()[0]
                     target.execute('UPDATE evidence SET indexed_windows=?,ready=? WHERE analysis_id=?',
                                    (n, int(n == expected), aid))
+                    if n == expected:
+                        target.execute(
+                            'INSERT OR REPLACE INTO head_summary '
+                            'SELECT ?,o.model_id,o.class_name,'
+                            "CASE WHEN sum(o.validity='valid')=? THEN avg(CASE WHEN o.validity='valid' THEN o.raw_score END) END,"
+                            "min(CASE WHEN o.validity='valid' THEN o.raw_score END),"
+                            "max(CASE WHEN o.validity='valid' THEN o.raw_score END),"
+                            "sum(o.validity='valid'),? FROM outputs o "
+                            'JOIN windows w ON w.segment_id=o.segment_id WHERE w.analysis_id=? '
+                            'GROUP BY o.model_id,o.class_name',
+                            (aid, expected, expected, aid),
+                        )
             target.execute('UPDATE cursor_state SET segment_id=? WHERE id=1', (sid,))
     return len(segments)
 

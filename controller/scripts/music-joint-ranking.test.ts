@@ -21,3 +21,19 @@ test('joint ranking evaluates every candidate and prioritizes complete evidence'
   assert.equal(ranked?.at(-1).tier, 'partial');
   assert.equal(rankMusicCandidates([{ id: 'partial', values: { arousal: { value: 0 } } }], preferences, ['instrument'])?.length, 0);
 });
+
+test('missing one requested label in the same family is partial, not full', () => {
+  const preferences = [
+    { family: 'instrument', key: 'piano', direction: 'high' },
+    { family: 'instrument', key: 'guitar', direction: 'high' },
+  ];
+  const candidates = [
+    { id: 'partial', values: { instrument: { piano: 1 } } },
+    { id: 'full', values: { instrument: { piano: 0.2, guitar: 0.2 } } },
+  ];
+  const result = rankMusicCandidates(candidates, preferences);
+  assert.equal(result?.[0].id, 'full');
+  assert.equal(result?.[1].tier, 'partial');
+  assert.equal(result?.[1].evidenceCoverage, 0.5);
+  assert.equal(rankMusicCandidates(candidates, preferences, ['instrument'])?.length, 1);
+});

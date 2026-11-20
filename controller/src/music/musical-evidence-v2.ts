@@ -6,6 +6,7 @@ export interface ModelOutput {
   value: number | null;
   nativeScale: string | null;
   missingReason: string | null;
+  validity?: string;
 }
 
 export interface EvidenceWindow {

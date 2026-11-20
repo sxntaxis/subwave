@@ -39,3 +39,44 @@ test('comparison describes direction but Pool delta remains exactly zero', () =>
   assert.equal(compareMusicalEvidence(fixture(5, 5), fixture(9, 9), { ...context, sameShow: false }).status, 'unavailable');
   assert.equal(compareMusicalEvidence(fixture(5, 5), fixture(9, 9), { ...context, request: true }).poolEssentiaDelta, 0);
 });
+
+test('endpoint comparisons preserve multi-label estimates and unknowns', () => {
+  const make = (which: 'left' | 'right'): MusicEvidenceV2 => {
+    const base = fixture(4, 5);
+    const role = which === 'left' ? 'ending' : 'opening';
+    const value = which === 'left' ? .3 : .7;
+    return { ...base, windows: base.windows.map(window => window.role !== role ? window : ({
+      ...window, outputs: [...window.outputs,
+        ...['piano', 'synthesizer'].map((label, i) => ({
+          modelId: 'mtg_jamendo_instrument-discogs-effnet-1', label, value: value - i * .1,
+          validity: 'valid', nativeScale: 'model native; see metadata', missingReason: null,
+        })),
+        { modelId: 'voice_instrumental-discogs-effnet-1', label: 'voice', value,
+          validity: 'valid', nativeScale: 'model native; see metadata', missingReason: null },
+        { modelId: 'timbre-discogs-effnet-1', label: 'bright', value,
+          validity: which === 'left' ? 'outside_declared_range' : 'valid',
+          nativeScale: 'model native; see metadata', missingReason: null },
+      ],
+    })) };
+  };
+  const left = make('left'), right = make('right');
+  const comparison = compareMusicalEvidence(left, right,
+    { sameShow: true, predecessorReliable: true, request: false });
+  const d = comparison.dimensions!;
+  assert.deepEqual(d.instruments.labels.map(x => x.label), ['piano', 'synthesizer']);
+  assert.ok(Math.abs(d.voice.change! - .4) < 1e-9);
+  assert.equal(d.voice.predecessor.validWindows, 1);
+  assert.equal(d.voice.predecessor.expectedWindows, 2);
+  assert.equal(d.timbre.change, null);
+  assert.equal(d.timbre.status, 'partial');
+  assert.equal(d.arousal.predecessor.expectedWindows, 2);
+  assert.equal(d.arousal.candidate.validWindows, 2);
+  const invalid = compareMusicalEvidence(fixture(3, 11.31), fixture(4, 5),
+    { sameShow: true, predecessorReliable: true, request: false });
+  assert.equal(invalid.arousalChange, null);
+  assert.equal(invalid.dimensions?.arousal.status, 'partial');
+  assert.equal(invalid.dimensions?.arousal.predecessor.endpointScore, null);
+  assert.equal(comparison.poolEssentiaDelta, 0);
+  assert.equal(compareMusicalEvidence(left, { ...right, modelsHash: 'other' },
+    { sameShow: true, predecessorReliable: true, request: false }).dimensions, undefined);
+});

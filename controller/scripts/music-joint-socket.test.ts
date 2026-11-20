@@ -46,11 +46,14 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       const fileStat = i === 262 ? staleStat : stat;
       if (i !== 264) inventory.run(id, file, 'mapped');
       analysis.run(i, id, fileStat.size, fileStat.mtimeNs, 'complete', '{"segments":1}', 'run');
-      segment.run(i, i, 0, 10000, 'opening', '{}', '{}');
+      segment.run(i, i, 0, 10000, i === 2 ? 'ending' : 'opening', '{}', '{}');
       prediction.run(i, 'deam-msd-musicnn-2', 'arousal', i === 260 ? 2 : 1.1, 'DEAM native [1,9], valence then arousal', null);
+      prediction.run(i, 'deam-msd-musicnn-2', 'valence', 4, 'DEAM native [1,9], valence then arousal', null);
       if (i !== 261) {
         prediction.run(i, 'voice_instrumental-discogs-effnet-1', 'voice', i >= 260 ? 0.1 : 0.9, 'model native; see metadata', null);
         prediction.run(i, 'mtg_jamendo_instrument-discogs-effnet-1', 'piano', i >= 260 ? 0.9 : 0.01, 'model native; see metadata', null);
+        prediction.run(i, 'mtg_jamendo_instrument-discogs-effnet-1', 'synthesizer', i >= 260 ? 0.8 : 0.2, 'model native; see metadata', null);
+        prediction.run(i, 'timbre-discogs-effnet-1', 'bright', i >= 260 ? 0.8 : 0.4, 'model native; see metadata', null);
       }
     }
   })();
@@ -78,7 +81,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     const v2Profiles = await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'),
       ['rare-piano', 'stale', 'ambiguous']);
     assert.deepEqual([...v2Profiles!.keys()], ['rare-piano']);
-    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 3);
+    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 6);
     assert.equal(JSON.stringify([...v2Profiles!]).includes(dir), false);
     const preferences = [
       { family: 'arousal' as const, key: 'value', direction: 'low' as const },
@@ -168,6 +171,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         });
         const ctx = buildPickerContext(pickerScope({
           essentiaDiscovery: true, playlistLock: new Set(['rare-piano', 'lead-001']), essentiaAudit: audit,
+          selection: { predecessorId: 'lead-002', recentAiredIds: [] },
         }));
         const offered = await (tool.build(ctx) as any).execute(
           { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
@@ -181,6 +185,12 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         );
         assert.equal(compared.status, 'available');
         assert.equal(compared.candidates.length, 2);
+        const rareComparison = compared.candidates.find((x: any) => x.id === 'rare-piano').predecessor_comparison;
+        assert.equal(rareComparison.arousalChange, 0.8999999999999999);
+        assert.deepEqual(rareComparison.dimensions.instruments.labels.map((x: any) => x.label), ['piano', 'synthesizer']);
+        assert.equal(rareComparison.dimensions.voice.predecessor.validWindows, 1);
+        assert.equal(rareComparison.dimensions.voice.candidate.validWindows, 1);
+        assert.equal(rareComparison.dimensions.timbre.change, 0.4);
         assert.equal(JSON.stringify(compared).includes(dir), false);
         assert.deepEqual([...ctx.seen.keys()], before);
         const invalid = await (compareTool.build(ctx) as any).execute(

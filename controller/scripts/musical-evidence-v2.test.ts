@@ -67,6 +67,8 @@ test('endpoint comparisons preserve multi-label estimates and unknowns', () => {
   assert.ok(Math.abs(d.voice.change! - .4) < 1e-9);
   assert.equal(d.voice.predecessor.validWindows, 1);
   assert.equal(d.voice.predecessor.expectedWindows, 2);
+  assert.equal(d.voice.status, 'partial');
+  assert.equal(d.instruments.status, 'partial');
   assert.equal(d.timbre.change, null);
   assert.equal(d.timbre.status, 'partial');
   assert.equal(d.arousal.predecessor.expectedWindows, 2);

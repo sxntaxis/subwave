@@ -146,7 +146,9 @@ function headEndpoint(evidence: MusicEvidenceV2, modelId: string, label: string 
   const status = label === null
     ? validWindows === evidence.expectedWindows && validWindows > 0 && evidence.windows.length === evidence.expectedWindows
       ? 'available' : headPresent ? 'partial' : 'unavailable'
-    : endpointScore != null ? 'available' : headPresent ? 'partial' : 'unavailable';
+    : endpointScore != null && validWindows === evidence.expectedWindows
+      && evidence.expectedWindows > 0 && evidence.windows.length === evidence.expectedWindows
+      ? 'available' : headPresent ? 'partial' : 'unavailable';
   return { status, headPresent, labelPresent: label === null ? headPresent : labelPresent,
     validWindows, expectedWindows: evidence.expectedWindows, endpointScore };
 }
@@ -157,7 +159,7 @@ function compareLabel(predecessor: MusicEvidenceV2, candidate: MusicEvidenceV2,
   const right = headEndpoint(candidate, modelId, label, 'opening');
   const change = left.endpointScore != null && right.endpointScore != null
     ? right.endpointScore - left.endpointScore : null;
-  return { label, status: change != null ? 'available'
+  return { label, status: change != null && left.status === 'available' && right.status === 'available' ? 'available'
     : left.status === 'unavailable' && right.status === 'unavailable' ? 'unavailable' : 'partial',
   predecessor: left, candidate: right, change };
 }
@@ -169,7 +171,8 @@ function deamEndpoint(evidence: MusicEvidenceV2, label: 'arousal' | 'valence',
     .filter(output => output.modelId === 'deam-msd-musicnn-2');
   const endpointScore = summary[role];
   return {
-    status: endpointScore != null ? 'available' : outputs.length ? 'partial' : 'unavailable',
+    status: endpointScore != null && summary.coverage === 'complete'
+      ? 'available' : outputs.length ? 'partial' : 'unavailable',
     headPresent: outputs.length > 0,
     labelPresent: outputs.some(output => output.label === label),
     validWindows: summary.validWindows,
@@ -184,7 +187,7 @@ function compareDeam(predecessor: MusicEvidenceV2, candidate: MusicEvidenceV2,
   const right = deamEndpoint(candidate, label, 'opening');
   const change = left.endpointScore != null && right.endpointScore != null
     ? right.endpointScore - left.endpointScore : null;
-  return { label, status: change != null ? 'available'
+  return { label, status: change != null && left.status === 'available' && right.status === 'available' ? 'available'
     : left.status === 'unavailable' && right.status === 'unavailable' ? 'unavailable' : 'partial',
   predecessor: left, candidate: right, change };
 }
@@ -206,7 +209,8 @@ function compareInstruments(predecessor: MusicEvidenceV2, candidate: MusicEviden
       - Math.max(a.predecessor.endpointScore!, a.candidate.endpointScore!)
       || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
     .slice(0, 4);
-  return { status: shared.length ? 'available'
+  return { status: shared.length && left.status === 'available' && right.status === 'available'
+    && shared.every(item => item.status === 'available') ? 'available'
     : !left.headPresent && !right.headPresent ? 'unavailable' : 'partial',
   predecessorHead: left, candidateHead: right, labels: shared };
 }

@@ -15,6 +15,7 @@ export interface EssentiaReader {
   search(preferences: TraitPreferences): Promise<string[] | null>;
   searchJoint?(request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
     eligibleIds?: string[] | null; limit?: number }): Promise<JointEvidenceResult | null>;
+  lookupV2?(ids: readonly string[]): Promise<Map<string, MusicEvidenceV2> | null>;
 }
 
 export interface JointEvidencePreference {
@@ -193,7 +194,8 @@ export function createSocketEssentiaReader(path: string): EssentiaReader {
       });
     });
   };
-  return { ...readerFromQuery(query), searchJoint: request => searchJointSocket(path, request) };
+  return { ...readerFromQuery(query), searchJoint: request => searchJointSocket(path, request),
+    lookupV2: ids => lookupMusicEvidenceSocket(path, ids) };
 }
 
 // Only a recently healthy private socket is offered to the autonomous picker.

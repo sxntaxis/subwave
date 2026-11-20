@@ -60,3 +60,31 @@ export function compactMusicEvidence(evidence: MusicEvidenceV2) {
     valence: deamSummary(evidence, 'valence'),
   };
 }
+
+/**
+ * Allocate the same evidence-byte share to every returned candidate. If the
+ * full four-label view cannot fit, reduce both label lists before omitting a
+ * profile. The original track objects and seen-map entries are not mutated.
+ */
+export function attachCompactMusicEvidence(
+  tracks: readonly any[], evidence: ReadonlyMap<string, MusicEvidenceV2>, budgetBytes: number,
+): { tracks: any[]; bytes: number } {
+  if (!tracks.length || budgetBytes <= 0) return { tracks: [...tracks], bytes: 0 };
+  const share = Math.floor(Math.min(8192, budgetBytes) / tracks.length);
+  let bytes = 0;
+  const out = tracks.map(track => {
+    const data = evidence.get(track?.id);
+    if (!data) return track;
+    const profile = compactMusicEvidence(data);
+    let size = Buffer.byteLength(JSON.stringify({ musical_evidence: profile }));
+    while (size > share && (profile.instruments.scores.length || profile.moodThemes.scores.length)) {
+      if (profile.instruments.scores.length) profile.instruments.scores.pop();
+      if (profile.moodThemes.scores.length) profile.moodThemes.scores.pop();
+      size = Buffer.byteLength(JSON.stringify({ musical_evidence: profile }));
+    }
+    if (size > share) return track;
+    bytes += size;
+    return { ...track, musical_evidence: profile };
+  });
+  return { tracks: out, bytes };
+}

@@ -153,6 +153,9 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         );
         assert.deepEqual(offered.map((x: any) => x.id), ['rare-piano']);
         assert.deepEqual([...ctx.seen.keys()], ['rare-piano']);
+        assert.equal(offered[0].musical_evidence.source, 'essentia_estimate');
+        assert.equal(offered[0].musical_evidence.instruments.scores[0].label, 'piano');
+        assert.equal(ctx.seen.get('rare-piano').musical_evidence, undefined);
         assert.ok(jointCalls > 0);
       });
       assert.equal(v1Search.includes('rare-piano'), false);

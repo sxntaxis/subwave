@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactMusicEvidence } from '../src/music/music-evidence-profile.js';
+import { attachCompactMusicEvidence, compactMusicEvidence } from '../src/music/music-evidence-profile.js';
 import type { MusicEvidenceV2, ModelOutput } from '../src/music/musical-evidence-v2.js';
 
 test('compact profile keeps multiple estimates and reports sparse invalid evidence honestly', () => {
@@ -34,4 +34,18 @@ test('compact profile keeps multiple estimates and reports sparse invalid eviden
   assert.equal(profile.arousal.opening, null);
   assert.equal(profile.windowSampling, 'sparse_windows_not_continuous');
   assert.equal(profile.voice.status, 'unavailable');
+});
+
+test('budget allocation gives late candidates the same evidence opportunity', () => {
+  const tracks = Array.from({ length: 8 }, (_, i) => ({ id: `track-${i}` }));
+  const rows = new Map(tracks.map(track => [track.id, {
+    trackId: track.id, analysisId: '1', runId: 'r', modelsHash: 'hash', sourceSize: '1',
+    sourceMtimeNs: '2', expectedWindows: 1, windows: [{
+      startMs: 0, endMs: 10000, role: 'opening' as const, outputs: [],
+    }],
+  }]));
+  const attached = attachCompactMusicEvidence(tracks, rows, 8192);
+  assert.ok(attached.bytes <= 8192);
+  assert.ok(attached.tracks.every(track => track.musical_evidence));
+  assert.ok(tracks.every(track => !('musical_evidence' in track)));
 });

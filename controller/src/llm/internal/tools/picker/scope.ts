@@ -26,6 +26,7 @@ import { composeSelection } from '../../../../music/selection-compose.js';
 import type { PickerEssentiaAudit, PickerSelectionObservation } from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { enrichEssentia, getEssentiaReader, type EssentiaReader } from '../../../../music/essentia-evidence.js';
+import { attachCompactMusicEvidence } from '../../../../music/music-evidence-profile.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -172,6 +173,7 @@ export function buildPickerContext(
 
   const seen = scope.seen ?? new Map<string, any>();
   const essentia = scope.essentiaDiscovery ? getEssentiaReader() : null;
+  let remainingEvidenceBytes = 32 * 1024;
   scope.essentiaAudit?.setEssentiaAvailability(essentia !== null);
 
   // Pushed into every KNN query so a heavily-aired cluster answers with its next
@@ -371,8 +373,32 @@ export function buildPickerContext(
       });
     });
   };
+  const attachV2 = async (tracks: any[]): Promise<any[]> => {
+    let enriched = tracks;
+    if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+        && essentia?.lookupV2 && enriched.length > 0 && enriched.length <= 12 && remainingEvidenceBytes > 0) {
+      // Reserve before awaiting so simultaneous tool calls cannot overrun the
+      // per-pick budget. Unused bytes are returned to this attempt only.
+      const reserved = Math.min(8192, remainingEvidenceBytes);
+      remainingEvidenceBytes -= reserved;
+      let used = 0;
+      try {
+        const ids = enriched.map(track => track?.id);
+        if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
+          const rows = await essentia.lookupV2(ids);
+          if (rows) {
+            const attached = attachCompactMusicEvidence(enriched, rows, reserved);
+            enriched = attached.tracks;
+            used = attached.bytes;
+          }
+        }
+      } catch { /* optional evidence must not affect candidate admission */ }
+      finally { remainingEvidenceBytes += reserved - used; }
+    }
+    return enriched;
+  };
   const collectAsync: PickerContext['collectAsync'] = async (list, cap = 8, opts = {}) => {
-    const enriched = await enrichEssentia(essentia, await collectSelection(list, cap, opts));
+    const enriched = await attachV2(await enrichEssentia(essentia, await collectSelection(list, cap, opts)));
     scope.essentiaAudit?.captureProfileExposure(
       enriched.filter(track => track?.audio_profile).map(track => track?.id),
     );
@@ -455,7 +481,7 @@ export function buildPickerContext(
   const seedSimilarityAsync: PickerContext['seedSimilarityAsync'] = async (songId, primary) => {
     if (!attempt) {
       const result = seedSimilarity(songId, primary);
-      const tracks = await enrichEssentia(essentia, result.tracks);
+      const tracks = await attachV2(await enrichEssentia(essentia, result.tracks));
       scope.essentiaAudit?.captureProfileExposure(
         tracks.filter(track => track?.audio_profile).map(track => track?.id),
       );

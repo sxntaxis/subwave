@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import Database from 'better-sqlite3';
 import { searchJointSocket } from '../src/music/essentia-evidence.js';
 
@@ -84,8 +85,29 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       preferences, eligibleIds: ['partial'], requiredFamilies: ['instrument'],
     });
     assert.deepEqual(required?.results, []);
+    const invalid = await searchJointSocket(join(socketDir, 'evidence.sock'), {
+      preferences: [{ family: 'instrument', key: '../invalid', direction: 'high' }],
+    });
+    assert.equal(invalid, null);
     assert.equal(await searchJointSocket(join(dir, 'missing.sock'), { preferences }), null);
   } finally {
     server.kill('SIGTERM');
+  }
+});
+
+test('v2 socket client enforces its absolute deadline', async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-timeout-'));
+  const socketPath = join(dir, 'hang.sock');
+  const server = createServer(socket => socket.on('error', () => {}));
+  await new Promise<void>(resolve => server.listen(socketPath, resolve));
+  try {
+    const start = Date.now();
+    const result = await searchJointSocket(socketPath, {
+      preferences: [{ family: 'arousal', key: 'value', direction: 'low' }],
+    });
+    assert.equal(result, null);
+    assert.ok(Date.now() - start < 2000);
+  } finally {
+    server.close();
   }
 });

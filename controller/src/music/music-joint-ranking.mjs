@@ -1,5 +1,10 @@
 // One contribution per requested family, with full evidence ahead of partial.
 // Values are normalized within their own head; they are not probabilities.
+export function compareJointResults(a, b) {
+  return (a.tier === b.tier ? 0 : a.tier === 'full' ? -1 : 1)
+    || b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 export function rankMusicCandidates(candidates, preferences, requiredFamilies = []) {
   if (!Array.isArray(candidates) || !Array.isArray(preferences) || !preferences.length
       || preferences.length > 32 || !Array.isArray(requiredFamilies)) return null;
@@ -50,7 +55,6 @@ export function rankMusicCandidates(candidates, preferences, requiredFamilies = 
       matchedPreferences: matchedCount, requestedPreferences: requestedCount,
     });
   }
-  ranked.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'full' ? -1 : 1)
-    || b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  ranked.sort(compareJointResults);
   return ranked;
 }

@@ -26,6 +26,8 @@ export interface JointEvidenceResult {
     matchedPreferences: number; requestedPreferences: number }>;
   rankedCount: number;
   rejectedFreshness: number;
+  checkedCount?: number;
+  verificationLimited?: boolean;
 }
 
 /** Additive v2 query; timeout/unavailability returns null, never a fabricated result. */

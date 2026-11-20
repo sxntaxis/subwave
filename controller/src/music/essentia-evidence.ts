@@ -13,6 +13,8 @@ import type { MusicEvidenceV2 } from './musical-evidence-v2.js';
 export interface EssentiaReader {
   lookup(ids: readonly string[]): Promise<Map<string, EssentiaEvidence> | null>;
   search(preferences: TraitPreferences): Promise<string[] | null>;
+  searchJoint?(request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
+    eligibleIds?: string[] | null; limit?: number }): Promise<JointEvidenceResult | null>;
 }
 
 export interface JointEvidencePreference {
@@ -191,7 +193,7 @@ export function createSocketEssentiaReader(path: string): EssentiaReader {
       });
     });
   };
-  return readerFromQuery(query);
+  return { ...readerFromQuery(query), searchJoint: request => searchJointSocket(path, request) };
 }
 
 // Only a recently healthy private socket is offered to the autonomous picker.

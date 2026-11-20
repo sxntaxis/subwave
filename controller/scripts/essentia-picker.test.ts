@@ -99,3 +99,61 @@ test('eligible evidence cohort applies pinned playlist, exclusions, hard recency
     assert.deepEqual(await request.eligibleEvidenceIds(performance.now() + 5000), { status: 'incomplete' });
   });
 });
+
+test('opt-in joint trait discovery offers a deep-ranked pinned track through seen', async () => {
+  const previous = process.env.SUBWAVE_MUSIC_EVIDENCE_V2;
+  process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = '1';
+  db.upsertTrackMeta('deep-piano', { title: 'deep-piano', artist: 'deep-artist', duration: 180 });
+  const global = [...Array.from({ length: 300 }, (_, i) => `outside-${i}`), 'deep-piano'];
+  const jointReader = {
+    ...reader,
+    async searchJoint(request: { eligibleIds?: string[] | null }) {
+      const ids = request.eligibleIds ? global.filter(id => request.eligibleIds!.includes(id)) : global.slice(0, 12);
+      return { results: ids.slice(0, 12).map(id => ({
+        id, tier: 'full' as const, score: 0.9, evidenceCoverage: 1, matchedPreferences: 3, requestedPreferences: 3,
+      })), rankedCount: ids.length, rejectedFreshness: 0, verificationLimited: false };
+    },
+  };
+  try {
+    await withEssentiaReaderForTest(jointReader, async () => {
+      const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, playlistLock: new Set(['deep-piano']) }));
+      const result = await (traitTool.build(ctx) as any).execute({ arousal: 'low', voice: 'instrumental', instrument: 'piano' }, options);
+      assert.deepEqual(result.map((track: any) => track.id), ['deep-piano']);
+      assert.equal(ctx.seen.get('deep-piano')?.id, 'deep-piano');
+    });
+  } finally {
+    if (previous === undefined) delete process.env.SUBWAVE_MUSIC_EVIDENCE_V2;
+    else process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = previous;
+  }
+});
+
+test('an incomplete constrained v2 cohort is reported unavailable without leaking partial results', async () => {
+  const previous = process.env.SUBWAVE_MUSIC_EVIDENCE_V2;
+  process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = '1';
+  const ids = Array.from({ length: 130 }, (_, i) => `cohort-${i}`);
+  for (const id of ids) db.upsertTrackMeta(id, { title: id, artist: `artist-${id}`, duration: 180 });
+  let calls = 0;
+  const jointReader = {
+    ...reader,
+    async searchJoint(request: { eligibleIds?: string[] | null }) {
+      calls++;
+      if (calls === 2) return null;
+      const id = request.eligibleIds![0];
+      return { results: [{ id, tier: 'full' as const, score: 0.9, evidenceCoverage: 1,
+        matchedPreferences: 1, requestedPreferences: 1 }], rankedCount: 1, rejectedFreshness: 0 };
+    },
+  };
+  try {
+    await withEssentiaReaderForTest(jointReader, async () => {
+      const ctx = buildPickerContext(pickerScope({ essentiaDiscovery: true, playlistLock: new Set(ids) }));
+      const result = await (traitTool.build(ctx) as any).execute({ instrument: 'piano' }, options);
+      assert.equal(calls, 2);
+      assert.deepEqual(result.tracks, []);
+      assert.match(result.note, /could not finish/);
+      assert.equal(ctx.seen.size, 0);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.SUBWAVE_MUSIC_EVIDENCE_V2;
+    else process.env.SUBWAVE_MUSIC_EVIDENCE_V2 = previous;
+  }
+});

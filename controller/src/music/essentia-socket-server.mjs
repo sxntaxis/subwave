@@ -4,7 +4,7 @@ import { createConnection, createServer } from 'node:net';
 import { accessSync, chmodSync, constants, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readIndex } from './essentia-index-reader.mjs';
-import { searchMusicEvidence } from './music-evidence-index-v2-reader.mjs';
+import { readMusicEvidence, searchMusicEvidence } from './music-evidence-index-v2-reader.mjs';
 
 const [directory, indexPath, sourcePath, indexV2Path] = process.argv.slice(2);
 if (!directory || !indexPath || !sourcePath) process.exit(2);
@@ -69,10 +69,14 @@ const server = createServer(socket => {
     try {
       const request = JSON.parse(input.slice(0, input.indexOf('\n')));
       const marker = readiness();
-      const v2marker = request?.version === 2 && request.op === 'searchJoint' ? v2Readiness() : null;
-      if (v2marker && Object.keys(request).every(key =>
+      const v2marker = request?.version === 2 && ['searchJoint', 'profiles'].includes(request.op) ? v2Readiness() : null;
+      if (v2marker && request.op === 'searchJoint' && Object.keys(request).every(key =>
         ['version', 'op', 'preferences', 'requiredFamilies', 'eligibleIds', 'limit'].includes(key))) {
         result = searchMusicEvidence(indexV2Path, sourcePath, v2marker.models_sha256, request);
+      }
+      if (v2marker && request.op === 'profiles' && Object.keys(request).every(key =>
+        ['version', 'op', 'ids'].includes(key))) {
+        result = readMusicEvidence(indexV2Path, sourcePath, v2marker.models_sha256, request.ids);
       }
       const lookup = request?.version === 1 && request.op === 'profiles'
         && Array.isArray(request.ids) && request.ids.length > 0 && request.ids.length <= 12

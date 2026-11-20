@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import Database from 'better-sqlite3';
-import { createSocketEssentiaReader, searchJointSocket } from '../src/music/essentia-evidence.js';
+import { createSocketEssentiaReader, lookupMusicEvidenceSocket, searchJointSocket } from '../src/music/essentia-evidence.js';
 
 test('private socket joint search reaches a rare candidate beyond the primary top 256', async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-socket-'));
@@ -72,6 +72,11 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     const v1Search = await v1.search({ arousal: 'low' });
     assert.ok(v1Search?.length);
     assert.ok(v1Search.includes('lead-001'));
+    const v2Profiles = await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'),
+      ['rare-piano', 'stale', 'ambiguous']);
+    assert.deepEqual([...v2Profiles!.keys()], ['rare-piano']);
+    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 3);
+    assert.equal(JSON.stringify([...v2Profiles!]).includes(dir), false);
     const preferences = [
       { family: 'arousal' as const, key: 'value', direction: 'low' as const },
       { family: 'voice' as const, key: 'value', direction: 'low' as const },

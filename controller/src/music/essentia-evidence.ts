@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { dirname, join } from 'node:path';
 import { audioProfile, traitScore, type EssentiaEvidence, type TraitPreferences } from './essentia-traits.js';
+import type { MusicEvidenceV2 } from './musical-evidence-v2.js';
 
 export interface EssentiaReader {
   lookup(ids: readonly string[]): Promise<Map<string, EssentiaEvidence> | null>;
@@ -33,15 +34,43 @@ export function searchJointSocket(
   request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
     eligibleIds?: string[] | null; limit?: number },
 ): Promise<JointEvidenceResult | null> {
+  return queryV2Socket(path, { version: 2, op: 'searchJoint', ...request }).then(value => {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as JointEvidenceResult;
+    if (!Array.isArray(result.results) || !Number.isInteger(result.rankedCount)
+        || !Number.isInteger(result.rejectedFreshness)) return null;
+    return result;
+  });
+}
+
+/** Detailed evidence for existing IDs; no filesystem path reaches the client. */
+export function lookupMusicEvidenceSocket(path: string, ids: readonly string[]): Promise<Map<string, MusicEvidenceV2> | null> {
+  if (!ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !id || id.length > 256)) return Promise.resolve(null);
+  return queryV2Socket(path, { version: 2, op: 'profiles', ids }).then(value => {
+    if (!Array.isArray(value) || value.length > ids.length) return null;
+    const allowed = new Set(ids);
+    const result = new Map<string, MusicEvidenceV2>();
+    for (const pair of value) {
+      if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string'
+          || !allowed.has(pair[0]) || result.has(pair[0]) || !pair[1] || pair[1].trackId !== pair[0]
+          || !Array.isArray(pair[1].windows)) return null;
+      result.set(pair[0], pair[1] as MusicEvidenceV2);
+    }
+    return result;
+  });
+}
+
+function queryV2Socket(path: string, request: object): Promise<unknown | null> {
   if (inFlight >= 2) return Promise.resolve(null);
-  const message = JSON.stringify({ version: 2, op: 'searchJoint', ...request }) + '\n';
+  const message = JSON.stringify(request) + '\n';
   if (Buffer.byteLength(message) > 32768) return Promise.resolve(null);
   inFlight++;
   return new Promise(resolve => {
     let done = false;
     let output = '';
     const socket = createConnection(path);
-    const finish = (value: JointEvidenceResult | null) => {
+    const finish = (value: unknown | null) => {
       if (done) return;
       done = true;
       clearTimeout(deadline);
@@ -60,8 +89,6 @@ export function searchJointSocket(
       if (end < 0) return;
       try {
         const value = JSON.parse(output.slice(0, end));
-        if (!value || !Array.isArray(value.results) || !Number.isInteger(value.rankedCount)
-            || !Number.isInteger(value.rejectedFreshness)) return finish(null);
         finish(value);
       } catch { finish(null); }
     });

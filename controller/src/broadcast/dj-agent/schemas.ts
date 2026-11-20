@@ -149,6 +149,8 @@ export function pickSystem(showAt: Date | null = null, playlistResolved = true) 
   const findingCandidates = rounds > 1
     ? instruction('picker', 'finding-candidates-multi', { rounds })
     : instruction('picker', 'finding-candidates');
+  const musicEvidence = process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+    ? `\n\n${instruction('picker', 'music-evidence-v2')}` : '';
   return `${settings.agentPersonaPreamble(persona)}
 
 ${instruction('picker', 'frame')}${djModeLine}${showLine}${musicLean}${playlistLean}
@@ -157,7 +159,7 @@ ${dj.PICKER_CRITERIA}
 
 ${instruction('picker', 'listener-requests', { listenerText: LISTENER_TEXT_CLAUSE })}${dj.REQUESTER_NAME_CLAUSE}
 
-${findingCandidates}${dj.effectsGuidance()}${settings.agentLanguageReminder(persona, 'the "say" link')}`;
+${findingCandidates}${musicEvidence}${dj.effectsGuidance()}${settings.agentLanguageReminder(persona, 'the "say" link')}`;
 }
 
 // Exported for scripts/llm-bench, like requestSchema above.
@@ -181,4 +183,3 @@ ${LISTENER_TEXT_CLAUSE}${dj.REQUESTER_GREETING_CLAUSE}${dj.REQUESTER_NAME_CLAUSE
 
 ${currentTrack}`;
 }
-

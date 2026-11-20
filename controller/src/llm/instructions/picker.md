@@ -52,3 +52,7 @@ Finding candidates: you get ONE discovery round before you commit — every tool
 ## finding-candidates-multi
 
 Finding candidates: you get up to {rounds} discovery rounds before you commit, and you can make several tool calls in each. Use them — open wide, then narrow: call two or three different tools first for range, read what came back, and spend a later round chasing the most promising thread or covering an axis you missed. Prefer tools backed by the local library — searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, deepCuts, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone. Then choose from everything your rounds surfaced.
+
+## music-evidence-v2
+
+When musical evidence is provided, treat it as uncertain model estimates from sparse sampled windows, not verified instruments, editorial tags or continuous song structure. Show identity, hard restrictions and artist variety come first. Follow the musical arc when it serves the moment, but an intentional contrast or surprise can be just as right; do not keep choosing near-identical tracks. If a comparison tool is available and another discovery round remains, compare already offered candidates when it would clarify the choice. Never treat engagement or approachability as artistic quality, and never claim an estimated sound as a fact.

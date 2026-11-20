@@ -12,6 +12,7 @@ export default definePickerTool({
     description: 'Compare 2–4 song IDs already returned by discovery. Evidence is estimated and based on sparse sampled windows; continuity and contrast can both be useful.',
     inputSchema: z.object({ ids: z.array(z.string().min(1).max(256)).min(2).max(4) }),
     execute: async ({ ids }) => {
+      ctx.scope.essentiaAudit?.noteV2Compare?.();
       if (new Set(ids).size !== ids.length || ids.some(id => !ctx.seen.has(id))) {
         return { status: 'invalid_candidates', note: 'Use 2–4 distinct IDs already returned by discovery.' };
       }

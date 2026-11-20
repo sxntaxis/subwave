@@ -55,6 +55,9 @@ export interface PickerScope {
     captureProfileExposure(ids: Iterable<string | null | undefined>): void;
     noteTraitInvocation(): void;
     captureTraitResult(ids: Iterable<string | null | undefined>, status: PickerEssentiaAudit['trait_result']): void;
+    noteV2Joint?(unavailable: boolean): void;
+    noteV2Compare?(): void;
+    captureV2Profiles?(ids: Iterable<string | null | undefined>): void;
   };
   // Optional attempt-local accumulator. The track picker supplies this so it
   // can snapshot the same IDs exposed through PickerExtras even if the agent
@@ -412,6 +415,9 @@ export function buildPickerContext(
   };
   const collectAsync: PickerContext['collectAsync'] = async (list, cap = 8, opts = {}) => {
     const enriched = await attachV2(await enrichEssentia(essentia, await collectSelection(list, cap, opts)));
+    if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
+      scope.essentiaAudit?.captureV2Profiles?.(enriched.filter(track => track?.musical_evidence).map(track => track?.id));
+    }
     scope.essentiaAudit?.captureProfileExposure(
       enriched.filter(track => track?.audio_profile).map(track => track?.id),
     );
@@ -495,6 +501,9 @@ export function buildPickerContext(
     if (!attempt) {
       const result = seedSimilarity(songId, primary);
       const tracks = await attachV2(await enrichEssentia(essentia, result.tracks));
+      if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
+        scope.essentiaAudit?.captureV2Profiles?.(tracks.filter(track => track?.musical_evidence).map(track => track?.id));
+      }
       scope.essentiaAudit?.captureProfileExposure(
         tracks.filter(track => track?.audio_profile).map(track => track?.id),
       );

@@ -22,6 +22,13 @@ export default definePickerTool({
     }),
     execute: async preferences => {
       ctx.scope.essentiaAudit?.noteTraitInvocation();
+      let v2Attempted = false;
+      let v2Noted = false;
+      const noteV2 = (unavailable: boolean) => {
+        if (v2Noted) return;
+        v2Noted = true;
+        ctx.scope.essentiaAudit?.noteV2Joint?.(unavailable);
+      };
       if (!Object.values(preferences).some(Boolean)) {
         ctx.scope.essentiaAudit?.captureTraitResult([], 'empty');
         return ctx.emptyResult(0, 'choose at least one audio trait, or use another discovery tool');
@@ -30,6 +37,7 @@ export default definePickerTool({
         let ids: string[] | null | undefined;
         if (ctx.scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
             && ctx.essentia?.searchJoint) {
+          v2Attempted = true;
           const requested: JointEvidencePreference[] = [];
           for (const family of ['arousal', 'valence', 'danceability'] as const) {
             if (preferences[family]) requested.push({ family, key: 'value', direction: preferences[family] });
@@ -50,17 +58,21 @@ export default definePickerTool({
             const deadline = performance.now() + 8000;
             const cohort = await ctx.eligibleEvidenceIds(deadline);
             if (cohort.status !== 'complete') {
+              noteV2(true);
               ctx.scope.essentiaAudit?.captureTraitResult([], 'unavailable');
               return ctx.emptyResult(0, 'audio trait search could not finish the eligible show scope; use another discovery tool');
             }
             const result = await searchEligibleCohort(cohort.ids, requested, ctx.essentia.searchJoint, deadline);
             if (result.status !== 'complete') {
+              noteV2(true);
               ctx.scope.essentiaAudit?.captureTraitResult([], 'unavailable');
               return ctx.emptyResult(0, 'audio trait search could not finish the eligible show scope; use another discovery tool');
             }
+            noteV2(false);
             ids = result.results.map(row => row.id);
           } else {
             const result = await ctx.essentia.searchJoint({ preferences: requested, limit: 12 });
+            noteV2(!result || result.verificationLimited === true);
             ids = result && !result.verificationLimited
               ? result.results.map(row => row.id) : await ctx.essentia.search(preferences);
           }
@@ -80,6 +92,7 @@ export default definePickerTool({
         );
         return tracks.length ? tracks : ctx.emptyResult(list.length, 'no available analysed tracks match; use another discovery tool');
       } catch {
+        if (v2Attempted) noteV2(true);
         ctx.scope.essentiaAudit?.captureTraitResult([], 'error_or_timeout');
         return ctx.emptyResult(0, 'audio trait evidence is temporarily unavailable; use another discovery tool');
       }

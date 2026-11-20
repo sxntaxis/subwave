@@ -138,6 +138,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       const library = await import('../src/music/library.js');
       const libraryDb = await import('../src/music/library-db.js');
       const { buildPickerContext, pickerScope } = await import('../src/llm/internal/tools/picker/scope.js');
+      const { createPickerAuditRecorder } = await import('../src/observability/picker-audit.js');
       const tool = (await import('../src/llm/internal/tools/picker/tools/find-by-audio-traits.js')).default;
       const compareTool = (await import('../src/llm/internal/tools/picker/tools/compare-musical-candidates.js')).default;
       await library.load();
@@ -161,8 +162,12 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       });
       assert.equal(v1Search.includes('rare-piano'), false);
       await withEssentiaReaderForTest(reader, async () => {
+        const events: any[] = [];
+        const audit = createPickerAuditRecorder('agent', null, null, {
+          enabled: true, attemptId: 'socket-fixture', write: event => events.push(event),
+        });
         const ctx = buildPickerContext(pickerScope({
-          essentiaDiscovery: true, playlistLock: new Set(['rare-piano', 'lead-001']),
+          essentiaDiscovery: true, playlistLock: new Set(['rare-piano', 'lead-001']), essentiaAudit: audit,
         }));
         const offered = await (tool.build(ctx) as any).execute(
           { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
@@ -183,6 +188,12 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         );
         assert.equal(invalid.status, 'invalid_candidates');
         assert.deepEqual([...ctx.seen.keys()], before);
+        audit.finish({ outcome: 'success', chosenId: 'rare-piano' });
+        assert.deepEqual(events[0].music_v2, {
+          joint_calls: 1, joint_unavailable: 0, compare_calls: 2,
+          profile_candidates_exposed: 2, chosen_had_exposed_profile: true,
+        });
+        assert.equal(JSON.stringify(events[0].music_v2).includes(dir), false);
       });
 
       for (const id of ['rare-piano', ...leads.slice(0, 4)]) {

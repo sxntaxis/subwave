@@ -58,6 +58,14 @@ export interface PickerEssentiaAudit {
   chosen_from_trait_result: boolean | null;
 }
 
+export interface PickerMusicV2Audit {
+  joint_calls: number;
+  joint_unavailable: number;
+  compare_calls: number;
+  profile_candidates_exposed: number;
+  chosen_had_exposed_profile: boolean | null;
+}
+
 export interface PickerAuditEvent {
   schema_version: 1;
   timestamp: string;
@@ -74,6 +82,7 @@ export interface PickerAuditEvent {
   selection?: PickerSelectionAudit;
   acoustic_search_tool_calls?: number;
   essentia?: PickerEssentiaAudit;
+  music_v2?: PickerMusicV2Audit;
 }
 
 const ENABLED = process.env.SUBWAVE_PICKER_AUDIT === '1';
@@ -160,6 +169,9 @@ export interface PickerAuditRecorder {
   captureProfileExposure(ids: Iterable<string | null | undefined>): void;
   noteTraitInvocation(): void;
   captureTraitResult(ids: Iterable<string | null | undefined>, status: PickerEssentiaAudit['trait_result']): void;
+  noteV2Joint(unavailable: boolean): void;
+  noteV2Compare(): void;
+  captureV2Profiles(ids: Iterable<string | null | undefined>): void;
   finish(result: PickerAuditResult): void;
 }
 
@@ -224,6 +236,12 @@ export function createPickerAuditRecorder(
   const traitIds = new Set<string>();
   let traitInvocations = 0;
   let traitResult: PickerEssentiaAudit['trait_result'] = 'not_invoked';
+  let v2Observed = false;
+  let v2JointCalls = 0;
+  let v2JointUnavailable = 0;
+  let v2CompareCalls = 0;
+  let v2ProfileObserved = false;
+  const v2ProfileIds = new Set<string>();
   let finished = false;
   return {
     setShowId(id) { resolvedShowId = id ?? null; },
@@ -275,6 +293,23 @@ export function createPickerAuditRecorder(
       traitResult = status;
       for (const id of ids) if (traitIds.size < 100_000 && typeof id === 'string' && id) traitIds.add(id);
     },
+    noteV2Joint(unavailable) {
+      if (!options.enabled || finished) return;
+      v2Observed = true;
+      v2JointCalls = Math.min(1000, v2JointCalls + 1);
+      if (unavailable) v2JointUnavailable = Math.min(1000, v2JointUnavailable + 1);
+    },
+    noteV2Compare() {
+      if (!options.enabled || finished) return;
+      v2Observed = true;
+      v2CompareCalls = Math.min(1000, v2CompareCalls + 1);
+    },
+    captureV2Profiles(ids) {
+      if (!options.enabled || finished) return;
+      v2Observed = true;
+      v2ProfileObserved = true;
+      for (const id of ids) if (v2ProfileIds.size < 100_000 && typeof id === 'string' && id) v2ProfileIds.add(id);
+    },
     finish(result) {
       if (!options.enabled || finished) return;
       finished = true;
@@ -306,6 +341,14 @@ export function createPickerAuditRecorder(
           chosen_from_trait_result: ['success', 'repaired', 'repicked'].includes(result.outcome)
             && typeof result.chosenId === 'string'
             ? traitInvocations > 0 ? traitIds.has(result.chosenId) : false : null,
+        } } : {}),
+        ...(path === 'agent' && v2Observed ? { music_v2: {
+          joint_calls: v2JointCalls,
+          joint_unavailable: v2JointUnavailable,
+          compare_calls: v2CompareCalls,
+          profile_candidates_exposed: v2ProfileIds.size,
+          chosen_had_exposed_profile: ['success', 'repaired', 'repicked'].includes(result.outcome)
+            && typeof result.chosenId === 'string' && v2ProfileObserved ? v2ProfileIds.has(result.chosenId) : null,
         } } : {}),
         ...(hasSelection ? { selection } : selectionExpected ? {
           selection: { status: 'not_invoked', reasons: { collector_not_invoked: 1 } },

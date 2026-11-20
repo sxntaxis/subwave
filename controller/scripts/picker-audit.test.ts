@@ -44,6 +44,26 @@ test('private selection audit aggregates score versus baseline and separates aco
   assert.equal(JSON.stringify(events[0]).includes('fixture-track-id'), false);
 });
 
+test('v2 audit counts exposure and comparison without claiming queue or airplay', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'v2-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.noteV2Joint(false);
+  audit.noteV2Compare();
+  audit.captureV2Profiles(['candidate', 'candidate']);
+  audit.finish({ outcome: 'success', chosenId: 'candidate' });
+  assert.deepEqual(events[0].music_v2, {
+    joint_calls: 1, joint_unavailable: 0, compare_calls: 1,
+    profile_candidates_exposed: 1, chosen_had_exposed_profile: true,
+  });
+  const serialized = JSON.stringify(events[0].music_v2);
+  assert.equal(serialized.includes('candidate'), true); // field name only, no ID value
+  assert.equal(serialized.includes('"candidate"'), false);
+  assert.equal(serialized.includes('aired'), false);
+  assert.equal(serialized.includes('queued'), false);
+});
+
 test('Essentia summary counts observed distinct exposures and correlates only successful Agent choices', () => {
   const events: PickerAuditEvent[] = [];
   const audit = createPickerAuditRecorder('agent', null, null, {

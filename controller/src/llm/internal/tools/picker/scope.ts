@@ -143,6 +143,7 @@ export interface PickerContext {
   collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
   collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number }): Promise<any[]>;
   eligibleEvidenceIds(deadlineMs: number): Promise<{ status: 'complete'; ids: string[] } | { status: 'incomplete' }>;
+  reserveMusicEvidence(maxBytes: number): { bytes: number; release(usedBytes: number): void } | null;
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
   seedSimilarity(songId: string, primary: 'audio' | 'text'): { tracks: any[]; matched: number; fellBack: boolean };
   seedSimilarityAsync(songId: string, primary: 'audio' | 'text'): Promise<{ tracks: any[]; matched: number; fellBack: boolean }>;
@@ -174,6 +175,18 @@ export function buildPickerContext(
   const seen = scope.seen ?? new Map<string, any>();
   const essentia = scope.essentiaDiscovery ? getEssentiaReader() : null;
   let remainingEvidenceBytes = 32 * 1024;
+  const reserveMusicEvidence: PickerContext['reserveMusicEvidence'] = maxBytes => {
+    if (!Number.isInteger(maxBytes) || maxBytes <= 0 || remainingEvidenceBytes <= 0) return null;
+    const bytes = Math.min(maxBytes, remainingEvidenceBytes);
+    remainingEvidenceBytes -= bytes;
+    let released = false;
+    return { bytes, release(usedBytes) {
+      if (released) return;
+      released = true;
+      const used = Number.isFinite(usedBytes) ? Math.max(0, Math.min(bytes, Math.ceil(usedBytes))) : bytes;
+      remainingEvidenceBytes += bytes - used;
+    } };
+  };
   scope.essentiaAudit?.setEssentiaAvailability(essentia !== null);
 
   // Pushed into every KNN query so a heavily-aired cluster answers with its next
@@ -503,5 +516,5 @@ export function buildPickerContext(
     return { tracks: [], matched: 0, fellBack: false };
   };
 
-  return { scope, essentia, seen, collect, collectAsync, eligibleEvidenceIds, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
+  return { scope, essentia, seen, collect, collectAsync, eligibleEvidenceIds, reserveMusicEvidence, emptyResult, seedSimilarity, seedSimilarityAsync, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

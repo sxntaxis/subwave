@@ -139,6 +139,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       const libraryDb = await import('../src/music/library-db.js');
       const { buildPickerContext, pickerScope } = await import('../src/llm/internal/tools/picker/scope.js');
       const tool = (await import('../src/llm/internal/tools/picker/tools/find-by-audio-traits.js')).default;
+      const compareTool = (await import('../src/llm/internal/tools/picker/tools/compare-musical-candidates.js')).default;
       await library.load();
       const leads = Array.from({ length: 130 }, (_, i) => `lead-${String(i + 1).padStart(3, '0')}`);
       for (const id of [...leads, 'rare-piano']) {
@@ -159,6 +160,30 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         assert.ok(jointCalls > 0);
       });
       assert.equal(v1Search.includes('rare-piano'), false);
+      await withEssentiaReaderForTest(reader, async () => {
+        const ctx = buildPickerContext(pickerScope({
+          essentiaDiscovery: true, playlistLock: new Set(['rare-piano', 'lead-001']),
+        }));
+        const offered = await (tool.build(ctx) as any).execute(
+          { arousal: 'low', voice: 'instrumental', instrument: 'piano' },
+          { toolCallId: 'compare-discovery', messages: [] },
+        );
+        assert.deepEqual(new Set(offered.map((x: any) => x.id)), new Set(['rare-piano', 'lead-001']));
+        assert.equal(compareTool.available?.(ctx), true);
+        const before = [...ctx.seen.keys()];
+        const compared = await (compareTool.build(ctx) as any).execute(
+          { ids: ['rare-piano', 'lead-001'] }, { toolCallId: 'compare', messages: [] },
+        );
+        assert.equal(compared.status, 'available');
+        assert.equal(compared.candidates.length, 2);
+        assert.equal(JSON.stringify(compared).includes(dir), false);
+        assert.deepEqual([...ctx.seen.keys()], before);
+        const invalid = await (compareTool.build(ctx) as any).execute(
+          { ids: ['rare-piano', 'never-offered'] }, { toolCallId: 'compare-invalid', messages: [] },
+        );
+        assert.equal(invalid.status, 'invalid_candidates');
+        assert.deepEqual([...ctx.seen.keys()], before);
+      });
 
       for (const id of ['rare-piano', ...leads.slice(0, 4)]) {
         libraryDb.upsertTrackMeta(id, { title: id, artist: `artist-${id}`, duration: id === 'lead-001' ? 60 : 180,

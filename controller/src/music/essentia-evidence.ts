@@ -16,6 +16,23 @@ export interface EssentiaReader {
   searchJoint?(request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
     eligibleIds?: string[] | null; limit?: number }): Promise<JointEvidenceResult | null>;
   lookupV2?(ids: readonly string[]): Promise<Map<string, MusicEvidenceV2> | null>;
+  /** Opt-in v2.2 diagnostic lookup. Legacy clients retain null fail-open. */
+  lookupV2Result?(ids: readonly string[]): Promise<MusicEvidenceLookupResult>;
+
+}
+
+/** A physical envelope failure is not evidence absence or a provider failure. */
+export type MusicEvidenceLookupResult =
+  | { status: 'ok'; rows: Map<string, MusicEvidenceV2> }
+  | { status: 'transport_limit'; boundary: 'request' | 'response' }
+  | { status: 'unavailable'; reason: 'invalid_request' | 'busy' | 'timeout' | 'connection'
+      | 'malformed_response' | 'unknown' };
+
+/** Read an optional detailed contract; fixtures and older readers stay fail-open. */
+export async function lookupV2WithStatus(reader: EssentiaReader, ids: readonly string[]): Promise<MusicEvidenceLookupResult> {
+  if (reader.lookupV2Result) return reader.lookupV2Result(ids);
+  const rows = await reader.lookupV2?.(ids);
+  return rows ? { status: 'ok', rows } : { status: 'unavailable', reason: 'unknown' };
 }
 
 export interface JointEvidencePreference {
@@ -98,6 +115,82 @@ function queryV2Socket(path: string, request: object): Promise<unknown | null> {
       } catch { finish(null); }
     });
   });
+}
+
+/**
+ * v2.2 negotiated diagnostics: the host answers with an explicit envelope
+ * failure only when reportLimits is true. The legacy socket result shape and
+ * the legacy null failure semantics remain unchanged.
+ */
+export async function lookupMusicEvidenceSocketResult(
+  path: string, ids: readonly string[],
+): Promise<MusicEvidenceLookupResult> {
+  if (!ids.length || ids.length > 12 || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !id || id.length > 256)) {
+    return { status: 'unavailable', reason: 'invalid_request' };
+  }
+  const response = await queryV2SocketWithStatus(path, { version: 2, op: 'profiles', ids, reportLimits: true });
+  if (response.status !== 'ok') return response;
+  if (response.value && typeof response.value === 'object' && !Array.isArray(response.value)
+      && (response.value as { version?: unknown }).version === 2
+      && (response.value as { error?: unknown }).error === 'response_too_large') {
+    return { status: 'transport_limit', boundary: 'response' };
+  }
+  if (response.value === null) return { status: 'unavailable', reason: 'unknown' };
+  const rows = validateV2Profiles(response.value, ids);
+  return rows ? { status: 'ok', rows } : { status: 'unavailable', reason: 'malformed_response' };
+}
+
+type SocketResult = { status: 'ok'; value: unknown }
+  | Exclude<MusicEvidenceLookupResult, { status: 'ok'; rows: Map<string, MusicEvidenceV2> }>;
+
+/** Strict byte envelopes, clear failures, and no request-specific identifiers in diagnostic messages. */
+function queryV2SocketWithStatus(path: string, request: object): Promise<SocketResult> {
+  if (inFlight >= 2) return Promise.resolve({ status: 'unavailable', reason: 'busy' });
+  const message = JSON.stringify(request) + '\n';
+  if (Buffer.byteLength(message) > 32768) return Promise.resolve({ status: 'transport_limit', boundary: 'request' });
+  inFlight++;
+  return new Promise(resolve => {
+    let done = false;
+    let output = Buffer.alloc(0);
+    const socket = createConnection(path);
+    const finish = (result: SocketResult) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      inFlight--;
+      socket.destroy();
+      resolve(result);
+    };
+    const deadline = setTimeout(() => finish({ status: 'unavailable', reason: 'timeout' }), 1000);
+    socket.on('error', () => finish({ status: 'unavailable', reason: 'connection' }));
+    socket.on('close', () => finish({ status: 'unavailable', reason: 'connection' }));
+    socket.on('connect', () => socket.write(message));
+    socket.on('data', (chunk: Buffer) => {
+      const incoming = Buffer.concat([output, chunk]);
+      const end = incoming.indexOf(10);
+      // The bound applies to the JSON payload, not its line delimiter.
+      const bodySize = end >= 0 ? end : incoming.length;
+      if (bodySize > 2 * 1024 * 1024) return finish({ status: 'transport_limit', boundary: 'response' });
+      if (end < 0) { output = incoming; return; }
+      try {
+        finish({ status: 'ok', value: JSON.parse(incoming.subarray(0, end).toString('utf8')) });
+      } catch { finish({ status: 'unavailable', reason: 'malformed_response' }); }
+    });
+  });
+}
+
+function validateV2Profiles(value: unknown, ids: readonly string[]): Map<string, MusicEvidenceV2> | null {
+  if (!Array.isArray(value) || value.length > ids.length) return null;
+  const allowed = new Set(ids);
+  const result = new Map<string, MusicEvidenceV2>();
+  for (const pair of value) {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string'
+        || !allowed.has(pair[0]) || result.has(pair[0]) || !pair[1] || pair[1].trackId !== pair[0]
+        || !Array.isArray(pair[1].windows)) return null;
+    result.set(pair[0], pair[1] as MusicEvidenceV2);
+  }
+  return result;
 }
 
 const fixture = new AsyncLocalStorage<EssentiaReader>();
@@ -195,7 +288,8 @@ export function createSocketEssentiaReader(path: string): EssentiaReader {
     });
   };
   return { ...readerFromQuery(query), searchJoint: request => searchJointSocket(path, request),
-    lookupV2: ids => lookupMusicEvidenceSocket(path, ids) };
+    lookupV2: ids => lookupMusicEvidenceSocket(path, ids),
+    lookupV2Result: ids => lookupMusicEvidenceSocketResult(path, ids) };
 }
 
 // Only a recently healthy private socket is offered to the autonomous picker.

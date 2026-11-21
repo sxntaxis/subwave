@@ -62,6 +62,87 @@ export function compactMusicEvidence(evidence: MusicEvidenceV2) {
 }
 
 /**
+ * v2.2 opt-in: retain every individually valid, trusted model label. Partial
+ * labels carry their own observed-window counts; a sparse mean must never be
+ * presented as though it described all expected samples.
+ */
+function summarizeHeadWithCoverage(evidence: MusicEvidenceV2, modelId: string) {
+  const observed = new Map<string, number[]>();
+  let windowsWithValidLabels = 0;
+  for (const window of evidence.windows) {
+    const outputsByLabel = new Map<string, typeof window.outputs[number][]>();
+    for (const output of window.outputs) {
+      if (output.modelId !== modelId) continue;
+      const matches = outputsByLabel.get(output.label) ?? [];
+      matches.push(output);
+      outputsByLabel.set(output.label, matches);
+    }
+    let thisWindowValid = false;
+    for (const [label, matches] of outputsByLabel) {
+      if (matches.length !== 1) continue; // never treat duplicates as valid
+      const output = matches[0];
+      if (output.missingReason || output.validity !== 'valid'
+          || output.nativeScale !== 'model native; see metadata'
+          || typeof output.value !== 'number' || !Number.isFinite(output.value)
+          || output.value < 0 || output.value > 1) continue;
+      thisWindowValid = true;
+      const values = observed.get(label) ?? [];
+      values.push(output.value);
+      observed.set(label, values);
+    }
+    if (thisWindowValid) windowsWithValidLabels++;
+  }
+  const expected = evidence.expectedWindows;
+  const scores = [...observed.entries()].map(([label, values]) => ({
+    label,
+    score: Math.round(values.reduce((a, b) => a + b, 0) / values.length * 1000) / 1000,
+    validWindows: values.length,
+    expectedWindows: expected,
+    coverage: expected > 0 && evidence.windows.length === expected && values.length === expected
+      ? 'complete' as const : 'partial' as const,
+  })).sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+  return {
+    status: scores.some(score => score.coverage === 'complete') ? 'complete' as const
+      : scores.length ? 'partial' as const : 'unavailable' as const,
+    observedWindows: windowsWithValidLabels,
+    expectedWindows: expected,
+    scores,
+  };
+}
+
+/**
+ * v2.2 discovery profile without editorial top-N trimming or token-share
+ * allocation. No source paths, file stamps, hashes or raw output metadata.
+ */
+export function completeDiscoveryMusicEvidence(evidence: MusicEvidenceV2) {
+  return {
+    ...compactMusicEvidence(evidence),
+    detail: 'verified_discovery' as const,
+    instruments: summarizeHeadWithCoverage(evidence, 'mtg_jamendo_instrument-discogs-effnet-1'),
+    moodThemes: summarizeHeadWithCoverage(evidence, 'mtg_jamendo_moodtheme-discogs-effnet-1'),
+  };
+}
+
+/**
+ * Returns every verified profile for a bounded socket batch. Transport-size
+ * failures are explicit, not misreported as missing Essentia evidence.
+ */
+export function attachCompleteMusicEvidence(tracks: readonly any[], evidence: ReadonlyMap<string, MusicEvidenceV2>) {
+  const result = tracks.map(track => {
+    const data = evidence.get(track?.id);
+    return data ? { ...track, musical_evidence: completeDiscoveryMusicEvidence(data) } : track;
+  });
+  // This is a physical per-message guard, not a per-pick or per-song token
+  // allowance. Further detail can be queried via the paged comparison tool.
+  if (Buffer.byteLength(JSON.stringify(result)) > 2 * 1024 * 1024) {
+    return tracks.map(track => evidence.has(track?.id)
+      ? { ...track, musical_evidence_status: 'transport_limit_use_compare' as const }
+      : track);
+  }
+  return result;
+}
+
+/**
  * A deliberately smaller discovery representation. The full verified profile
  * remains available to the shortlist comparison tool; nothing here is a
  * calibrated probability or a continuous description of the recording.
@@ -161,21 +242,24 @@ const WINDOW_HEADS = {
 export function sampledWindowEvidence(
   evidence: MusicEvidenceV2,
   families: readonly WindowDetailFamily[] = ['arousal', 'valence'],
+  options: { includeAllVerifiedLabels?: boolean } = {},
 ) {
   const features: Record<string, unknown> = {};
   for (const family of new Set(families)) {
     if (family === 'instrument' || family === 'mood') {
-      const summary = summarizeHead(evidence, family === 'instrument'
+      const model = family === 'instrument'
         ? 'mtg_jamendo_instrument-discogs-effnet-1'
-        : 'mtg_jamendo_moodtheme-discogs-effnet-1');
+        : 'mtg_jamendo_moodtheme-discogs-effnet-1';
+      const summary = options.includeAllVerifiedLabels
+        ? summarizeHeadWithCoverage(evidence, model) : summarizeHead(evidence, model);
       features[family] = {
         nativeScale: 'model native; see metadata',
         status: summary.status,
         observedWindows: summary.observedWindows,
         expectedWindows: summary.expectedWindows,
-        returnedLabels: Math.min(8, summary.scores.length),
+        returnedLabels: options.includeAllVerifiedLabels ? summary.scores.length : Math.min(8, summary.scores.length),
         availableLabels: summary.scores.length,
-        scores: summary.scores.slice(0, 8),
+        scores: options.includeAllVerifiedLabels ? summary.scores : summary.scores.slice(0, 8),
       };
       continue;
     }

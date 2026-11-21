@@ -66,16 +66,21 @@ const server = createServer(socket => {
     if (!input.includes('\n')) return;
     socket.pause();
     let result = null;
+    let reportLimits = false;
     try {
       const request = JSON.parse(input.slice(0, input.indexOf('\n')));
+      // v2.2 can opt into typed envelope-limit replies. Old clients and all
+      // v1 operations still receive their exact legacy wire result.
+      reportLimits = request?.version === 2 && request?.reportLimits === true
+        && ['profiles', 'searchJoint'].includes(request?.op);
       const marker = readiness();
       const v2marker = request?.version === 2 && ['searchJoint', 'profiles'].includes(request.op) ? v2Readiness() : null;
       if (v2marker && request.op === 'searchJoint' && Object.keys(request).every(key =>
-        ['version', 'op', 'preferences', 'requiredFamilies', 'eligibleIds', 'limit'].includes(key))) {
+        ['version', 'op', 'preferences', 'requiredFamilies', 'eligibleIds', 'limit', ...(reportLimits ? ['reportLimits'] : [])].includes(key))) {
         result = searchMusicEvidence(indexV2Path, sourcePath, v2marker.models_sha256, request);
       }
       if (v2marker && request.op === 'profiles' && Object.keys(request).every(key =>
-        ['version', 'op', 'ids'].includes(key))) {
+        ['version', 'op', 'ids', ...(reportLimits ? ['reportLimits'] : [])].includes(key))) {
         result = readMusicEvidence(indexV2Path, sourcePath, v2marker.models_sha256, request.ids);
       }
       const lookup = request?.version === 1 && request.op === 'profiles'
@@ -96,7 +101,11 @@ const server = createServer(socket => {
       }
     } catch {}
     const encoded = JSON.stringify(result);
-    socket.end((Buffer.byteLength(encoded) <= 2 * 1024 * 1024 ? encoded : 'null') + '\n');
+    // v2.2 diagnostic opt-in is protocol-compatible: the preexisting v1/v2
+    // callers retain null on oversize. No evidence payload is sent in errors.
+    const response = Buffer.byteLength(encoded) <= 2 * 1024 * 1024 ? encoded
+      : reportLimits ? '{"version":2,"error":"response_too_large"}' : 'null';
+    socket.end(response + '\n');
   });
 });
 server.maxConnections = 8;

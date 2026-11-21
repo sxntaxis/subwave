@@ -27,8 +27,8 @@ import type {
   PickerComparisonObservation, PickerEssentiaAudit, PickerSelectionObservation,
 } from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { enrichEssentia, getEssentiaReader, type EssentiaReader } from '../../../../music/essentia-evidence.js';
-import { attachCompactMusicEvidence } from '../../../../music/music-evidence-profile.js';
+import { enrichEssentia, getEssentiaReader, lookupV2WithStatus, type EssentiaReader } from '../../../../music/essentia-evidence.js';
+import { attachCompactMusicEvidence, attachCompleteMusicEvidence } from '../../../../music/music-evidence-profile.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -181,6 +181,11 @@ export function buildPickerContext(
 
   const seen = scope.seen ?? new Map<string, any>();
   const essentia = scope.essentiaDiscovery ? getEssentiaReader() : null;
+  // The legacy evidence ledger is deliberately preserved for flag-off parity.
+  // v2.2 bypasses it at callers; no economic token budget is enforced there.
+  const uncappedDiscovery = scope.essentiaDiscovery === true
+    && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+    && process.env.SUBWAVE_MUSIC_CONTEXT_UNCAPPED === '1';
   let remainingEvidenceBytes = 32 * 1024;
   const reserveMusicEvidence: PickerContext['reserveMusicEvidence'] = maxBytes => {
     if (!Number.isInteger(maxBytes) || maxBytes <= 0 || remainingEvidenceBytes <= 0) return null;
@@ -248,7 +253,7 @@ export function buildPickerContext(
   // tools (topSongsByArtist, recentByArtist) opt out. A strict PLAYLIST show opts
   // out wholesale — playlistLock has already intersected the pool with the
   // operator's pinned set, and a single-artist playlist is the point of pinning.
-  const collect = (list: any, cap = 8, opts: { maxPerArtist?: number } = {}) => {
+  const collect = (list: any, cap = uncappedDiscovery ? 12 : 8, opts: { maxPerArtist?: number } = {}) => {
     // Strict show: filter BEFORE recency + cap, so the 8 the agent sees are
     // genre-/era-/mood-/energy-pure. Each lock is HARD (starve:true) — a tool
     // with no match contributes nothing and emptyResult steers the model
@@ -287,7 +292,7 @@ export function buildPickerContext(
   };
 
   const attempt = scope.selection ? createSelectionAttempt() : null;
-  const collectSelection: PickerContext['collectAsync'] = (list, cap = 8, opts = {}) => {
+  const collectSelection: PickerContext['collectAsync'] = (list, cap = uncappedDiscovery ? 12 : 8, opts = {}) => {
     if (!attempt || !scope.selection) {
       const accepted = collect(list, cap, opts);
       scope.selectionAudit?.({
@@ -395,27 +400,46 @@ export function buildPickerContext(
   };
   const attachV2 = async (tracks: any[]): Promise<any[]> => {
     let enriched = tracks;
+    const uncapped = uncappedDiscovery;
     if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
-        && essentia?.lookupV2 && enriched.length > 0 && enriched.length <= 12 && remainingEvidenceBytes > 0) {
-      // Reserve before awaiting so simultaneous tool calls cannot overrun the
-      // per-pick budget. Unused bytes are returned to this attempt only.
-      const reserved = Math.min(8192, remainingEvidenceBytes);
-      remainingEvidenceBytes -= reserved;
-      let used = 0;
-      try {
-        const ids = enriched.map(track => track?.id);
-        if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
-          const rows = await essentia.lookupV2(ids);
-          if (rows) {
-            const attached = attachCompactMusicEvidence(enriched, rows, reserved, {
-              allowBriefFallback: process.env.SUBWAVE_MUSIC_CONTEXT_V21 === '1',
-            });
-            enriched = attached.tracks;
-            used = attached.bytes;
+        && essentia?.lookupV2 && enriched.length > 0 && enriched.length <= 12
+        && (uncapped || remainingEvidenceBytes > 0)) {
+      if (uncapped) {
+        // Keep the existing 12-ID physical socket boundary; do not divide
+        // verified profiles into arbitrary per-song/token shares.
+        try {
+          const ids = enriched.map(track => track?.id);
+          if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
+            const lookup = await lookupV2WithStatus(essentia, ids);
+            if (lookup.status === 'ok') enriched = attachCompleteMusicEvidence(enriched, lookup.rows);
+            else enriched = enriched.map(track => ({ ...track,
+              musical_evidence_status: lookup.status === 'transport_limit'
+                ? 'transport_limit_use_compare' : 'lookup_unavailable',
+            }));
           }
+        } catch {
+          enriched = enriched.map(track => ({ ...track, musical_evidence_status: 'lookup_unavailable' }));
         }
-      } catch { /* optional evidence must not affect candidate admission */ }
-      finally { remainingEvidenceBytes += reserved - used; }
+      } else {
+        // Legacy v2/v2.1 path: byte-for-byte stable when v2.2 is off.
+        const reserved = Math.min(8192, remainingEvidenceBytes);
+        remainingEvidenceBytes -= reserved;
+        let used = 0;
+        try {
+          const ids = enriched.map(track => track?.id);
+          if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
+            const rows = await essentia.lookupV2(ids);
+            if (rows) {
+              const attached = attachCompactMusicEvidence(enriched, rows, reserved, {
+                allowBriefFallback: process.env.SUBWAVE_MUSIC_CONTEXT_V21 === '1',
+              });
+              enriched = attached.tracks;
+              used = attached.bytes;
+            }
+          }
+        } catch { /* optional evidence must not affect candidate admission */ }
+        finally { remainingEvidenceBytes += reserved - used; }
+      }
     }
     return enriched;
   };

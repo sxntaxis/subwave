@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createConnection, createServer } from 'node:net';
 import Database from 'better-sqlite3';
-import { createSocketEssentiaReader, lookupMusicEvidenceSocket, searchJointSocket, withEssentiaReaderForTest } from '../src/music/essentia-evidence.js';
+import { createSocketEssentiaReader, lookupMusicEvidenceSocket, lookupMusicEvidenceSocketResult, searchJointSocket, withEssentiaReaderForTest } from '../src/music/essentia-evidence.js';
 import { searchEligibleCohort } from '../src/music/music-evidence-cohort.js';
 
 function rawSocketRequest(path: string, message: string): Promise<string | null> {
@@ -170,6 +170,30 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     });
     assert.equal(invalid, null);
     assert.equal(await searchJointSocket(join(dir, 'missing.sock'), { preferences }), null);
+
+    // A real v3-indexed profile exceeding the 2MiB wire envelope is not
+    // "missing evidence". The diagnostic request is additive and the original
+    // version-2 wire request still receives null exactly as before.
+    const indexed = new Database(target);
+    try {
+      const setMeasurements = indexed.prepare('UPDATE windows SET measurements_json=? WHERE segment_id=?');
+      setMeasurements.run(JSON.stringify({ syntheticLongField: 'x'.repeat(2 * 1024 * 1024) }), 260);
+      const oldWire = await rawSocketRequest(join(socketDir, 'evidence.sock'),
+        `${JSON.stringify({ version: 2, op: 'profiles', ids: ['rare-piano'] })}\n`);
+      assert.equal(oldWire, 'null');
+      const diagnosticWire = await rawSocketRequest(join(socketDir, 'evidence.sock'),
+        `${JSON.stringify({ version: 2, op: 'profiles', ids: ['rare-piano'], reportLimits: true })}\n`);
+      assert.equal(diagnosticWire, '{"version":2,"error":"response_too_large"}');
+      assert.deepEqual(await lookupMusicEvidenceSocketResult(join(socketDir, 'evidence.sock'), ['rare-piano']),
+        { status: 'transport_limit', boundary: 'response' });
+      assert.equal(await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'), ['rare-piano']), null);
+    } finally {
+      indexed.prepare('UPDATE windows SET measurements_json=? WHERE segment_id=?').run('{}', 260);
+      indexed.close();
+    }
+    const missingProfile = await lookupMusicEvidenceSocketResult(join(socketDir, 'evidence.sock'), ['unknown-id']);
+    assert.equal(missingProfile.status, 'ok');
+    if (missingProfile.status === 'ok') assert.equal(missingProfile.rows.size, 0);
 
     // The proxy counts actual wire requests and can drop a particular chunk;
     // successful requests are forwarded to the real disposable socket server.

@@ -7,6 +7,7 @@ import { defineAgent } from '../../llm/agent.js';
 import { buildPickerTools, type PickerScope } from '../../llm/tools.js';
 import { pickSchema, pickSystem, requestSchema, requestSystem } from './schemas.js';
 import { agentDeadline } from './breaker.js';
+import type { PickerAgentDiagnosticsObserver } from '../../observability/picker-audit.js';
 
 // What pickViaAgent hands the picker each run. `scope` is the whole constraint
 // set as ONE value, passed through to the discovery tools untouched. Do not
@@ -15,6 +16,7 @@ import { agentDeadline } from './breaker.js';
 // picker still honours it. See llm/internal/tools/picker/scope.ts.
 export interface PickerRunArgs {
   scope: PickerScope;
+  diagnostics?: PickerAgentDiagnosticsObserver;
   // Forecast air time for the pick's link, prompt only — not a discovery
   // constraint, so it stays outside the scope.
   showAt?: Date | null;

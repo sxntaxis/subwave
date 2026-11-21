@@ -30,6 +30,7 @@ import { objectViaToolCall } from './object-via-tool.js';
 import { agentPlan } from './plan.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
 import { recordAgentRetry } from '../telemetry/log.js';
+import type { PickerAgentDiagnosticsObserver } from '../../../observability/picker-audit.js';
 
 // Loose views of an AI SDK ToolLoopAgent generate result — only the fields the
 // cascade reads. `AgentLike` is the minimal surface runDeadlined needs.
@@ -44,7 +45,14 @@ interface AgentGenerateResult {
   response?: { messages?: ModelMessage[] };
 }
 interface AgentLike {
-  generate(options: { messages: ModelMessage[]; abortSignal?: AbortSignal }): Promise<AgentGenerateResult>;
+  generate(options: {
+    messages: ModelMessage[];
+    abortSignal?: AbortSignal;
+    onLanguageModelCallStart?: (event: unknown) => void;
+    onLanguageModelCallEnd?: (event: unknown) => void;
+    onToolExecutionStart?: (event: unknown) => void;
+    onToolExecutionEnd?: (event: unknown) => void;
+  }): Promise<AgentGenerateResult>;
 }
 
 interface AgentFailureError extends Error {
@@ -68,6 +76,7 @@ interface DjAgentOptions {
   // historical step. Opt-in per agent, OFF by default: a caller's step cap can
   // be load-bearing, so only pick/request ask for it.
   providerDiscoveryBudget?: boolean;
+  diagnostics?: PickerAgentDiagnosticsObserver;
 }
 
 // Operator-overridable via settings.llm.maxOutputTokens (#712); 0 keeps this
@@ -150,25 +159,84 @@ function buildRecoveryAgent(leg: Leg, system: string, allTools: ToolSet | undefi
 // every attempt for one pick draws down the same budget, so a slow main run
 // leaves less time for recovery instead of resetting the clock. undefined means
 // no deadline.
-function runDeadlinedCall<T>(deadlineAt: number | undefined, kind: string, label: string, fn: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+function notifyDiagnostic(callback: (() => void) | undefined): void {
+  try { callback?.(); } catch { /* diagnostics never affect generation */ }
+}
+
+function observeFailurePhase(
+  diagnostics: PickerAgentDiagnosticsObserver | undefined,
+  phase: 'completion_validation' | 'done_only_recovery' | 'terminal_collapse' | 'text_salvage',
+): void {
+  notifyDiagnostic(() => diagnostics?.failurePhaseObserved(phase));
+}
+
+function isOutputValidationFailure(error: unknown): boolean {
+  try {
+    const name = error && typeof error === 'object'
+      ? (error as { name?: unknown }).name
+      : undefined;
+    return name === 'ZodError' || name === 'AI_NoObjectGeneratedError'
+      || name === 'AI_NoOutputGeneratedError';
+  } catch {
+    return false;
+  }
+}
+
+function runDeadlinedCall<T>(
+  deadlineAt: number | undefined,
+  kind: string,
+  label: string,
+  fn: (signal?: AbortSignal) => Promise<T>,
+  diagnostics?: PickerAgentDiagnosticsObserver,
+): Promise<T> {
+  const retryObserver = diagnostics ? {
+    retryNotAttempted: () => notifyDiagnostic(() => diagnostics.retryNotAttempted()),
+    retryAttempted: () => notifyDiagnostic(() => diagnostics.retryAttempted()),
+    retrySucceeded: () => notifyDiagnostic(() => diagnostics.retrySucceeded()),
+    retryExhausted: () => notifyDiagnostic(() => diagnostics.retryExhausted()),
+  } : undefined;
   if (deadlineAt == null) {
-    return withTransientRetry(kind, () => fn());
+    return withTransientRetry(kind, () => fn(), undefined, retryObserver);
   }
   const remaining = deadlineAt - Date.now();
   if (remaining <= 0) {
+    notifyDiagnostic(() => diagnostics?.retryNotAttempted());
     const err = new Error(`${kind} ${label} — no time left on the shared deadline`);
     err.name = 'AgentDeadlineError';
     return Promise.reject(err);
   }
   return withDeadline(remaining, `${kind} ${label}`, (signal) =>
-    withTransientRetry(kind, () => fn(signal), signal));
+    withTransientRetry(kind, () => fn(signal), signal, retryObserver));
 }
 
-function runDeadlined(deadlineAt: number | undefined, kind: string, label: string, agent: AgentLike, messages: ModelMessage[]): Promise<AgentGenerateResult> {
+function runDeadlined(
+  deadlineAt: number | undefined,
+  kind: string,
+  label: string,
+  agent: AgentLike,
+  messages: ModelMessage[],
+  diagnostics?: PickerAgentDiagnosticsObserver,
+): Promise<AgentGenerateResult> {
   return runDeadlinedCall(deadlineAt, kind, label, (signal) => agent.generate({
     messages,
     ...(signal ? { abortSignal: signal } : {}),
-  }));
+    ...(diagnostics ? {
+      onLanguageModelCallStart: () => notifyDiagnostic(() => diagnostics.providerGenerationStarted()),
+      onLanguageModelCallEnd: () => notifyDiagnostic(() => diagnostics.providerGenerationCompleted()),
+      onToolExecutionStart: () => notifyDiagnostic(() => diagnostics.toolStarted()),
+      onToolExecutionEnd: event => {
+        try {
+          const toolEvent = event as {
+            toolOutput?: { type?: unknown };
+            toolCall?: { toolName?: unknown };
+          } | null;
+          const outputType = toolEvent?.toolOutput?.type;
+          const comparator = toolEvent?.toolCall?.toolName === 'compareMusicalCandidates';
+          notifyDiagnostic(() => diagnostics.toolFinished(outputType === 'tool-result', comparator));
+        } catch { /* diagnostics never affect tool execution */ }
+      },
+    } : {}),
+  }), diagnostics);
 }
 
 export async function djAgent({
@@ -182,6 +250,7 @@ export async function djAgent({
   kind = 'sdk.djAgent',
   timeoutMs,
   providerDiscoveryBudget = false,
+  diagnostics,
   // Caller acceptance check on the NATIVE path's object only — that branch
   // validates schema shape, not content, so a fabricated-but-well-formed answer
   // would otherwise sail through. A miss falls through to the done-tool path.
@@ -217,7 +286,14 @@ export async function djAgent({
         if (plan === 'object-via-tool') {
           lastVia = 'ai-sdk:tool';
           const { object, usage, perf, warnings } = await withTransientRetry(kind,
-            () => objectViaToolCall(leg, { system, prompt: undefined, messages, schema, temperature, maxOutputTokens }));
+            () => objectViaToolCall(leg, { system, prompt: undefined, messages, schema, temperature, maxOutputTokens }),
+            undefined,
+            diagnostics ? {
+              retryNotAttempted: () => notifyDiagnostic(() => diagnostics.retryNotAttempted()),
+              retryAttempted: () => notifyDiagnostic(() => diagnostics.retryAttempted()),
+              retrySucceeded: () => notifyDiagnostic(() => diagnostics.retrySucceeded()),
+              retryExhausted: () => notifyDiagnostic(() => diagnostics.retryExhausted()),
+            } : undefined);
           return {
             value: { object, steps: 0, toolCalls: [] },
             via: lastVia,
@@ -264,7 +340,7 @@ export async function djAgent({
               reasoning: reasoningFor(leg.cfg, { forceNoThink: true }),
               output: Output.object({ schema: schema! }),
             } as any);
-            const nr = await runDeadlined(deadlineAt, kind, 'native run', nativeAgent, messages);
+            const nr = await runDeadlined(deadlineAt, kind, 'native run', nativeAgent, messages, diagnostics);
             const nObj = nr.output;
             const nSteps = nr.steps?.length ?? 0;
             // Require a real discovery call: the cross-provider failure
@@ -292,6 +368,7 @@ export async function djAgent({
             console.log(`[${kind}] native output produced no usable pick (explored=${explored}, accepted=${accepted}) — falling back to done-tool`);
             addUsage(usageOf(nr));
           } catch (e) {
+            if (isOutputValidationFailure(e)) observeFailurePhase(diagnostics, 'completion_validation');
             console.log(`[${kind}] native output failed (${e?.message}) — falling back to done-tool`);
           }
         }
@@ -330,7 +407,13 @@ export async function djAgent({
           // On the done-tool path the schema lives on `done`, so no agent output.
           ...(schema && !useDoneTool ? { output: Output.object({ schema }) } : {}),
         } as any);
-        let result = await runDeadlined(deadlineAt, kind, 'agent run', agent, messages);
+        let result: AgentGenerateResult;
+        try {
+          result = await runDeadlined(deadlineAt, kind, 'agent run', agent, messages, diagnostics);
+        } catch (error) {
+          if (isOutputValidationFailure(error)) observeFailurePhase(diagnostics, 'completion_validation');
+          throw error;
+        }
         let steps = result.steps?.length ?? 0;
         addUsage(usageOf(result));
 
@@ -373,8 +456,14 @@ export async function djAgent({
           lastVia = 'ai-sdk:agent:recovery';
           const priorMessages = result.response?.messages || [];
           const recoveryMessages = priorMessages.length ? [...messages, ...priorMessages] : messages;
-          result = await runDeadlined(deadlineAt, kind, 'agent recovery',
-            buildRecoveryAgent(leg, system, allTools, temperature, maxOutputTokens, forcedChoice), recoveryMessages);
+          try {
+            result = await runDeadlined(deadlineAt, kind, 'agent recovery',
+              buildRecoveryAgent(leg, system, allTools, temperature, maxOutputTokens, forcedChoice), recoveryMessages, diagnostics);
+          } catch (error) {
+            observeFailurePhase(diagnostics, isOutputValidationFailure(error)
+              ? 'completion_validation' : 'done_only_recovery');
+            throw error;
+          }
           steps = result.steps?.length ?? 0;
           addUsage(usageOf(result));
           captureTrail(result);
@@ -395,13 +484,15 @@ export async function djAgent({
               const t = await runDeadlinedCall(deadlineAt, kind, 'agent terminal collapse',
                 (signal) => objectViaToolCall(leg, {
                   system, prompt, schema, temperature, maxOutputTokens, signal,
-                }));
+                }), diagnostics);
               terminalObject = t.object;
               addUsage(t.usage);
               terminalPrompt = prompt;
               // A real model call the record should count.
               steps += 1;
             } catch (e) {
+              observeFailurePhase(diagnostics, isOutputValidationFailure(e)
+                ? 'completion_validation' : 'terminal_collapse');
               // Text salvage below still gets a shot, then the caller's pool
               // fallback, so log and carry on rather than throwing past both.
               const why = (e as Error)?.message || String(e);
@@ -430,6 +521,7 @@ export async function djAgent({
               object = schema!.parse(JSON.parse(extractJson(stripThinking(result.text || ''))));
               lastVia = `${lastVia}:text`;
             } catch {
+              observeFailurePhase(diagnostics, 'text_salvage');
               const err = new Error('agent did not call the done tool before stopping') as AgentFailureError;
               err.text = declinedAttempts.length ? declinedAttempts.join('\n\n') : (result.text || '');
               err.finishReason = result.finishReason;
@@ -470,5 +562,10 @@ export async function djAgent({
         throw err;
       }
     },
+    undefined,
+    diagnostics ? {
+      failoverNotAttempted: () => notifyDiagnostic(() => diagnostics.failoverNotAttempted()),
+      failoverAttempted: () => notifyDiagnostic(() => diagnostics.failoverAttempted()),
+    } : undefined,
   );
 }

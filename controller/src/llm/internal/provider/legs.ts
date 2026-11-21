@@ -6,6 +6,7 @@
 // withFailover (core/failover.ts) tries the primary leg, and only on a
 // host-unreachable error retries against the fallback leg. See discussion #320.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as settings from '../../../settings.js';
 import { languageModel, resolveModelId, ollamaBaseUrl, llmCfg } from './registry.js';
 import { discoveryStepsFor, DISCOVERY_STEPS_MIN } from './capabilities.js';
@@ -22,6 +23,19 @@ export interface Leg {
   label: string;  // `provider:modelId` for /debug records
 }
 
+interface LegFixture {
+  primary: Leg;
+  fallback: Leg | null;
+}
+
+// Scoped fixture seam for tests that exercise the real Agent strategy with an
+// AI SDK MockLanguageModel. It is absent from production call paths and cannot
+// leak between concurrent async tests or requests.
+const legFixture = new AsyncLocalStorage<LegFixture>();
+export function withProviderLegsForTest<T>(fixture: LegFixture, fn: () => T): T {
+  return legFixture.run(fixture, fn);
+}
+
 function labelFor(cfg: any): string {
   try {
     return `${cfg.provider}:${resolveModelId(cfg)}`;
@@ -34,6 +48,8 @@ function labelFor(cfg: any): string {
 // cloud provider) exactly as languageModel() does today — that's a hard error
 // the caller surfaces, not something to silently route around.
 export function primaryLeg(): Leg {
+  const fixture = legFixture.getStore();
+  if (fixture) return fixture.primary;
   const cfg = llmCfg();
   return { cfg, model: languageModel(cfg), noThinkModel: languageModel(cfg, { forceNoThink: true }), label: labelFor(cfg) };
 }
@@ -44,6 +60,8 @@ export function primaryLeg(): Leg {
 // no model) degrades to "no fallback" rather than throwing over the primary's
 // own error.
 export function fallbackLeg(): Leg | null {
+  const fixture = legFixture.getStore();
+  if (fixture) return fixture.fallback;
   const stored = settings.get().llm?.fallback;
   if (!stored || !stored.enabled) return null;
   // Resolve the fallback's inline key per-provider (issue #657) — the stored

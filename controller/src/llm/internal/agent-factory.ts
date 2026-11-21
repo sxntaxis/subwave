@@ -20,6 +20,7 @@
 
 import { djAgent } from './strategy/agent.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PickerAgentDiagnosticsObserver } from '../../observability/picker-audit.js';
 
 // An isolated runner override for offline tests. Normal calls always use the
 // production strategy; the scope cannot leak to concurrent asynchronous runs.
@@ -115,6 +116,14 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         ? def.buildTools(toolArgs)
         : { tools: undefined, extras: undefined };
       const extras = built.extras as TExtras;
+      let diagnostics: PickerAgentDiagnosticsObserver | undefined;
+      // Only the autonomous DJ picker opts into private lifecycle diagnostics.
+      // Keep this transport out of the generic AgentDefinition type/API.
+      if (def.kind === 'djAgentPick') {
+        try {
+          diagnostics = (toolArgs as TArgs & { diagnostics?: PickerAgentDiagnosticsObserver }).diagnostics;
+        } catch { /* private diagnostics are best-effort */ }
+      }
       const result = await (runnerScope.getStore() ?? djAgent)({
         system,
         messages,
@@ -126,6 +135,7 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         maxOutputTokens: def.maxOutputTokens,
         kind: def.kind,
         providerDiscoveryBudget: def.providerDiscoveryBudget === true,
+        ...(diagnostics ? { diagnostics } : {}),
         ...(def.validateObject
           ? { validate: (object: any) => def.validateObject!(object, extras) }
           : {}),

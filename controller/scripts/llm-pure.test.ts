@@ -60,6 +60,48 @@ async function main() {
     assert.equal(thrown.name, 'AgentDeadlineError');
     assert.equal(isUnreachable(thrown), false);
   });
+  await test('retry observer failures are swallowed and preserve the original rejection identity', async () => {
+    const failure = new Error('fixture non-transient failure');
+    const thrown = await withTransientRetry(
+      'fixture', async () => { throw failure; }, undefined,
+      { retryNotAttempted() { throw new Error('observer failure'); } },
+    ).catch(error => error);
+    assert.equal(thrown, failure);
+  });
+  await test('a throwing retry-observer getter cannot replace the original failure', async () => {
+    const failure = new Error('original retry failure');
+    const observer = Object.defineProperty({}, 'retryNotAttempted', {
+      get() { throw new Error('observer getter failure'); },
+    });
+    let thrown: unknown;
+    try {
+      await withTransientRetry('fixture', async () => { throw failure; }, undefined, observer as any);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(thrown, failure);
+  });
+  await test('retry lifecycle reports an actual retry start and result without changing the returned value', async () => {
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    let calls = 0;
+    const observed: string[] = [];
+    try {
+      const result = await withTransientRetry('fixture', async () => {
+        calls++;
+        if (calls === 1) throw { statusCode: 503 };
+        return 'fixture-result';
+      }, undefined, {
+        retryAttempted: () => observed.push('attempted'),
+        retrySucceeded: () => observed.push('succeeded'),
+      });
+      assert.equal(result, 'fixture-result');
+      assert.equal(calls, 2);
+      assert.deepEqual(observed, ['attempted', 'succeeded']);
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
 
   console.log('isQuotaOrAuthError (quota/usage-limit/auth → fail over, not retry):');
   await test('Ollama Cloud weekly usage-limit 429 → quota/auth, NOT transient', () => {

@@ -23,7 +23,9 @@ import { parseKeyRanges, parsePaceSpans } from '../../../../music/library-db/row
 import { endingKeyFrom, openingKeyFrom } from '../../../../music/mix.js';
 import { scoreSelection, type AcousticEvidence } from '../../../../music/selection-score.js';
 import { composeSelection } from '../../../../music/selection-compose.js';
-import type { PickerEssentiaAudit, PickerSelectionObservation } from '../../../../observability/picker-audit.js';
+import type {
+  PickerComparisonObservation, PickerEssentiaAudit, PickerSelectionObservation,
+} from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { enrichEssentia, getEssentiaReader, type EssentiaReader } from '../../../../music/essentia-evidence.js';
 import { attachCompactMusicEvidence } from '../../../../music/music-evidence-profile.js';
@@ -57,6 +59,7 @@ export interface PickerScope {
     captureTraitResult(ids: Iterable<string | null | undefined>, status: PickerEssentiaAudit['trait_result']): void;
     noteV2Joint?(unavailable: boolean): void;
     noteV2Compare?(): void;
+    captureV2Comparison?(observation: PickerComparisonObservation): void;
     captureV2Profiles?(ids: Iterable<string | null | undefined>): void;
     captureV2JointCandidates?(ids: Iterable<string | null | undefined>): void;
   };

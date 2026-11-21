@@ -97,8 +97,10 @@ export async function withFailover<T>(
   failExtra: (err: any) => any,
   attempt: (leg: any) => Promise<AttemptResult<T>>,
   pin?: 'primary' | 'fallback',
+  observer?: { failoverNotAttempted?(): void; failoverAttempted?(): void },
 ): Promise<T> {
   if (pin) {
+    try { observer?.failoverNotAttempted?.(); } catch { /* diagnostics are best-effort */ }
     const leg = pin === 'fallback' ? fallbackLeg() : primaryLeg();
     if (!leg) throw new Error(`withFailover: pinned leg "${pin}" is not configured`);
     const started = Date.now();
@@ -130,6 +132,7 @@ export async function withFailover<T>(
       (candidate.cfg.provider !== 'ollama' || /:cloud$/i.test(candidate.label))
       ? null : candidate;
     if (!backup) {
+      try { observer?.failoverNotAttempted?.(); } catch { /* diagnostics are best-effort */ }
       logFailurePreview(kind, err, primary.label);
       recordFailure({ kind, started: primaryStarted, via: primaryVia, model: primary.label, error: err?.message, extra: failExtra(err) });
       throw err;
@@ -140,6 +143,7 @@ export async function withFailover<T>(
     recordFailure({ kind, started: primaryStarted, via: `${primaryVia}:failover→${backup.label}`, model: primary.label, error: err?.message, extra: failExtra(err) });
     const backupStarted = Date.now();
     try {
+      try { observer?.failoverAttempted?.(); } catch { /* diagnostics are best-effort */ }
       const r = await attempt(backup);
       recordSuccess({ kind, started: backupStarted, via: r.via, model: backup.label, sampling: r.sampling, usage: r.usage, perf: r.perf, warnings: r.warnings, extra: r.extra });
       return r.value;

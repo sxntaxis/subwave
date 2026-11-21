@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 // Set before importing the controller: never open the operator's state.
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'pool-vnext-route-'));
+process.env.SUBWAVE_PICKER_AUDIT = '0';
 
 test('real Pool choice uses acoustic order only with opt-in; cold and provider failure retain fallback', async () => {
   const picker = await import('../src/music/picker.js');
@@ -107,6 +108,7 @@ test('runTrackEvent reaches the same Pool path directly and after an Agent failu
   assert.equal(activeShow?.id, 'fixture-show');
   const current = { track: { id: 'anchor', title: 'Anchor', artist: 'Artist' }, startedAt: new Date().toISOString() };
   let queued = 0, agentCalls = 0, poolCalls = 0, acousticLookups = 0;
+  const agentErrors: Error[] = [];
   const queue = {
     current, upcoming: [], history: [], recentlyPlayed: () => ({ ids: new Set(), keys: new Set() }),
     queuedIds: () => new Set(), recentArtistsSince: () => new Set(), recentAlbumKeys: () => new Set(),
@@ -133,7 +135,9 @@ test('runTrackEvent reaches the same Pool path directly and after an Agent failu
           pace_json: null, key_ranges_json: null, duration_sec: 180 }, vector: null }));
       }, () => runner.withAgentRunnerForTest((async () => {
         agentCalls++;
-        throw new Error('fixture agent failure');
+        const error = new Error('fixture agent failure');
+        agentErrors.push(error);
+        throw error;
       }) as any, () => picker.withPoolPickerFixtureForTest(fixture as any, () =>
         agent.runTrackEvent(queue, { dominantMood: null, activeShow }, {
           wantLink: false, showAt: new Date(), target: { kind: 'current', item: current } as any,
@@ -143,6 +147,17 @@ test('runTrackEvent reaches the same Pool path directly and after an Agent failu
     assert.equal(poolCalls, 4);
     assert.equal(queued, 4);
     assert.equal(acousticLookups, 2);
+    assert.equal(agentErrors.length, 2);
+    for (const error of agentErrors) {
+      assert.equal(error.message, 'fixture agent failure');
+      assert.equal(Object.hasOwn(error, 'failure_phase'), false);
+      assert.equal(Object.hasOwn(error, 'failure_category'), false);
+      assert.equal(Object.hasOwn(error, 'pickFailure'), false);
+    }
+    const breaker = await import('../src/broadcast/dj-agent/breaker.js');
+    assert.equal(breaker.breakerOpen(), false, 'two failed Agent attempts remain below the existing threshold');
+    breaker.breakerFailure(queue);
+    assert.equal(breaker.breakerOpen(), true, 'the existing third consecutive failure opens the breaker');
   } finally {
     cfg.llm.pickerAgent = previousAgent;
     cfg.shows = previousShows;

@@ -13,6 +13,7 @@
 // Either way the session is updated.
 
 import { z } from 'zod';
+import { performance } from 'node:perf_hooks';
 import * as settings from '../settings.js';
 import * as session from './session.js';
 import * as picker from '../music/picker.js';
@@ -26,7 +27,7 @@ import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import {
-  beginPickerAudit, bindPickerSelectionAudit, finishAgentPickerAudit, pickerAuditEnabled,
+  beginPickerAudit, bindPickerSelectionAudit, classifyPickerFailure, finishAgentPickerAudit, pickerAuditEnabled,
 } from '../observability/picker-audit.js';
 import { recencyWindowsForLibrary } from '../music/recency.js';
 import { showNoRepeatGuard } from '../music/show-recency.js';
@@ -289,18 +290,30 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   });
 
   let run: Awaited<ReturnType<typeof pickerAgent.run>>;
+  const auditRunStartedAt = pickerAuditEnabled() ? performance.now() : null;
   try {
     run = await pickerAgent.run({
       messages: session.windowMessages(),
       scope,
       showAt,
+      ...(pickerAuditEnabled() ? { diagnostics: audit.agentDiagnosticsObserver() } : {}),
     });
   } catch (error) {
-    if (auditSeen) audit.captureCandidates(auditSeen.keys());
-    audit.finish({
-      outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed',
-      toolCalls: toolCallCount, acousticSearchToolCalls,
-    });
+    // Internal lifecycle details were captured by the opt-in harness observer;
+    // this boundary contributes only bounded elapsed time and sanitized error
+    // facts. Audit failures never replace the original Agent exception.
+    try {
+      if (auditSeen) audit.captureCandidates(auditSeen.keys());
+      audit.finish({
+        outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed',
+        toolCalls: toolCallCount, acousticSearchToolCalls,
+        ...(auditRunStartedAt === null ? {} : {
+          failure: classifyPickerFailure(error, performance.now() - auditRunStartedAt),
+        }),
+      });
+    } catch {
+      // Private diagnostics are best-effort; preserve the original exception.
+    }
     throw error;
   }
   const { steps, toolCalls, extras } = run;

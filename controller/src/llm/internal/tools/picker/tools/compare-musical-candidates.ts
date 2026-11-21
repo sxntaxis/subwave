@@ -12,12 +12,28 @@ export default definePickerTool({
     description: 'Compare 2–4 song IDs already returned by discovery. Evidence is estimated and based on sparse sampled windows; continuity and contrast can both be useful.',
     inputSchema: z.object({ ids: z.array(z.string().min(1).max(256)).min(2).max(4) }),
     execute: async ({ ids }) => {
-      ctx.scope.essentiaAudit?.noteV2Compare?.();
+      try { ctx.scope.essentiaAudit?.noteV2Compare?.(); } catch { /* private audit is best-effort */ }
+      try {
+        ctx.scope.essentiaAudit?.captureV2Comparison?.({
+          outcome: 'invoked', inputCount: ids.length, outputCount: 0,
+        });
+      } catch { /* private audit is best-effort */ }
+      const observe = (outcome: 'success' | 'partial' | 'unavailable', outputCount: number) => {
+        try {
+          ctx.scope.essentiaAudit?.captureV2Comparison?.({
+            outcome,
+            inputCount: ids.length,
+            outputCount,
+          });
+        } catch { /* private audit is best-effort */ }
+      };
       if (new Set(ids).size !== ids.length || ids.some(id => !ctx.seen.has(id))) {
+        observe('unavailable', 0);
         return { status: 'invalid_candidates', note: 'Use 2–4 distinct IDs already returned by discovery.' };
       }
       const reservation = ctx.reserveMusicEvidence(16 * 1024);
       if (!reservation || !ctx.essentia?.lookupV2) {
+        observe('unavailable', 0);
         return { status: 'unavailable', note: 'No comparison evidence budget remains.' };
       }
       let used = 0;
@@ -25,7 +41,10 @@ export default definePickerTool({
         const predecessorId = ctx.scope.selection?.predecessorId;
         const lookup = predecessorId && !ids.includes(predecessorId) ? [...ids, predecessorId] : ids;
         const rows = await ctx.essentia.lookupV2(lookup);
-        if (!rows) return { status: 'unavailable', note: 'Music evidence is temporarily unavailable.' };
+        if (!rows) {
+          observe('unavailable', 0);
+          return { status: 'unavailable', note: 'Music evidence is temporarily unavailable.' };
+        }
         const predecessor = predecessorId ? rows.get(predecessorId) ?? null : null;
         const found = ids.filter(id => rows.has(id)).length;
         const result = {
@@ -44,10 +63,13 @@ export default definePickerTool({
         used = Buffer.byteLength(JSON.stringify(result));
         if (used > reservation.bytes) {
           used = 0;
+          observe('unavailable', 0);
           return { status: 'unavailable', note: 'Comparison exceeds the remaining evidence budget.' };
         }
+        observe(found === ids.length ? 'success' : found ? 'partial' : 'unavailable', found);
         return result;
       } catch {
+        observe('unavailable', 0);
         return { status: 'unavailable', note: 'Music evidence is temporarily unavailable.' };
       } finally {
         reservation.release(used);

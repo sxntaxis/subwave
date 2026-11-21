@@ -3,7 +3,11 @@ import test from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { appendPickerAuditEvent, createPickerAuditRecorder, observeV2QueueStart, type PickerAuditEvent } from '../src/observability/picker-audit.js';
+import {
+  appendPickerAuditEvent, classifyPickerFailure, createPickerAuditRecorder, observeV2QueueStart,
+  type PickerAuditEvent,
+} from '../src/observability/picker-audit.js';
+import compareMusicalCandidates from '../src/llm/internal/tools/picker/tools/compare-musical-candidates.js';
 
 const NOW = () => new Date('2026-11-18T12:34:56.000Z');
 
@@ -12,12 +16,242 @@ test('off mode performs no candidate capture or write', () => {
   const audit = createPickerAuditRecorder('pool', 'show-fixture', null, {
     enabled: false, attemptId: 'trace-fixture', now: NOW, write: event => events.push(event),
   });
+  assert.equal(audit.agentDiagnosticsObserver(), undefined);
   audit.captureCandidates(['one', 'two']);
   audit.captureSelection({
     reason: 'scored_membership_change', eligibleCandidates: 2, offeredCandidates: 1,
   });
   audit.finish({ outcome: 'success', chosenId: 'one' });
+  audit.finish({
+    outcome: 'error',
+    failure: classifyPickerFailure(Object.assign(new Error('private error text'), { statusCode: 503 }), 12),
+  });
   assert.deepEqual(events, []);
+});
+
+test('Agent failure classification is finite, sanitized, and leaves unknown phase and retries unknown', () => {
+  const provider = Object.assign(new Error('must-not-persist-provider-message'), {
+    statusCode: 503,
+    code: 'private-provider-code',
+  });
+  const beforeKeys = Object.getOwnPropertyNames(provider).sort();
+  const classified = classifyPickerFailure(provider, 17.6);
+  assert.deepEqual(classified, {
+    failure_phase: 'unknown',
+    failure_category: 'provider_http',
+    failure_retry_status: 'unknown',
+    failure_http_status: 503,
+    failure_elapsed_ms: 18,
+  });
+  assert.deepEqual(Object.getOwnPropertyNames(provider).sort(), beforeKeys);
+  assert.equal(provider.message, 'must-not-persist-provider-message');
+  assert.equal(JSON.stringify(classified).includes('must-not-persist'), false);
+  assert.equal(JSON.stringify(classified).includes('private-provider-code'), false);
+
+  assert.deepEqual(classifyPickerFailure({ message: 'untrusted free text' }), {
+    failure_phase: 'unknown',
+    failure_category: 'unknown',
+    failure_retry_status: 'unknown',
+  });
+});
+
+test('deadline classification reports only the known deadline fact and bounds elapsed time', () => {
+  const deadline = new Error('private deadline text');
+  deadline.name = 'AgentDeadlineError';
+  assert.deepEqual(classifyPickerFailure(deadline, 9_000_000), {
+    failure_phase: 'unknown',
+    failure_category: 'timeout_deadline',
+    failure_retry_status: 'unknown',
+    failure_elapsed_ms: 600_000,
+    failure_deadline_exhausted: true,
+  });
+});
+
+test('Agent lifecycle observer records only bounded phase, tool, retry and failover facts', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'lifecycle-fixture', now: NOW, write: event => events.push(event),
+  });
+  const observer = audit.agentDiagnosticsObserver();
+  assert.ok(observer);
+  observer.providerGenerationStarted();
+  observer.toolStarted();
+  observer.toolFinished(true);
+  observer.toolStarted();
+  observer.toolFinished(false);
+  observer.retryAttempted();
+  observer.retryExhausted();
+  audit.finish({
+    outcome: 'error',
+    failure: classifyPickerFailure(new Error('private exception')),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].failure_phase, 'tool_invocation_or_result');
+  assert.equal(events[0].failure_retry_status, 'unknown');
+  assert.equal(events[0].failure_transient_retry_status, 'exhausted');
+  assert.equal(events[0].failure_tool_started_count, 2);
+  assert.equal(events[0].failure_tool_completed_count, 1);
+  assert.equal(events[0].failure_tool_failed_count, 1);
+  assert.equal(JSON.stringify(events[0]).includes('private exception'), false);
+});
+
+test('failover is recorded separately and retry status resets for the backup leg', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'failover-fixture', now: NOW, write: event => events.push(event),
+  });
+  const observer = audit.agentDiagnosticsObserver()!;
+  observer.retryAttempted();
+  observer.retryExhausted();
+  observer.failoverAttempted();
+  observer.providerGenerationStarted();
+  observer.retryNotAttempted();
+  audit.finish({ outcome: 'error', failure: classifyPickerFailure(new Error('private')) });
+  assert.equal(events[0].failure_failover_status, 'attempted');
+  assert.equal(events[0].failure_retry_status, 'unknown');
+  assert.equal(events[0].failure_transient_retry_status, 'not_attempted');
+  assert.equal(events[0].failure_phase, 'provider_generation');
+});
+
+test('comparison audit stores only outcome, bounded aggregates and attempt correlation', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'comparison-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.noteV2Compare();
+  audit.captureV2Comparison({ outcome: 'partial', inputCount: 4, outputCount: 2 });
+  audit.finish({ outcome: 'error', failure: classifyPickerFailure(new Error('private')) });
+  assert.equal(events[0].attempt_id, 'comparison-fixture');
+  assert.deepEqual(events[0].comparison, {
+    invocations: 1, outcome: 'partial', input_count: 4, output_count: 2, coverage: 0.5,
+  });
+  assert.equal(JSON.stringify(events[0].comparison).includes('private'), false);
+});
+
+test('comparison audit totals invocations and keeps aggregates scoped to the last result', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'comparison-last-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.noteV2Compare();
+  audit.captureV2Comparison({ outcome: 'invoked', inputCount: 2, outputCount: 0 });
+  audit.captureV2Comparison({ outcome: 'partial', inputCount: 2, outputCount: 1 });
+  audit.noteV2Compare();
+  audit.captureV2Comparison({ outcome: 'invoked', inputCount: 4, outputCount: 0 });
+  audit.captureV2Comparison({ outcome: 'unavailable', inputCount: 4, outputCount: 0 });
+  audit.finish({ outcome: 'error', failure: classifyPickerFailure(new Error('private')) });
+  assert.deepEqual(events[0].comparison, {
+    invocations: 2, outcome: 'unavailable', input_count: 4, output_count: 0, coverage: 0,
+  });
+  assert.equal(JSON.stringify(events[0].comparison).includes('fixture'), false);
+});
+
+test('an escaping comparator tool error is distinct from returned unavailable evidence', () => {
+  const events: PickerAuditEvent[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'comparison-error-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.noteV2Compare();
+  audit.captureV2Comparison({ outcome: 'invoked', inputCount: 3, outputCount: 0 });
+  audit.agentDiagnosticsObserver()!.toolFinished(false, true);
+  audit.finish({ outcome: 'error', failure: classifyPickerFailure(new Error('private')) });
+  assert.deepEqual(events[0].comparison, {
+    invocations: 1, outcome: 'error', input_count: 3, output_count: 0, coverage: 0,
+  });
+});
+
+test('comparator return boundary reports success, partial and unavailable aggregates only', async () => {
+  const observed: Array<{ outcome: string; inputCount: number; outputCount: number }> = [];
+  const row = {
+    trackId: 'private-track-id', analysisId: 'private-analysis', runId: 'private-run',
+    modelsHash: 'private-models', sourceSize: '1', sourceMtimeNs: '1',
+    expectedWindows: 0, windows: [],
+  };
+  async function execute(rows: Map<string, unknown> | null, reservation = true) {
+    const seen = new Map([['private-a', {}], ['private-b', {}]]);
+    const tool = compareMusicalCandidates.build({
+      scope: { essentiaDiscovery: true, essentiaAudit: {
+        noteV2Compare() {},
+        captureV2Comparison: value => observed.push(value),
+      } },
+      seen,
+      essentia: { lookupV2: async () => rows } as any,
+      reserveMusicEvidence: () => reservation ? { bytes: 16_384, release() {} } : null,
+    } as any) as any;
+    return tool.execute({ ids: ['private-a', 'private-b'] });
+  }
+  assert.equal((await execute(new Map([['private-a', row], ['private-b', row]]))).status, 'available');
+  assert.equal((await execute(new Map([['private-a', row]]))).status, 'partial');
+  assert.equal((await execute(null)).status, 'unavailable');
+  assert.equal((await execute(new Map(), false)).status, 'unavailable');
+  assert.deepEqual(observed.map(item => item.outcome), [
+    'invoked', 'success', 'invoked', 'partial', 'invoked', 'unavailable', 'invoked', 'unavailable',
+  ]);
+  assert.deepEqual(observed.filter(item => item.outcome !== 'invoked')
+    .slice(0, 2).map(({ inputCount, outputCount }) => ({ inputCount, outputCount })), [
+    { inputCount: 2, outputCount: 2 }, { inputCount: 2, outputCount: 1 },
+  ]);
+  assert.equal(JSON.stringify(observed).includes('private-a'), false);
+  assert.equal(JSON.stringify(observed).includes('private-track-id'), false);
+});
+
+test('pre- and post-tool-shaped errors remain phase-unknown without completed counts or recoverability claims', () => {
+  const beforeTool = classifyPickerFailure(new Error('before tool'));
+  const afterTool = classifyPickerFailure(Object.assign(new Error('after tool'), {
+    steps: [{
+      toolCalls: [{ toolName: 'fixtureTool', input: { private: 'argument' } }],
+      toolResults: [{ output: { private: 'result' } }],
+    }],
+  }));
+  assert.equal(beforeTool.failure_phase, 'unknown');
+  assert.equal(afterTool.failure_phase, 'unknown');
+  for (const diagnostics of [beforeTool, afterTool]) {
+    assert.equal('tool_calls_completed' in diagnostics, false);
+    assert.equal('tool_results_completed' in diagnostics, false);
+    assert.equal('usable_result' in diagnostics, false);
+    assert.equal(diagnostics.failure_retry_status, 'unknown');
+  }
+});
+
+test('failed Agent audit event contains only normalized failure fields and candidate count', () => {
+  const events: PickerAuditEvent[] = [];
+  const raw = Object.assign(new Error('RAW_EXCEPTION_MESSAGE'), {
+    statusCode: 502,
+    responseText: 'RAW_MODEL_COMPLETION',
+    steps: [{
+      toolCalls: [{ toolName: 'fixtureTool', input: { secret: 'RAW_TOOL_ARGUMENT' } }],
+      toolResults: [{ output: 'RAW_TOOL_RESULT' }],
+    }],
+  });
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'failure-fixture', now: NOW, write: event => events.push(event),
+  });
+  audit.captureCandidates(['private-candidate-one', 'private-candidate-two', 'private-candidate-one']);
+  audit.finish({
+    outcome: 'error', fallbackPath: 'pool', fallbackReason: 'agent_run_failed',
+    failure: classifyPickerFailure(raw, 23.4),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].outcome, 'error');
+  assert.equal(events[0].fallback_reason, 'agent_run_failed');
+  assert.equal(events[0].failure_phase, 'unknown');
+  assert.equal(events[0].failure_category, 'provider_http');
+  assert.equal(events[0].failure_retry_status, 'unknown');
+  assert.equal(events[0].failure_http_status, 502);
+  assert.equal(events[0].failure_elapsed_ms, 23);
+  assert.equal(events[0].seen_candidate_count, 2);
+  assert.equal('failure_deadline_exhausted' in events[0], false);
+  assert.equal('tool_calls' in events[0], false);
+  const diagnosticFields = Object.fromEntries(Object.entries(events[0])
+    .filter(([key]) => key.startsWith('failure_') || key === 'seen_candidate_count'));
+  const serialized = JSON.stringify(diagnosticFields);
+  for (const secret of [
+    'RAW_EXCEPTION_MESSAGE', 'RAW_MODEL_COMPLETION', 'RAW_TOOL_ARGUMENT',
+    'RAW_TOOL_RESULT', 'private-candidate-one', 'private-candidate-two',
+  ]) assert.equal(serialized.includes(secret), false);
+  assert.equal('tool_calls_completed' in events[0], false);
+  assert.equal('tool_results_completed' in events[0], false);
+  assert.equal('usable_result' in events[0], false);
 });
 
 test('private selection audit aggregates score versus baseline and separates acoustic search calls', () => {
@@ -198,11 +432,14 @@ test('each selector path records a bounded terminal outcome, including failures'
 
 test('writer failures are swallowed and do not mutate selection results', () => {
   const chosen = 'fixture-choice';
-  const audit = createPickerAuditRecorder('pool', null, null, {
+  const audit = createPickerAuditRecorder('agent', null, null, {
     enabled: true, attemptId: null, now: NOW, write: () => { throw new Error('disk unavailable'); },
   });
   audit.captureCandidates(['fixture-choice', 'fixture-other']);
-  assert.doesNotThrow(() => audit.finish({ outcome: 'success', chosenId: chosen }));
+  assert.doesNotThrow(() => audit.finish({
+    outcome: 'error', chosenId: chosen, fallbackPath: 'pool', fallbackReason: 'agent_run_failed',
+    failure: classifyPickerFailure(new Error('must-not-escape'), 2),
+  }));
   assert.equal(chosen, 'fixture-choice');
 });
 
@@ -269,6 +506,11 @@ test('source wiring observes existing boundaries without adding model or search 
   assert.match(agent, /seen: auditSeen/);
   assert.match(agent, /audit\.captureCandidates\(extras\.seen\.keys\(\)\)/);
   assert.match(agent, /audit\.finish\(\{\s*outcome: 'error', fallbackPath: 'pool'/);
+  assert.match(agent, /const auditRunStartedAt = pickerAuditEnabled\(\) \? performance\.now\(\) : null;/);
+  assert.match(agent, /classifyPickerFailure\(error, performance\.now\(\) - auditRunStartedAt\)/);
+  assert.match(agent, /throw error;/);
+  assert.match(agent, /breakerFailure\(queue\)/);
+  assert.match(agent, /const pooled = await pickViaPool/);
   assert.ok(
     agent.indexOf('const selectedFromV2Joint = audit.captureV2Selection(song.id)')
       > agent.indexOf('if (albumHours > 0)'),

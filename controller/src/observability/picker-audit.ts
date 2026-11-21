@@ -1,6 +1,7 @@
 // Private, opt-in candidate-offer diagnostics. This deliberately bypasses the
 // general event log: candidate IDs are local audit data, never a web/API event.
 import { constants as fsConstants } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { lstat, open, readdir, unlink } from 'node:fs/promises';
 import { currentTrace } from './events.js';
 
@@ -8,6 +9,63 @@ export type PickerAuditPath = 'agent' | 'pool' | 'auto_refresh';
 export type PickerAuditOutcome =
   | 'success' | 'empty' | 'rejected' | 'repaired' | 'repicked'
   | 'fallback' | 'collision' | 'error';
+
+/**
+ * Last observed failed-leg phase: provider_generation requires an SDK model
+ * start without a matching end; tool_invocation_or_result requires a started
+ * tool without success, or an explicit tool-error end. Recovery/salvage values
+ * are set at their actual rejected catch boundaries. Unobserved remains unknown.
+ */
+export type PickerFailurePhase =
+  | 'provider_generation' | 'tool_invocation_or_result' | 'completion_validation'
+  | 'done_only_recovery' | 'terminal_collapse' | 'text_salvage'
+  | 'caller_boundary' | 'unknown';
+export type PickerFailureCategory =
+  | 'timeout_deadline' | 'transient_provider_network' | 'provider_http'
+  | 'output_schema_validation' | 'tool_execution' | 'aborted_cancelled'
+  | 'other' | 'unknown';
+/** Retry state of one controller withTransientRetry wrapper, not SDK retries. */
+export type PickerFailureRetryStatus =
+  | 'attempted' | 'succeeded' | 'exhausted' | 'not_attempted' | 'unknown';
+export type PickerFailureFailoverStatus = 'attempted' | 'not_attempted' | 'unknown';
+export type PickerComparisonOutcome = 'invoked' | 'success' | 'partial' | 'unavailable' | 'error' | 'unknown';
+
+/** In-memory only; callbacks receive no payload, error, tool name, or identity. */
+export interface PickerAgentDiagnosticsObserver {
+  failurePhaseObserved(phase: PickerFailurePhase): void;
+  providerGenerationStarted(): void;
+  providerGenerationCompleted(): void;
+  toolStarted(): void;
+  toolFinished(success: boolean, comparator?: boolean): void;
+  retryNotAttempted(): void;
+  retryAttempted(): void;
+  retrySucceeded(): void;
+  retryExhausted(): void;
+  failoverNotAttempted(): void;
+  failoverAttempted(): void;
+}
+
+// This is the in-process input shape. The event flattens these allowlisted
+// values; an Error object is never accepted or serialized by the recorder.
+export interface PickerFailureDiagnostics {
+  failure_phase: PickerFailurePhase;
+  failure_category: PickerFailureCategory;
+  failure_retry_status: PickerFailureRetryStatus;
+  failure_failover_status?: PickerFailureFailoverStatus;
+  failure_http_status?: number;
+  failure_elapsed_ms?: number;
+  failure_deadline_exhausted?: boolean;
+  failure_tool_started_count?: number;
+  failure_tool_completed_count?: number;
+  failure_tool_failed_count?: number;
+}
+
+export interface PickerComparisonObservation {
+  outcome: PickerComparisonOutcome;
+  inputCount: number;
+  /** Count of input candidates with evidence returned, not output array length. */
+  outputCount: number;
+}
 
 export type PickerSelectionReason =
   | 'no_eligible_context' | 'index_unavailable' | 'deadline_or_budget'
@@ -46,6 +104,7 @@ export interface PickerAuditResult {
   fallbackReason?: string | null;
   toolCalls?: number | null;
   acousticSearchToolCalls?: number | null;
+  failure?: PickerFailureDiagnostics;
 }
 
 export interface PickerEssentiaAudit {
@@ -79,10 +138,32 @@ export interface PickerAuditEvent {
   fallback_path?: 'pool' | 'auto_playlist';
   fallback_reason?: string;
   tool_calls?: number;
+  seen_candidate_count?: number;
+  failure_phase?: PickerFailurePhase;
+  failure_category?: PickerFailureCategory;
+  failure_retry_status?: PickerFailureRetryStatus;
+  /** Observations from controller withTransientRetry only; SDK-internal retries remain unknown. */
+  failure_transient_retry_status?: PickerFailureRetryStatus;
+  failure_failover_status?: PickerFailureFailoverStatus;
+  failure_http_status?: number;
+  failure_elapsed_ms?: number;
+  failure_deadline_exhausted?: boolean;
+  failure_tool_started_count?: number;
+  failure_tool_completed_count?: number;
+  failure_tool_failed_count?: number;
   selection?: PickerSelectionAudit;
   acoustic_search_tool_calls?: number;
   essentia?: PickerEssentiaAudit;
   music_v2?: PickerMusicV2Audit;
+  comparison?: {
+    invocations: number;
+    /** Outcome and aggregates below describe the most recently completed comparison call. */
+    outcome: PickerComparisonOutcome;
+    input_count: number;
+    output_count: number;
+    /** Per-call returned-evidence coverage; says nothing about final pick influence. */
+    coverage: number | null;
+  };
 }
 
 export interface PickerAuditLifecycleEvent {
@@ -100,9 +181,164 @@ const AUDIT_DIR = '/run/subwave-picker-audit';
 const MAX_QUEUED = 128;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const RETENTION_DAYS = 7;
+const MAX_FAILURE_ELAPSED_MS = 10 * 60_000;
+const MAX_FAILURE_CHAIN = 6;
+
+interface PickerAuditTestContext {
+  enabled: boolean;
+  write: (event: PickerAuditEvent | PickerAuditLifecycleEvent) => void;
+}
+const pickerAuditTestContext = new AsyncLocalStorage<PickerAuditTestContext>();
+
+// Scoped in-memory test hook for exercising caller wiring without touching the
+// station's private audit directory. Production never enters this context.
+export function withPickerAuditForTest<T>(
+  context: PickerAuditTestContext,
+  fn: () => T,
+): T {
+  return pickerAuditTestContext.run(context, fn);
+}
+
+const FAILURE_PHASES = new Set<PickerFailurePhase>([
+  'provider_generation', 'tool_invocation_or_result', 'completion_validation',
+  'done_only_recovery', 'terminal_collapse', 'text_salvage',
+  'caller_boundary', 'unknown',
+]);
+const FAILURE_CATEGORIES = new Set<PickerFailureCategory>([
+  'timeout_deadline', 'transient_provider_network', 'provider_http',
+  'output_schema_validation', 'tool_execution', 'aborted_cancelled', 'other', 'unknown',
+]);
+const FAILURE_RETRY_STATUSES = new Set<PickerFailureRetryStatus>([
+  'attempted', 'succeeded', 'exhausted', 'not_attempted', 'unknown',
+]);
+const FAILURE_FAILOVER_STATUSES = new Set<PickerFailureFailoverStatus>([
+  'attempted', 'not_attempted', 'unknown',
+]);
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'ENOTFOUND',
+]);
+
+function safeProperty(value: unknown, key: string): unknown {
+  try {
+    return value && (typeof value === 'object' || typeof value === 'function')
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function failureErrorChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  const visited = new Set<unknown>();
+  let current = error;
+  for (let i = 0; i < MAX_FAILURE_CHAIN && current != null && !visited.has(current); i++) {
+    chain.push(current);
+    if ((typeof current !== 'object' && typeof current !== 'function')) break;
+    visited.add(current);
+    const cause = safeProperty(current, 'cause');
+    const lastError = safeProperty(current, 'lastError');
+    const errors = safeProperty(current, 'errors');
+    const lastNestedError = Array.isArray(errors) ? errors.at(-1) : undefined;
+    current = cause ?? lastError ?? lastNestedError;
+  }
+  return chain;
+}
+
+function failureStatus(chain: readonly unknown[]): number | undefined {
+  for (const error of chain) {
+    for (const key of ['statusCode', 'status']) {
+      const status = safeProperty(error, key);
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+        return status;
+      }
+    }
+  }
+  return undefined;
+}
+
+function failureCategory(chain: readonly unknown[], status: number | undefined): PickerFailureCategory {
+  const names = chain.map(error => safeProperty(error, 'name')).filter((name): name is string => typeof name === 'string');
+  const codes = chain.map(error => safeProperty(error, 'code'))
+    .filter((code): code is string => typeof code === 'string' && code.length <= 64)
+    .map(code => code.toUpperCase());
+  if (names.includes('AgentDeadlineError') || names.includes('TimeoutError')) return 'timeout_deadline';
+  if (names.includes('AbortError') || codes.includes('ABORT_ERR')) return 'aborted_cancelled';
+  if (names.some(name => [
+    'ZodError', 'AI_NoObjectGeneratedError', 'AI_NoOutputGeneratedError',
+  ].includes(name))) return 'output_schema_validation';
+  if (names.some(name => [
+    'AI_InvalidToolInputError', 'ToolExecutionError',
+  ].includes(name))) return 'tool_execution';
+  if (status !== undefined) return 'provider_http';
+  if (codes.some(code => TRANSIENT_NETWORK_CODES.has(code))) return 'transient_provider_network';
+  if (names.length) return 'other';
+  return 'unknown';
+}
+
+/**
+ * Build sanitized error facts only. Lifecycle fields are supplied separately
+ * by the in-process observer; none are inferred from the thrown object.
+ */
+export function classifyPickerFailure(error: unknown, elapsedMs?: number): PickerFailureDiagnostics {
+  try {
+    const chain = failureErrorChain(error);
+    const status = failureStatus(chain);
+    const deadlineExhausted = chain.some(item => safeProperty(item, 'name') === 'AgentDeadlineError');
+    const elapsed = typeof elapsedMs === 'number' && Number.isFinite(elapsedMs)
+      ? Math.min(MAX_FAILURE_ELAPSED_MS, Math.max(0, Math.round(elapsedMs)))
+      : undefined;
+    return {
+      failure_phase: 'unknown',
+      failure_category: failureCategory(chain, status),
+      failure_retry_status: 'unknown',
+      ...(status === undefined ? {} : { failure_http_status: status }),
+      ...(elapsed === undefined ? {} : { failure_elapsed_ms: elapsed }),
+      ...(deadlineExhausted ? { failure_deadline_exhausted: true } : {}),
+    };
+  } catch {
+    // Diagnostics are strictly best-effort, including hostile getters on an
+    // unexpected thrown value. Never let classification replace the failure.
+    return {
+      failure_phase: 'unknown',
+      failure_category: 'unknown',
+      failure_retry_status: 'unknown',
+    };
+  }
+}
+
+function safeFailureFields(failure: PickerFailureDiagnostics | undefined): Partial<PickerFailureDiagnostics> {
+  if (!failure) return {};
+  const phase = FAILURE_PHASES.has(failure.failure_phase) ? failure.failure_phase : 'unknown';
+  const category = FAILURE_CATEGORIES.has(failure.failure_category) ? failure.failure_category : 'unknown';
+  const retryStatus = FAILURE_RETRY_STATUSES.has(failure.failure_retry_status)
+    ? failure.failure_retry_status : 'unknown';
+  const status = failure.failure_http_status;
+  const elapsed = failure.failure_elapsed_ms;
+  return {
+    failure_phase: phase,
+    failure_category: category,
+    failure_retry_status: retryStatus,
+    ...(failure.failure_failover_status && FAILURE_FAILOVER_STATUSES.has(failure.failure_failover_status)
+      ? { failure_failover_status: failure.failure_failover_status } : {}),
+    ...(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+      ? { failure_http_status: status } : {}),
+    ...(typeof elapsed === 'number' && Number.isFinite(elapsed)
+      ? { failure_elapsed_ms: Math.min(MAX_FAILURE_ELAPSED_MS, Math.max(0, Math.floor(elapsed))) } : {}),
+    ...(typeof failure.failure_deadline_exhausted === 'boolean'
+      ? { failure_deadline_exhausted: failure.failure_deadline_exhausted } : {}),
+    ...(typeof failure.failure_tool_started_count === 'number' && Number.isFinite(failure.failure_tool_started_count)
+      ? { failure_tool_started_count: Math.min(1000, Math.max(0, Math.floor(failure.failure_tool_started_count))) } : {}),
+    ...(typeof failure.failure_tool_completed_count === 'number' && Number.isFinite(failure.failure_tool_completed_count)
+      ? { failure_tool_completed_count: Math.min(1000, Math.max(0, Math.floor(failure.failure_tool_completed_count))) } : {}),
+    ...(typeof failure.failure_tool_failed_count === 'number' && Number.isFinite(failure.failure_tool_failed_count)
+      ? { failure_tool_failed_count: Math.min(1000, Math.max(0, Math.floor(failure.failure_tool_failed_count))) } : {}),
+  };
+}
 
 export function pickerAuditEnabled(): boolean {
-  return ENABLED;
+  return pickerAuditTestContext.getStore()?.enabled ?? ENABLED;
 }
 
 let writeChain: Promise<void> = Promise.resolve();
@@ -181,6 +417,8 @@ export interface PickerAuditRecorder {
   captureTraitResult(ids: Iterable<string | null | undefined>, status: PickerEssentiaAudit['trait_result']): void;
   noteV2Joint(unavailable: boolean): void;
   noteV2Compare(): void;
+  captureV2Comparison(observation: PickerComparisonObservation): void;
+  agentDiagnosticsObserver(): PickerAgentDiagnosticsObserver | undefined;
   captureV2Profiles(ids: Iterable<string | null | undefined>): void;
   captureV2JointCandidates(ids: Iterable<string | null | undefined>): void;
   captureV2Selection(id: string): boolean;
@@ -254,6 +492,17 @@ export function createPickerAuditRecorder(
   let v2JointCalls = 0;
   let v2JointUnavailable = 0;
   let v2CompareCalls = 0;
+  let comparisonInvocations = 0;
+  let comparisonOutcome: PickerComparisonOutcome = 'unknown';
+  let comparisonInputCount = 0;
+  let comparisonOutputCount = 0;
+  let toolStartedCount = 0;
+  let toolCompletedCount = 0;
+  let toolFailedCount = 0;
+  let retryStatus: PickerFailureRetryStatus = 'unknown';
+  let failoverStatus: PickerFailureFailoverStatus = 'unknown';
+  let failurePhase: PickerFailurePhase = 'unknown';
+  let agentDiagnosticsObserved = false;
   let v2ProfileObserved = false;
   const v2ProfileIds = new Set<string>();
   const v2JointIds = new Set<string>();
@@ -320,6 +569,46 @@ export function createPickerAuditRecorder(
       v2Observed = true;
       v2CompareCalls = Math.min(1000, v2CompareCalls + 1);
     },
+    captureV2Comparison(observation) {
+      if (!options.enabled || finished) return;
+      if (observation.outcome === 'invoked' || comparisonInvocations === 0) {
+        comparisonInvocations = Math.min(1000, comparisonInvocations + 1);
+      }
+      comparisonOutcome = observation.outcome;
+      comparisonInputCount = Math.min(4, Math.max(0, Math.floor(observation.inputCount)));
+      comparisonOutputCount = Math.min(4, Math.max(0, Math.floor(observation.outputCount)));
+    },
+    agentDiagnosticsObserver() {
+      if (!options.enabled || finished) return undefined;
+      agentDiagnosticsObserved = true;
+      return {
+        failurePhaseObserved(phase) {
+          if (FAILURE_PHASES.has(phase)) failurePhase = phase;
+        },
+        providerGenerationStarted() { failurePhase = 'provider_generation'; },
+        providerGenerationCompleted() { failurePhase = 'unknown'; },
+        toolStarted() {
+          failurePhase = 'tool_invocation_or_result';
+          toolStartedCount = Math.min(1000, toolStartedCount + 1);
+        },
+        toolFinished(success, comparator = false) {
+          failurePhase = success ? 'unknown' : 'tool_invocation_or_result';
+          if (success) toolCompletedCount = Math.min(1000, toolCompletedCount + 1);
+          else toolFailedCount = Math.min(1000, toolFailedCount + 1);
+          if (comparator && !success && comparisonInvocations > 0) comparisonOutcome = 'error';
+        },
+        retryNotAttempted() { if (retryStatus === 'unknown') retryStatus = 'not_attempted'; },
+        retryAttempted() { retryStatus = 'attempted'; },
+        retrySucceeded() { retryStatus = 'succeeded'; },
+        retryExhausted() { retryStatus = 'exhausted'; },
+        failoverNotAttempted() { if (failoverStatus === 'unknown') failoverStatus = 'not_attempted'; },
+        failoverAttempted() {
+          failoverStatus = 'attempted';
+          retryStatus = 'unknown';
+          failurePhase = 'unknown';
+        },
+      };
+    },
     captureV2Profiles(ids) {
       if (!options.enabled || finished) return;
       v2Observed = true;
@@ -367,6 +656,20 @@ export function createPickerAuditRecorder(
         outcome: result.outcome,
         ...(result.fallbackPath ? { fallback_path: result.fallbackPath } : {}),
         ...(result.fallbackReason ? { fallback_reason: result.fallbackReason.slice(0, 80) } : {}),
+        ...(path === 'agent' && result.outcome === 'error' && result.failure
+          ? {
+            ...safeFailureFields(result.failure),
+            failure_phase: failurePhase === 'unknown' ? result.failure.failure_phase : failurePhase,
+            ...(retryStatus !== 'unknown' ? { failure_transient_retry_status: retryStatus } : {}),
+            ...(failoverStatus !== 'unknown' ? { failure_failover_status: failoverStatus } : {}),
+            ...(agentDiagnosticsObserved ? {
+              failure_tool_started_count: toolStartedCount,
+              failure_tool_completed_count: toolCompletedCount,
+              failure_tool_failed_count: toolFailedCount,
+            } : {}),
+            seen_candidate_count: Math.min(100_000, candidates.length),
+          }
+          : {}),
         ...(typeof result.toolCalls === 'number' && Number.isInteger(result.toolCalls) && result.toolCalls >= 0 ? { tool_calls: result.toolCalls } : {}),
         ...(typeof result.acousticSearchToolCalls === 'number' && Number.isInteger(result.acousticSearchToolCalls)
           && result.acousticSearchToolCalls >= 0 ? { acoustic_search_tool_calls: Math.min(1000, result.acousticSearchToolCalls) } : {}),
@@ -390,6 +693,13 @@ export function createPickerAuditRecorder(
           profile_candidates_exposed: v2ProfileIds.size,
           chosen_had_exposed_profile: ['success', 'repaired', 'repicked'].includes(result.outcome)
             && typeof result.chosenId === 'string' && v2ProfileObserved ? v2ProfileIds.has(result.chosenId) : null,
+        } } : {}),
+        ...(path === 'agent' && comparisonInvocations ? { comparison: {
+          invocations: comparisonInvocations,
+          outcome: comparisonOutcome,
+          input_count: comparisonInputCount,
+          output_count: comparisonOutputCount,
+          coverage: comparisonInputCount > 0 ? comparisonOutputCount / comparisonInputCount : null,
         } } : {}),
         ...(hasSelection ? { selection } : selectionExpected ? {
           selection: { status: 'not_invoked', reasons: { collector_not_invoked: 1 } },
@@ -450,11 +760,13 @@ export function beginPickerAudit(
   showAt?: Date | string | null,
 ): PickerAuditRecorder {
   const trace = currentTrace();
+  const testContext = pickerAuditTestContext.getStore();
   return createPickerAuditRecorder(path, showId, showAt, {
-    enabled: ENABLED,
+    enabled: testContext?.enabled ?? ENABLED,
     attemptId: trace?.traceId ?? null,
     write(event) {
-      queueAuditEvent(event);
+      if (testContext) testContext.write(event);
+      else queueAuditEvent(event);
     },
   });
 }

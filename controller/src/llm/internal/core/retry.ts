@@ -64,18 +64,42 @@ export async function withTransientRetry<T>(
   kind: string,
   fn: () => Promise<T>,
   signal?: AbortSignal,
+  observer?: {
+    retryNotAttempted?(): void;
+    retryAttempted?(): void;
+    retrySucceeded?(): void;
+    retryExhausted?(): void;
+  },
 ): Promise<T> {
   const delays = [500, 1500]; // ms — two retries, ~2s total budget
   let lastErr: any;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) {
+      try { observer?.retryAttempted?.(); } catch { /* diagnostics are best-effort */ }
+    }
     try {
-      return await fn();
+      const result = await fn();
+      if (attempt > 0) {
+        try { observer?.retrySucceeded?.(); } catch { /* diagnostics are best-effort */ }
+      }
+      return result;
     } catch (err) {
       lastErr = err;
-      if (!isTransient(err) || attempt === delays.length || signal?.aborted) throw err;
+      const transient = isTransient(err);
+      if (!transient || attempt === delays.length || signal?.aborted) {
+        if (transient && attempt === delays.length) {
+          try { observer?.retryExhausted?.(); } catch { /* diagnostics are best-effort */ }
+        } else if (attempt === 0) {
+          try { observer?.retryNotAttempted?.(); } catch { /* diagnostics are best-effort */ }
+        }
+        throw err;
+      }
       const jitter = Math.floor(Math.random() * 200);
       const hinted = retryAfterMs(err);
       if (hinted != null && hinted > MAX_RETRY_AFTER_MS) {
+        if (attempt === 0) {
+          try { observer?.retryNotAttempted?.(); } catch { /* diagnostics are best-effort */ }
+        }
         console.log(`[${kind}] provider asked to retry after ${Math.round(hinted / 1000)}s — beyond the ${MAX_RETRY_AFTER_MS / 1000}s same-leg budget, giving up on this leg`);
         throw err;
       }

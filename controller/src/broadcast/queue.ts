@@ -57,6 +57,7 @@ import {
   SKIP_POLL_INTERVAL_MS,
 } from './skip-policy.js';
 import * as stemBlend from './stem-blend.js';
+import { publicNowPlaying } from './queue/now-playing-public.js';
 import type {
   DjLogEntry,
   NowPlaying,
@@ -2977,11 +2978,11 @@ class Queue {
   // copy; a direct read until the first tick lands (or with no watcher, e.g.
   // one-off scripts). Returns a COPY: callers enrich the object in place and
   // must not leak those fields into the shared cache.
-  async getNowPlaying() {
+  async getNowPlaying(): Promise<any> {
     const np = this._nowPlayingFresh
       ? this._nowPlaying
       : await this.readNowPlayingFromDisk();
-    return np ? { ...np } : null;
+    return publicNowPlaying(np);
   }
 
   // Read the now-playing JSON Liquidsoap writes

@@ -23,6 +23,7 @@ import * as subsonicLog from '../music/subsonic-log.js';
 import { getFullContext } from '../context.js';
 import * as settings from '../settings.js';
 import { queue } from '../broadcast/queue.js';
+import { publicNowPlaying } from '../broadcast/queue/now-playing-public.js';
 import * as session from '../broadcast/session.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
 import { voiceStatus } from '../broadcast/voice-policy.js';
@@ -87,7 +88,7 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
 
   // What Liquidsoap last wrote.
   try {
-    out.nowPlaying = JSON.parse(await readFile(config.liquidsoap.nowPlayingFile, 'utf8'));
+    out.nowPlaying = publicNowPlaying(JSON.parse(await readFile(config.liquidsoap.nowPlayingFile, 'utf8')));
   } catch (err) {
     out.nowPlaying = { error: err.message };
   }

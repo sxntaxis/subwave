@@ -41,6 +41,23 @@ test('instrument endpoints keep bounded one-sided observations unknown on the ot
   assert.equal(result.labels[3].change, null);
   assert.equal(result.status, 'partial');
   assert.deepEqual(compare(), result);
+  const invalidRight = endpoint('opening', [output('piano', .6), output('flute', 1.5)]);
+  const invalid = compareMusicalEvidence(left, invalidRight, {
+    sameShow: true, predecessorReliable: true, request: false,
+  }).dimensions!.instruments;
+  const flute = invalid.labels.find(item => item.label === 'flute')!;
+  assert.equal(flute.predecessor.endpointScore, .8);
+  assert.equal(flute.candidate.endpointScore, null);
+  assert.equal(flute.candidate.labelPresent, true);
+  assert.equal(flute.change, null);
+  const missing = compareMusicalEvidence(left, fixture(4, 5), {
+    sameShow: true, predecessorReliable: true, request: false,
+  }).dimensions!.instruments;
+  assert.equal(missing.candidateHead.headPresent, false);
+  assert.ok(missing.labels.every(item => item.change === null && item.candidate.endpointScore === null));
+  assert.equal(compareMusicalEvidence(left, { ...right, modelsHash: 'different' }, {
+    sameShow: true, predecessorReliable: true, request: false,
+  }).dimensions, undefined);
 });
 
 test('out-of-range DEAM survives as raw evidence but cannot become a 1–9 aggregate', () => {

@@ -65,6 +65,13 @@ class ProjectionTest(unittest.TestCase):
             source.execute('PRAGMA query_only=ON')
             target = sqlite3.connect(index_path)
             target.executescript(index.SCHEMA)
+            # The code supports new empty indexes and explicit retrofit of
+            # populated indexes without silently changing an existing index.
+            target.execute(index.COVERING_INDEX_SQL)
+            self.assertEqual(target.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' "
+                "AND name='head_summary_search_cover'"
+            ).fetchone()[0], 1)
             self.assertEqual(index.advance(source, target, 1, models), 1)
             self.assertEqual(target.execute('SELECT ready FROM evidence').fetchone()[0], 0)
             self.assertEqual(index.advance(source, target, 1, models), 1)
@@ -80,6 +87,33 @@ class ProjectionTest(unittest.TestCase):
             self.assertEqual(target.execute('SELECT mean,valid_windows,expected_windows FROM head_summary '
                                             'WHERE class_name="arousal"').fetchone(), (None, 1, 2))
             self.assertEqual(index.advance(source, target, 1, models), 0)
+            # Simulate a pre-upgrade populated v3 projection. Normal indexer
+            # startup must not implicitly build the ~200 MiB index.
+            target.execute('DROP INDEX head_summary_search_cover')
+            target.commit()
+            manifest = Path(directory) / 'models.json'
+            manifest.write_text(json.dumps({'models': models}))
+            command = ['python3', str(Path(__file__).with_name('music-evidence-index-v2.py')),
+                       '--source', str(source_path), '--index', str(index_path),
+                       '--models-manifest', str(manifest)]
+            subprocess.check_call(command + ['--limit', '1'])
+            self.assertEqual(target.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' "
+                "AND name='head_summary_search_cover'"
+            ).fetchone()[0], 0)
+            subprocess.check_call(command + ['--install-covering-index'])
+            self.assertEqual(target.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' "
+                "AND name='head_summary_search_cover'"
+            ).fetchone()[0], 1)
+            plan = target.execute(
+                "EXPLAIN QUERY PLAN SELECT mean FROM head_summary "
+                "INDEXED BY head_summary_search_cover "
+                "WHERE model_id=? AND class_name=?",
+                ('deam-msd-musicnn-2', 'arousal')
+            ).fetchall()
+            self.assertTrue(any('COVERING INDEX head_summary_search_cover' in row[3]
+                                for row in plan))
             script = '''
 import { readMusicEvidence } from './src/music/music-evidence-index-v2-reader.mjs';
 const result = readMusicEvidence(process.argv[1], process.argv[2], process.argv[3], ['song']);

@@ -50,13 +50,32 @@ export interface JointEvidenceResult {
   verificationLimited?: boolean;
 }
 
+/**
+ * The socket deadline is a transport safety ceiling, not a requirement that
+ * musical discovery finish in one second. Keep the legacy default unchanged;
+ * an operator can opt the v2 joint-search call into a longer bounded wait.
+ * A separate, airtime-aware picker deadline will later decide whether to start
+ * a new discovery request at all.
+ */
+const JOINT_SOCKET_DEFAULT_TIMEOUT_MS = 1000;
+const JOINT_SOCKET_MAX_TIMEOUT_MS = 7500;
+function jointSocketTimeoutMs(): number {
+  const value = process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS;
+  if (value === undefined) return JOINT_SOCKET_DEFAULT_TIMEOUT_MS;
+  // Never silently accept a malformed or unbounded configuration.
+  if (!/^[1-9]\d*$/.test(value)) return JOINT_SOCKET_DEFAULT_TIMEOUT_MS;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= JOINT_SOCKET_DEFAULT_TIMEOUT_MS
+    && parsed <= JOINT_SOCKET_MAX_TIMEOUT_MS ? parsed : JOINT_SOCKET_DEFAULT_TIMEOUT_MS;
+}
+
 /** Additive v2 query; timeout/unavailability returns null, never a fabricated result. */
 export function searchJointSocket(
   path: string,
   request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
     eligibleIds?: string[] | null; limit?: number },
 ): Promise<JointEvidenceResult | null> {
-  return queryV2Socket(path, { version: 2, op: 'searchJoint', ...request }).then(value => {
+  return queryV2Socket(path, { version: 2, op: 'searchJoint', ...request }, jointSocketTimeoutMs()).then(value => {
     if (!value || typeof value !== 'object') return null;
     const result = value as JointEvidenceResult;
     if (!Array.isArray(result.results) || !Number.isInteger(result.rankedCount)
@@ -83,7 +102,7 @@ export function lookupMusicEvidenceSocket(path: string, ids: readonly string[]):
   });
 }
 
-function queryV2Socket(path: string, request: object): Promise<unknown | null> {
+function queryV2Socket(path: string, request: object, timeoutMs = 1000): Promise<unknown | null> {
   if (inFlight >= 2) return Promise.resolve(null);
   const message = JSON.stringify(request) + '\n';
   if (Buffer.byteLength(message) > 32768) return Promise.resolve(null);
@@ -100,7 +119,7 @@ function queryV2Socket(path: string, request: object): Promise<unknown | null> {
       socket.destroy();
       resolve(value);
     };
-    const deadline = setTimeout(() => finish(null), 1000);
+    const deadline = setTimeout(() => finish(null), timeoutMs);
     socket.on('error', () => finish(null));
     socket.on('close', () => finish(null));
     socket.on('connect', () => socket.write(message));

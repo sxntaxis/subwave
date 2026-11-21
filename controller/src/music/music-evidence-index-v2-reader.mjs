@@ -66,9 +66,14 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
       scope = ` AND e.track_id IN (${eligibleIds.map(() => '?').join(',')})`;
       parameters.push(...eligibleIds);
     }
+    // For a bounded eligible cohort, drive the indexed track identities first.
+    // SQLite otherwise may drive the global head_summary index and then discard
+    // almost every row by track ID. CROSS JOIN preserves the inner-join result
+    // while preventing that reordering; unscoped discovery keeps its old plan.
+    const join = eligibleIds === null ? 'JOIN' : 'CROSS JOIN';
     // Explicit ceilings fail open; never silently truncate before joint ranking.
     const rows = db.prepare(`SELECT e.track_id,e.analysis_id,COUNT(*) AS matched_rows,${pivot}
-      FROM evidence e JOIN head_summary h ON h.analysis_id=e.analysis_id
+      FROM evidence e ${join} head_summary h ON h.analysis_id=e.analysis_id
       WHERE e.ready=1 AND (${predicates})${scope} GROUP BY e.analysis_id`).all(...parameters);
     const queried = benchmark ? performance.now() : 0;
     if (rows.reduce((sum, row) => sum + row.matched_rows, 0) > 800000) return null;

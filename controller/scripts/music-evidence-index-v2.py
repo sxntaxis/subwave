@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS head_summary (
 CREATE INDEX IF NOT EXISTS head_summary_search ON head_summary(model_id,class_name,analysis_id);
 """
 
+# Covers the mean used by global joint ranking. This is intentionally NOT part
+# of SCHEMA: adding it there would silently build ~200 MiB on an existing live
+# projection whenever its ordinary follow-mode indexer restarts. Instead, new
+# projections get it while empty; populated projections require an explicit,
+# one-time, offline/maintenance opt-in below.
+COVERING_INDEX_SQL = (
+    'CREATE INDEX IF NOT EXISTS head_summary_search_cover '
+    'ON head_summary(model_id,class_name,analysis_id,mean)'
+)
+
 
 def contract(target, models):
     digest = _v1.models_hash(models)
@@ -162,11 +172,16 @@ def main():
     parser.add_argument('--limit', type=int, default=20)
     parser.add_argument('--follow', action='store_true')
     parser.add_argument('--interval', type=int, default=10)
+    parser.add_argument('--install-covering-index', action='store_true')
     args = parser.parse_args()
+    if args.install_covering_index and args.follow:
+        parser.error('covering-index installation must not run in follow mode')
     if not 1 <= args.limit <= 100 or not 5 <= args.interval <= 3600:
         parser.error('invalid batch or interval')
     os.umask(0o077)
     source_path, target_path = Path(args.source).resolve(), Path(args.index).resolve()
+    if args.install_covering_index and not target_path.is_file():
+        parser.error('existing v3 projection required for covering-index retrofit')
     if source_path == target_path:
         parser.error('index must be independent of source')
     models = json.loads(Path(args.models_manifest).read_text())['models']
@@ -180,8 +195,25 @@ def main():
         source = sqlite3.connect(source_path.as_uri() + '?mode=ro', uri=True, timeout=0.1)
         source.execute('PRAGMA query_only=ON')
         target = sqlite3.connect(target_path, timeout=0.1)
-        target.executescript(SCHEMA)
         try:
+            if args.install_covering_index:
+                # Reject wrong or uninitialized targets before any DDL. A
+                # dedicated operator action is required for populated indexes.
+                actual = target.execute(
+                    'SELECT version,models_sha256 FROM contract WHERE id=1'
+                ).fetchone()
+                if actual != (VERSION, _v1.models_hash(models)):
+                    raise ValueError('evidence index contract mismatch')
+                target.execute(COVERING_INDEX_SQL)
+                target.commit()
+                print('covering index ready')
+                return
+            target.executescript(SCHEMA)
+            # Fresh projections get the covering index before any summaries.
+            # Never perform an implicit large index build on a populated DB.
+            if target.execute('SELECT 1 FROM head_summary LIMIT 1').fetchone() is None:
+                target.execute(COVERING_INDEX_SQL)
+                target.commit()
             while True:
                 try:
                     count = advance(source, target, args.limit, models)

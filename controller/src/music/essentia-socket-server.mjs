@@ -69,6 +69,13 @@ const server = createServer(socket => {
     let reportLimits = false;
     try {
       const request = JSON.parse(input.slice(0, input.indexOf('\n')));
+      // The default two-second idle protection remains for v1 and profiles.
+      // v2 joint-search may be intentionally longer than that legacy limit.
+      // This is an idle timer, NOT a CPU/SQL execution deadline: synchronous
+      // search can block the event loop; client deadlines stay authoritative.
+      if (request?.version === 2 && request?.op === 'searchJoint') {
+        socket.setTimeout(9000, () => socket.destroy());
+      }
       // v2.2 can opt into typed envelope-limit replies. Old clients and all
       // v1 operations still receive their exact legacy wire result.
       reportLimits = request?.version === 2 && request?.reportLimits === true

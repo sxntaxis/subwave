@@ -161,6 +161,16 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     });
     assert.deepEqual(scope?.results.map(x => [x.id, x.tier]), [['rare-piano', 'full'], ['partial', 'partial']]);
     assert.equal(scope?.rejectedFreshness, 1);
+    // A maximum-size eligible cohort must rank only its members without
+    // changing result order, completeness, or freshness validation.
+    const eligible128 = Array.from({ length: 128 }, (_, i) => `lead-${String(i + 1).padStart(3, '0')}`);
+    const bounded = await searchJointSocket(join(socketDir, 'evidence.sock'), {
+      preferences: [{ family: 'arousal', key: 'value', direction: 'low' }],
+      eligibleIds: eligible128, limit: 3,
+    });
+    assert.equal(bounded?.rankedCount, 128);
+    assert.deepEqual(bounded?.results.map(row => row.id), ['lead-001', 'lead-002', 'lead-003']);
+    assert.equal(bounded?.rejectedFreshness, 0);
     const required = await searchJointSocket(join(socketDir, 'evidence.sock'), {
       preferences, eligibleIds: ['partial'], requiredFamilies: ['instrument'],
     });
@@ -385,6 +395,39 @@ test('v2 socket client enforces its absolute deadline', async () => {
     assert.equal(await lookupMusicEvidenceSocket(socketPath, ['known']), null);
     assert.ok(Date.now() - profileStart < 2000);
   } finally {
+    server.close();
+  }
+});
+
+test('v2 searchJoint can wait longer by explicit bounded opt-in, without changing profiles or legacy defaults', async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-joint-wait-'));
+  const socketPath = join(dir, 'delayed.sock');
+  const prior = process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS;
+  const server = createServer(socket => {
+    socket.on('error', () => {});
+    socket.once('data', () => {
+      setTimeout(() => socket.end(JSON.stringify({
+        results: [{ id: 'synthetic-eligible', tier: 'full', score: 0.9,
+          evidenceCoverage: 1, matchedPreferences: 1, requestedPreferences: 1 }],
+        rankedCount: 1, rejectedFreshness: 0,
+      }) + '\n'), 1400);
+    });
+  });
+  await new Promise<void>(resolve => server.listen(socketPath, resolve));
+  const request = { preferences: [{ family: 'arousal' as const, key: 'value', direction: 'low' as const }] };
+  try {
+    process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS = '3000';
+    const found = await searchJointSocket(socketPath, request);
+    assert.deepEqual(found?.results.map(x => x.id), ['synthetic-eligible']);
+    // Turning the opt-in off restores the preexisting 1-second behavior.
+    delete process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS;
+    assert.equal(await searchJointSocket(socketPath, request), null);
+    // A malformed/unbounded override must not disable the safety ceiling.
+    process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS = '9999999';
+    assert.equal(await searchJointSocket(socketPath, request), null);
+  } finally {
+    if (prior === undefined) delete process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS;
+    else process.env.SUBWAVE_ESSENTIA_JOINT_TIMEOUT_MS = prior;
     server.close();
   }
 });

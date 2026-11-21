@@ -130,13 +130,13 @@ function headEndpoint(evidence: MusicEvidenceV2, modelId: string, label: string 
       headPresent = true;
       if (label !== null && output.label !== label) continue;
       labelPresent = true;
+      if (window.role === role && label !== null) endpointMatches++;
       const valid = output.validity === 'valid' && !output.missingReason
         && output.nativeScale === NATIVE_SCALE && typeof output.value === 'number'
         && Number.isFinite(output.value) && output.value >= 0 && output.value <= 1;
       if (!valid) continue;
       validInWindow = true;
       if (window.role === role && label !== null) {
-        endpointMatches++;
         endpointScore = output.value;
       }
     }

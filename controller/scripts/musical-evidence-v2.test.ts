@@ -50,6 +50,11 @@ test('instrument endpoints keep bounded one-sided observations unknown on the ot
   assert.equal(flute.candidate.endpointScore, null);
   assert.equal(flute.candidate.labelPresent, true);
   assert.equal(flute.change, null);
+  const ambiguous = compareMusicalEvidence(left, endpoint('opening', [
+    output('flute', .5), output('flute', 1.5),
+  ]), { sameShow: true, predecessorReliable: true, request: false }).dimensions!.instruments;
+  assert.equal(ambiguous.labels.find(item => item.label === 'flute')?.candidate.endpointScore, null);
+  assert.equal(ambiguous.labels.find(item => item.label === 'flute')?.change, null);
   const missing = compareMusicalEvidence(left, fixture(4, 5), {
     sameShow: true, predecessorReliable: true, request: false,
   }).dimensions!.instruments;

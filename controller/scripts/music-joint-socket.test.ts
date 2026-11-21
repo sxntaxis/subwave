@@ -9,6 +9,24 @@ import Database from 'better-sqlite3';
 import { createSocketEssentiaReader, lookupMusicEvidenceSocket, searchJointSocket, withEssentiaReaderForTest } from '../src/music/essentia-evidence.js';
 import { searchEligibleCohort } from '../src/music/music-evidence-cohort.js';
 
+function rawSocketRequest(path: string, message: string): Promise<string | null> {
+  return new Promise(resolve => {
+    const socket = createConnection(path);
+    let output = '';
+    socket.on('error', () => resolve(null));
+    socket.on('connect', () => socket.write(message));
+    socket.on('data', chunk => {
+      output += chunk.toString('utf8');
+      const end = output.indexOf('\n');
+      if (end >= 0) {
+        socket.destroy();
+        resolve(output.slice(0, end));
+      }
+    });
+    socket.on('close', () => resolve(output || null));
+  });
+}
+
 test('private socket joint search reaches a rare candidate beyond the primary top 256', async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-socket-'));
   const audio = join(dir, 'audio');
@@ -82,8 +100,49 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     const v2Profiles = await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'),
       ['rare-piano', 'stale', 'ambiguous']);
     assert.deepEqual([...v2Profiles!.keys()], ['rare-piano']);
-    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 7);
+    const profile = v2Profiles!.get('rare-piano')!;
+    assert.deepEqual(Object.keys(profile).sort(), [
+      'analysisId', 'expectedWindows', 'modelsHash', 'runId', 'sourceMtimeNs',
+      'sourceSize', 'trackId', 'windows',
+    ]);
+    assert.equal(profile.trackId, 'rare-piano');
+    assert.equal(typeof profile.analysisId, 'string');
+    assert.equal(typeof profile.runId, 'string');
+    assert.equal(typeof profile.modelsHash, 'string');
+    assert.equal(typeof profile.sourceSize, 'string');
+    assert.equal(typeof profile.sourceMtimeNs, 'string');
+    assert.equal(profile.expectedWindows, 1);
+    assert.equal(profile.windows.length, 1);
+    assert.deepEqual(Object.keys(profile.windows[0]).sort(),
+      ['endMs', 'measurements', 'outputs', 'quality', 'role', 'startMs']);
+    assert.equal(typeof profile.windows[0].startMs, 'number');
+    assert.equal(typeof profile.windows[0].endMs, 'number');
+    assert.equal(profile.windows[0].role, 'opening');
+    assert.equal(profile.windows[0].outputs.length, 7);
+    assert.ok(profile.windows[0].outputs.every(output => {
+      const keys = Object.keys(output).sort().join(',');
+      return keys === 'label,missingReason,modelId,nativeScale,validity,value'
+        && typeof output.modelId === 'string' && typeof output.label === 'string'
+        && (typeof output.value === 'number' || output.value === null)
+        && (typeof output.nativeScale === 'string' || output.nativeScale === null)
+        && (typeof output.missingReason === 'string' || output.missingReason === null);
+    }));
+    assert.ok(profile.windows[0].outputs.some(output => output.validity === 'valid'));
+    const partial = await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'), ['partial']);
+    assert.equal(partial?.get('partial')?.windows.length, 1);
+    assert.equal(partial?.get('partial')?.windows[0].outputs.some(
+      output => output.modelId === 'voice_instrumental-discogs-effnet-1',
+    ), false);
+    assert.deepEqual(await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'), ['not-indexed']), new Map());
     assert.equal(JSON.stringify([...v2Profiles!]).includes(dir), false);
+    assert.equal(await rawSocketRequest(join(socketDir, 'evidence.sock'),
+      `${JSON.stringify({ version: 99, op: 'profiles', ids: ['rare-piano'] })}\n`), 'null');
+    assert.equal(await rawSocketRequest(join(socketDir, 'evidence.sock'),
+      `${JSON.stringify({ version: 2, op: 'not-a-contract-op' })}\n`), 'null');
+    assert.equal(await rawSocketRequest(join(socketDir, 'evidence.sock'),
+      `${JSON.stringify({ version: 2, op: 'profiles', ids: ['rare-piano'], sourcePath: '/not-accepted' })}\n`), 'null');
+    const oversized = await rawSocketRequest(join(socketDir, 'evidence.sock'), ' '.repeat(32769));
+    assert.equal(oversized, null);
     const preferences = [
       { family: 'arousal' as const, key: 'value', direction: 'low' as const },
       { family: 'voice' as const, key: 'value', direction: 'low' as const },
@@ -298,7 +357,34 @@ test('v2 socket client enforces its absolute deadline', async () => {
     });
     assert.equal(result, null);
     assert.ok(Date.now() - start < 2000);
+    const profileStart = Date.now();
+    assert.equal(await lookupMusicEvidenceSocket(socketPath, ['known']), null);
+    assert.ok(Date.now() - profileStart < 2000);
   } finally {
     server.close();
   }
+});
+
+test('v2 profile client rejects malformed adapter envelopes and preserves fail-open behavior', async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'music-v2-malformed-'));
+  const responses = [
+    'not-json\n',
+    '{}\n',
+    '[["known",{"trackId":"different","windows":[]}]]\n',
+    `${'x'.repeat(2 * 1024 * 1024 + 1)}\n`,
+  ];
+  for (const [index, response] of responses.entries()) {
+    const path = join(dir, `bad-${index}.sock`);
+    const server = createServer(socket => {
+      socket.on('error', () => {});
+      socket.once('data', () => socket.end(response));
+    });
+    await new Promise<void>(resolve => server.listen(path, resolve));
+    try {
+      assert.equal(await lookupMusicEvidenceSocket(path, ['known']), null);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }
+  assert.equal(await lookupMusicEvidenceSocket(join(dir, 'missing.sock'), ['known']), null);
 });

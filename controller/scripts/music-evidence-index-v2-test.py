@@ -97,7 +97,15 @@ console.log(JSON.stringify(result));
                         if o['modelId'] == 'deam-msd-musicnn-2')
             self.assertEqual(deam['validity'], 'outside_declared_range')
             self.assertNotIn(str(audio), json.dumps(result))
+            changed_provenance = {**provenance, 'sample_rate': 22050}
             source.execute('PRAGMA query_only=OFF')
+            source.execute('UPDATE analysis_run SET provenance_json=? WHERE run_id=?',
+                           (json.dumps(changed_provenance), 'run'))
+            source.commit()
+            self.assertEqual(read(), [])
+            source.execute('UPDATE analysis_run SET provenance_json=? WHERE run_id=?',
+                           (json.dumps(provenance), 'run'))
+            source.commit()
             source.execute('INSERT INTO source_inventory VALUES(?,?,0,?)', ('waiting', str(audio), 'mapped'))
             source.execute('INSERT INTO track_analysis VALUES(2,?,?,?,?,?,?)',
                            ('waiting', stat.st_size, stat.st_mtime_ns, 'complete', '{"segments":1}', 'run'))

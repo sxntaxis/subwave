@@ -17,6 +17,32 @@ const fixture = (opening: number, ending: number): MusicEvidenceV2 => ({
   ],
 });
 
+test('instrument endpoints keep bounded one-sided observations unknown on the other side', () => {
+  const output = (label: string, value: number) => ({
+    modelId: 'mtg_jamendo_instrument-discogs-effnet-1', label, value,
+    validity: 'valid', nativeScale: 'model native; see metadata', missingReason: null,
+  });
+  const endpoint = (role: 'opening' | 'ending', values: ReturnType<typeof output>[]): MusicEvidenceV2 => {
+    const base = fixture(4, 5);
+    return { ...base, windows: base.windows.map(w => w.role === role
+      ? { ...w, outputs: [...w.outputs, ...values] } : w) };
+  };
+  const left = endpoint('ending', [output('piano', .4), output('guitar', .2), output('flute', .8)]);
+  const right = endpoint('opening', [output('piano', .6), output('guitar', .3), output('drums', .9), output('organ', .7)]);
+  const compare = () => compareMusicalEvidence(left, right, { sameShow: true, predecessorReliable: true, request: false }).dimensions!.instruments;
+  const result = compare();
+  assert.deepEqual(result.labels.map(x => x.label), ['piano', 'guitar', 'drums', 'flute']);
+  assert.equal(result.labels[0].change, .6 - .4);
+  assert.equal(result.labels[2].predecessor.endpointScore, null);
+  assert.equal(result.labels[2].candidate.endpointScore, .9);
+  assert.equal(result.labels[3].predecessor.endpointScore, .8);
+  assert.equal(result.labels[3].candidate.endpointScore, null);
+  assert.equal(result.labels[2].change, null);
+  assert.equal(result.labels[3].change, null);
+  assert.equal(result.status, 'partial');
+  assert.deepEqual(compare(), result);
+});
+
 test('out-of-range DEAM survives as raw evidence but cannot become a 1–9 aggregate', () => {
   const evidence = fixture(3, 11.31);
   const summary = deamSummary(evidence, 'arousal');

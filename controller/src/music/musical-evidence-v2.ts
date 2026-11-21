@@ -196,23 +196,25 @@ function compareInstruments(predecessor: MusicEvidenceV2, candidate: MusicEviden
   const left = headEndpoint(predecessor, INSTRUMENT_HEAD, null, 'ending');
   const right = headEndpoint(candidate, INSTRUMENT_HEAD, null, 'opening');
   const labels = new Set<string>();
-  for (const evidence of [predecessor, candidate]) {
+  for (const [evidence, role] of [[predecessor, 'ending'], [candidate, 'opening']] as const) {
     for (const window of evidence.windows) {
+      if (window.role !== role) continue;
       for (const output of window.outputs) {
         if (output.modelId === INSTRUMENT_HEAD && /^[a-z]{1,32}$/.test(output.label)) labels.add(output.label);
       }
     }
   }
-  const shared = [...labels].map(label => compareLabel(predecessor, candidate, INSTRUMENT_HEAD, label))
-    .filter(item => item.change != null)
-    .sort((a, b) => Math.max(b.predecessor.endpointScore!, b.candidate.endpointScore!)
-      - Math.max(a.predecessor.endpointScore!, a.candidate.endpointScore!)
+  const entries = [...labels].map(label => compareLabel(predecessor, candidate, INSTRUMENT_HEAD, label))
+    .filter(item => item.predecessor.endpointScore != null || item.candidate.endpointScore != null)
+    .sort((a, b) => Number(b.change != null) - Number(a.change != null)
+      || Math.max(b.predecessor.endpointScore ?? -1, b.candidate.endpointScore ?? -1)
+      - Math.max(a.predecessor.endpointScore ?? -1, a.candidate.endpointScore ?? -1)
       || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
     .slice(0, 4);
-  return { status: shared.length && left.status === 'available' && right.status === 'available'
-    && shared.every(item => item.status === 'available') ? 'available'
+  return { status: entries.length && left.status === 'available' && right.status === 'available'
+    && entries.every(item => item.status === 'available') ? 'available'
     : !left.headPresent && !right.headPresent ? 'unavailable' : 'partial',
-  predecessorHead: left, candidateHead: right, labels: shared };
+  predecessorHead: left, candidateHead: right, labels: entries };
 }
 
 /** Compare a verified predecessor ending to a verified candidate opening. */

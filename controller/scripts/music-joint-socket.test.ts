@@ -53,6 +53,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         prediction.run(i, 'voice_instrumental-discogs-effnet-1', 'voice', i >= 260 ? 0.1 : 0.9, 'model native; see metadata', null);
         prediction.run(i, 'mtg_jamendo_instrument-discogs-effnet-1', 'piano', i >= 260 ? 0.9 : 0.01, 'model native; see metadata', null);
         prediction.run(i, 'mtg_jamendo_instrument-discogs-effnet-1', 'synthesizer', i >= 260 ? 0.8 : 0.2, 'model native; see metadata', null);
+        if (i === 260) prediction.run(i, 'mtg_jamendo_instrument-discogs-effnet-1', 'flute', 0.7, 'model native; see metadata', null);
         prediction.run(i, 'timbre-discogs-effnet-1', 'bright', i >= 260 ? 0.8 : 0.4, 'model native; see metadata', null);
       }
     }
@@ -81,7 +82,7 @@ test('private socket joint search reaches a rare candidate beyond the primary to
     const v2Profiles = await lookupMusicEvidenceSocket(join(socketDir, 'evidence.sock'),
       ['rare-piano', 'stale', 'ambiguous']);
     assert.deepEqual([...v2Profiles!.keys()], ['rare-piano']);
-    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 6);
+    assert.equal(v2Profiles?.get('rare-piano')?.windows[0].outputs.length, 7);
     assert.equal(JSON.stringify([...v2Profiles!]).includes(dir), false);
     const preferences = [
       { family: 'arousal' as const, key: 'value', direction: 'low' as const },
@@ -187,7 +188,11 @@ test('private socket joint search reaches a rare candidate beyond the primary to
         assert.equal(compared.candidates.length, 2);
         const rareComparison = compared.candidates.find((x: any) => x.id === 'rare-piano').predecessor_comparison;
         assert.equal(rareComparison.arousalChange, 0.8999999999999999);
-        assert.deepEqual(rareComparison.dimensions.instruments.labels.map((x: any) => x.label), ['piano', 'synthesizer']);
+        assert.deepEqual(rareComparison.dimensions.instruments.labels.map((x: any) => x.label), ['piano', 'synthesizer', 'flute']);
+        const flute = rareComparison.dimensions.instruments.labels[2];
+        assert.equal(flute.predecessor.endpointScore, null);
+        assert.equal(flute.candidate.endpointScore, 0.7);
+        assert.equal(flute.change, null);
         assert.equal(rareComparison.dimensions.voice.predecessor.validWindows, 1);
         assert.equal(rareComparison.dimensions.voice.candidate.validWindows, 1);
         assert.equal(rareComparison.dimensions.timbre.change, 0.4);

@@ -9,7 +9,7 @@ interface HeadSummary {
 
 // Each label is averaged only when it occurs once and is valid in every
 // expected window. These are native uncalibrated model scores, not facts.
-function summarizeHead(evidence: MusicEvidenceV2, modelId: string): HeadSummary {
+export function summarizeHead(evidence: MusicEvidenceV2, modelId: string): HeadSummary {
   const observed = new Map<string, number[]>();
   const seenWindows = new Set<number>();
   for (let i = 0; i < evidence.windows.length; i++) {
@@ -62,12 +62,39 @@ export function compactMusicEvidence(evidence: MusicEvidenceV2) {
 }
 
 /**
- * Allocate the same evidence-byte share to every returned candidate. If the
- * full four-label view cannot fit, reduce both label lists before omitting a
- * profile. The original track objects and seen-map entries are not mutated.
+ * A deliberately smaller discovery representation. The full verified profile
+ * remains available to the shortlist comparison tool; nothing here is a
+ * calibrated probability or a continuous description of the recording.
+ */
+export function briefDiscoveryMusicEvidence(evidence: MusicEvidenceV2) {
+  const full = compactMusicEvidence(evidence);
+  const scalar = (value: typeof full.voice) => ({ status: value.status, score: value.score });
+  const endpoint = (value: typeof full.arousal) => ({
+    opening: value.opening, ending: value.ending, coverage: value.coverage,
+  });
+  return {
+    detail: 'discovery_brief' as const,
+    source: full.source,
+    scoreMeaning: full.scoreMeaning,
+    windowSampling: full.windowSampling,
+    arousal: endpoint(full.arousal),
+    valence: endpoint(full.valence),
+    danceable: scalar(full.danceable),
+    voice: scalar(full.voice),
+    brightTimbre: scalar(full.brightTimbre),
+    instruments: { status: full.instruments.status, scores: full.instruments.scores.slice(0, 2) },
+    moodThemes: { status: full.moodThemes.status, scores: full.moodThemes.scores.slice(0, 2) },
+  };
+}
+
+/**
+ * Allocate equal evidence-byte shares; optionally trade full profiles for a
+ * truthful smaller discovery view if doing so improves candidate coverage.
+ * Neither the input tracks nor the picker's canonical seen-map are modified.
  */
 export function attachCompactMusicEvidence(
   tracks: readonly any[], evidence: ReadonlyMap<string, MusicEvidenceV2>, budgetBytes: number,
+  options: { allowBriefFallback?: boolean } = {},
 ): { tracks: any[]; bytes: number } {
   if (!tracks.length || budgetBytes <= 0) return { tracks: [...tracks], bytes: 0 };
   const share = Math.floor(Math.min(8192, budgetBytes) / tracks.length);
@@ -86,5 +113,120 @@ export function attachCompactMusicEvidence(
     bytes += size;
     return { ...track, musical_evidence: profile };
   });
-  return { tracks: out, bytes };
+  // v2.1 opt-in only: when equal-sharing omits profiles, prefer a smaller
+  // honest view for every eligible candidate over an all-or-nothing failure.
+  // Never discard a successful full-profile allocation for fewer brief views.
+  if (!options.allowBriefFallback || out.every((track, i) => !evidence.has(tracks[i]?.id) || track?.musical_evidence)) {
+    return { tracks: out, bytes };
+  }
+  let briefBytes = 0;
+  let briefCount = 0;
+  const briefTracks = tracks.map(track => {
+    const data = evidence.get(track?.id);
+    if (!data) return track;
+    const brief = briefDiscoveryMusicEvidence(data);
+    let size = Buffer.byteLength(JSON.stringify({ musical_evidence: brief }));
+    while (size > share && (brief.instruments.scores.length || brief.moodThemes.scores.length)) {
+      if (brief.instruments.scores.length) brief.instruments.scores.pop();
+      if (brief.moodThemes.scores.length) brief.moodThemes.scores.pop();
+      size = Buffer.byteLength(JSON.stringify({ musical_evidence: brief }));
+    }
+    if (size > share) return track;
+    briefBytes += size;
+    briefCount++;
+    return { ...track, musical_evidence: brief };
+  });
+  const fullCount = out.filter((track, i) => evidence.has(tracks[i]?.id) && !!track?.musical_evidence).length;
+  return briefCount > fullCount ? { tracks: briefTracks, bytes: briefBytes } : { tracks: out, bytes };
+}
+
+// v2.1 optional shortlist evidence, never serialized in discovery. These
+// correspond exactly to existing model heads and their native scales.
+export type WindowDetailFamily =
+  | 'arousal' | 'valence' | 'danceability' | 'voice' | 'timbre' | 'instrument' | 'mood';
+
+const WINDOW_HEADS = {
+  arousal: { model: 'deam-msd-musicnn-2', label: 'arousal', scale: 'DEAM native [1,9], valence then arousal', min: 1, max: 9 },
+  valence: { model: 'deam-msd-musicnn-2', label: 'valence', scale: 'DEAM native [1,9], valence then arousal', min: 1, max: 9 },
+  danceability: { model: 'danceability-discogs-effnet-1', label: 'danceable', scale: 'model native; see metadata', min: 0, max: 1 },
+  voice: { model: 'voice_instrumental-discogs-effnet-1', label: 'voice', scale: 'model native; see metadata', min: 0, max: 1 },
+  timbre: { model: 'timbre-discogs-effnet-1', label: 'bright', scale: 'model native; see metadata', min: 0, max: 1 },
+} as const;
+
+/**
+ * Select only caller-requested native feature samples. Invalid/missing samples
+ * remain explicit nulls; never interpolate sparse windows or manufacture
+ * additional song sections. Caller must obtain only verified MusicEvidenceV2.
+ */
+export function sampledWindowEvidence(
+  evidence: MusicEvidenceV2,
+  families: readonly WindowDetailFamily[] = ['arousal', 'valence'],
+) {
+  const features: Record<string, unknown> = {};
+  for (const family of new Set(families)) {
+    if (family === 'instrument' || family === 'mood') {
+      const summary = summarizeHead(evidence, family === 'instrument'
+        ? 'mtg_jamendo_instrument-discogs-effnet-1'
+        : 'mtg_jamendo_moodtheme-discogs-effnet-1');
+      features[family] = {
+        nativeScale: 'model native; see metadata',
+        status: summary.status,
+        observedWindows: summary.observedWindows,
+        expectedWindows: summary.expectedWindows,
+        returnedLabels: Math.min(8, summary.scores.length),
+        availableLabels: summary.scores.length,
+        scores: summary.scores.slice(0, 8),
+      };
+      continue;
+    }
+    const head = WINDOW_HEADS[family];
+    if (!head) continue;
+    let validWindows = 0;
+    const samples = evidence.windows.map(window => {
+      const found = window.outputs.filter(o => o.modelId === head.model && o.label === head.label);
+      let value: number | null = null;
+      let validity: 'valid' | 'missing' | 'invalid' = 'missing';
+      let reason: string | null = 'missing_output';
+      if (found.length > 1) {
+        validity = 'invalid';
+        reason = 'duplicate_output';
+      } else if (found.length === 1) {
+        const output = found[0];
+        if (output.validity === 'valid' && !output.missingReason
+          && output.nativeScale === head.scale && typeof output.value === 'number'
+          && Number.isFinite(output.value) && output.value >= head.min && output.value <= head.max) {
+          value = output.value;
+          validity = 'valid';
+          reason = null;
+          validWindows++;
+        } else {
+          validity = 'invalid';
+          reason = output.missingReason ? 'source_missing'
+            : output.nativeScale !== head.scale ? 'scale_mismatch'
+              : output.validity !== 'valid' ? 'model_invalid' : 'invalid_value';
+        }
+      }
+      return {
+        role: window.role, startMs: window.startMs, endMs: window.endMs,
+        value, validity, ...(reason ? { reason } : {}),
+      };
+    });
+    const complete = evidence.expectedWindows > 0
+      && evidence.windows.length === evidence.expectedWindows
+      && validWindows === evidence.expectedWindows;
+    features[family] = {
+      nativeScale: head.scale,
+      coverage: complete ? 'complete' : validWindows ? 'partial' : 'unavailable',
+      validWindows, expectedWindows: evidence.expectedWindows,
+      samples,
+    };
+  }
+  return {
+    source: 'essentia_estimate' as const,
+    scoreMeaning: 'native_uncalibrated_model_output' as const,
+    windowSampling: 'sparse_windows_not_continuous' as const,
+    returnedWindows: evidence.windows.length,
+    expectedWindows: evidence.expectedWindows,
+    features,
+  };
 }

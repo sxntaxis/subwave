@@ -407,7 +407,9 @@ export function buildPickerContext(
         if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
           const rows = await essentia.lookupV2(ids);
           if (rows) {
-            const attached = attachCompactMusicEvidence(enriched, rows, reserved);
+            const attached = attachCompactMusicEvidence(enriched, rows, reserved, {
+              allowBriefFallback: process.env.SUBWAVE_MUSIC_CONTEXT_V21 === '1',
+            });
             enriched = attached.tracks;
             used = attached.bytes;
           }

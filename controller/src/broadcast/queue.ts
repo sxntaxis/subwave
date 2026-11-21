@@ -58,12 +58,15 @@ import {
 } from './skip-policy.js';
 import * as stemBlend from './stem-blend.js';
 import { publicNowPlaying } from './queue/now-playing-public.js';
+import { exactV2StartToken, queueItemForPersistence } from './queue/v2-attribution.js';
+import { observeV2QueueStart } from '../observability/picker-audit.js';
 import type {
   DjLogEntry,
   NowPlaying,
   Persona,
   PickTarget,
   QueueItem,
+  QueueInsertionReceipt,
   QueuePushArgs,
   RecentPlay,
   Track,
@@ -230,9 +233,11 @@ class Queue {
       this._persistTimer = null;
       try {
         await writeFileAtomic(config.queue.file, JSON.stringify({
-          upcoming: this.upcoming,
-          current: this.current,
-          history: this.history,
+          // Insertion tokens are process-local correlation only. A restart must
+          // not retain them or reconstruct attribution from a recovered queue.
+          upcoming: this.upcoming.map(queueItemForPersistence),
+          current: this.current ? queueItemForPersistence(this.current) : null,
+          history: this.history.map(queueItemForPersistence),
           airMessages: this.airMessages,
           // The rotate's boundary count (#1619). Snapshotted for the same
           // reason the queue itself is — a controller restart is routine, every
@@ -278,9 +283,13 @@ class Queue {
       // so a stale snapshot can't resurrect permanent "Up next" zombies.
       const cutoff = Date.now() - 2 * 60 * 60 * 1000;
       this.upcoming = (Array.isArray(stored.upcoming) ? stored.upcoming : [])
-        .filter((i: QueueItem) => i?.track?.title && new Date(i.queuedAt || 0).getTime() > cutoff);
+        .filter((i: QueueItem) => i?.track?.title && new Date(i.queuedAt || 0).getTime() > cutoff)
+        .map((item: QueueItem) => { delete item.queueToken; return item; });
       this.current = stored.current || null;
-      this.history = Array.isArray(stored.history) ? stored.history.slice(0, AIR_HISTORY_TRACKS) : [];
+      if (this.current) delete this.current.queueToken;
+      this.history = Array.isArray(stored.history)
+        ? stored.history.slice(0, AIR_HISTORY_TRACKS).map((item: QueueItem) => { delete item.queueToken; return item; })
+        : [];
       const historySince = this.airHistorySince();
       this.airMessages = Array.isArray(stored.airMessages)
         ? retainAirMessages(stored.airMessages, historySince)
@@ -562,7 +571,10 @@ class Queue {
   // the line if the real seam lands too far from it — the forecast is made from
   // the on-air track's remaining play and goes badly wrong when the pick misses
   // that seam and auto.m3u fills the slot.
-  async push({ track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: QueuePushArgs) {
+  async push(
+    { track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: QueuePushArgs,
+    onAccepted?: (receipt: QueueInsertionReceipt) => void,
+  ) {
     // The blocklist is absolute, so it sits above `allowDuplicate`.
     const blockHit = blocklist.hitOf(track);
     if (blockHit) {
@@ -587,6 +599,7 @@ class Queue {
     }
     const item = {
       track, requestedBy, operator, intent, introScript, introKind, introPersona, aiPicked,
+      ...(onAccepted ? { queueToken: randomBytes(16).toString('hex') } : {}),
       block: block ?? undefined,
       // Only stamp a back-announce target when there's actually an intro/link to
       // air against it; a bare track carries no claim about what preceded it.
@@ -604,6 +617,9 @@ class Queue {
       confirmedInLiquidsoap: false,
     };
     this.upcoming.push(item);
+    if (onAccepted && item.queueToken) {
+      try { onAccepted({ item, token: item.queueToken }); } catch { /* audit cannot affect queue acceptance */ }
+    }
     // A block's members are deliberately SILENT here and the route logs one
     // summary line instead (#1622 FR 4). The booth log is a 200-entry ring the
     // operator reads back through, and thirty consecutive "queued" lines off a
@@ -618,12 +634,12 @@ class Queue {
     return this.upcoming.length;
   }
 
-  async pushAiPick(args: QueuePushArgs, target: PickTarget): Promise<number | 'stale'> {
+  async pushAiPick(args: QueuePushArgs, target: PickTarget, onAccepted?: (receipt: QueueInsertionReceipt) => void): Promise<number | 'stale'> {
     if (!pickTargetValid(target, this.current, this.upcoming)) {
       this.log('stale-pick', `stale pick dropped: ${args.track.title} was selected for ${target.item.track.title}, but that successor slot changed before commit`);
       return 'stale';
     }
-    return this.push(args);
+    return this.push(args, onAccepted);
   }
 
   // A request whose whole playable span is under the crossfade is buffered into
@@ -1383,6 +1399,7 @@ class Queue {
           cueOutSec: cueOutCandidates.length ? Math.min(...cueOutCandidates) : null,
           cueInSec: item.cueInSec ?? null,
           resolveProbeId: item.resolveProbeId,
+          queueToken: item.queueToken,
         });
         if (trim.cueInSec != null || trim.cueOutSec != null) {
           this.log('mix', `silence trimmed on "${item.track.title}"${trim.cueInSec != null ? ` head ${trim.cueInSec}s` : ''}${trim.cueOutSec != null ? ` tail from ${trim.cueOutSec}s` : ''}`);
@@ -2032,6 +2049,11 @@ class Queue {
   // Called by the now-playing watcher when Liquidsoap reports a new track.
   onTrackStarted(np: NowPlaying | null) {
     if (!np || !np.title) return;
+    // Audit attribution is token-only and deliberately independent of the
+    // legacy id/title playback matcher below. Stem clips carry the incoming
+    // song identity but never this token.
+    const queueToken = exactV2StartToken(np, this.current, this.upcoming);
+    if (queueToken) observeV2QueueStart(queueToken);
     const key = `${np.subsonic_id || ''}|${np.title}|${np.artist || ''}`;
     if (key === this.lastSeenKey) return;
 
@@ -2909,7 +2931,7 @@ class Queue {
   // touches disk.
   startWatcher() {
     const tick = async () => {
-      this._nowPlaying = await this.readNowPlayingFromDisk();
+      this._nowPlaying = await this.readNowPlayingInternalFromDisk();
       this._nowPlayingFresh = true;
       this.onTrackStarted(this._nowPlaying);
       // Beds ride this tick rather than a poller of their own: 1.5s is already
@@ -2981,12 +3003,12 @@ class Queue {
   async getNowPlaying(): Promise<any> {
     const np = this._nowPlayingFresh
       ? this._nowPlaying
-      : await this.readNowPlayingFromDisk();
+      : await this.readNowPlayingInternalFromDisk();
     return publicNowPlaying(np);
   }
 
   // Read the now-playing JSON Liquidsoap writes
-  async readNowPlayingFromDisk() {
+  async readNowPlayingInternalFromDisk() {
     try {
       const raw = await readFile(config.liquidsoap.nowPlayingFile, 'utf8');
       return JSON.parse(raw);

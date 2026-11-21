@@ -23,6 +23,7 @@ export default definePickerTool({
     execute: async preferences => {
       ctx.scope.essentiaAudit?.noteTraitInvocation();
       let v2Attempted = false;
+      let v2Used = false;
       let v2Noted = false;
       const noteV2 = (unavailable: boolean) => {
         if (v2Noted) return;
@@ -69,10 +70,12 @@ export default definePickerTool({
               return ctx.emptyResult(0, 'audio trait search could not finish the eligible show scope; use another discovery tool');
             }
             noteV2(false);
+            v2Used = true;
             ids = result.results.map(row => row.id);
           } else {
             const result = await ctx.essentia.searchJoint({ preferences: requested, limit: 12 });
             noteV2(!result || result.verificationLimited === true);
+            v2Used = !!result && !result.verificationLimited;
             ids = result && !result.verificationLimited
               ? result.results.map(row => row.id) : await ctx.essentia.search(preferences);
           }
@@ -86,6 +89,9 @@ export default definePickerTool({
         await library.load();
         const list = blocklist.rejectBlocked(ids.slice(0, 128).map(id => library.slimById(id)).filter(Boolean));
         const tracks = await ctx.collectAsync(list);
+        if (v2Used) {
+          ctx.scope.essentiaAudit?.captureV2JointCandidates?.(tracks.map(track => track?.id));
+        }
         ctx.scope.essentiaAudit?.captureTraitResult(
           tracks.map(track => track?.id),
           tracks.length ? 'returned' : 'empty',

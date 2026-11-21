@@ -13,6 +13,7 @@ import { speechPaceScale } from '../../audio/tts.js';
 import { normalizeForDisplay, normalizeForSpeech, spokenWordScale } from '../../audio/speech-text.js';
 import { introMsOf } from './runs.js';
 import type { PickTarget } from '../queue/types.js';
+import type { QueueInsertionReceipt } from '../queue/types.js';
 
 export type EnqueuePickOutcome = 'queued' | 'duplicate' | 'blocked' | 'stale';
 
@@ -91,6 +92,7 @@ export async function enqueuePick(
   { sweep = false, washout = false, blend = false, dissolve = false, chop = false, loop = false }: { sweep?: boolean; washout?: boolean; blend?: boolean; dissolve?: boolean; chop?: boolean; loop?: boolean } = {},
   { linkClockAt = null }: { linkClockAt?: Date | null } = {},
   target: PickTarget,
+  onAccepted?: (receipt: QueueInsertionReceipt) => void,
 ): Promise<EnqueuePickOutcome> {
   // Single chokepoint for the intro budget: every pick path (agent, pool, any
   // future producer) funnels its link through here, so enforcement can't be
@@ -125,7 +127,7 @@ export async function enqueuePick(
     aiPicked: true,
     linkPrev,
     linkClockAt,
-  }, target);
+  }, target, onAccepted);
   if (pos === 'stale') return 'stale';
   if (pos === -2) {
     // Never-play blocklist refused the pick (library-db candidates can slip

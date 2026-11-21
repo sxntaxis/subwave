@@ -3,7 +3,7 @@ import test from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { appendPickerAuditEvent, createPickerAuditRecorder, type PickerAuditEvent } from '../src/observability/picker-audit.js';
+import { appendPickerAuditEvent, createPickerAuditRecorder, observeV2QueueStart, type PickerAuditEvent } from '../src/observability/picker-audit.js';
 
 const NOW = () => new Date('2026-11-18T12:34:56.000Z');
 
@@ -62,6 +62,35 @@ test('v2 audit counts exposure and comparison without claiming queue or airplay'
   assert.equal(serialized.includes('"candidate"'), false);
   assert.equal(serialized.includes('aired'), false);
   assert.equal(serialized.includes('queued'), false);
+});
+
+test('v2 lifecycle separates joint offer, selection, accepted insertion and exact start', () => {
+  const events: any[] = [];
+  const audit = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'attempt-42', now: NOW, write: event => events.push(event),
+  });
+  audit.noteV2Joint(false);
+  audit.captureV2JointCandidates(['joint-candidate']);
+  assert.equal(audit.captureV2Selection('other-tool-candidate'), false);
+  const selected = createPickerAuditRecorder('agent', null, null, {
+    enabled: true, attemptId: 'attempt-43', now: NOW, write: event => events.push(event),
+  });
+  selected.noteV2Joint(false);
+  selected.captureV2JointCandidates(['joint-candidate']);
+  assert.equal(selected.captureV2Selection('joint-candidate'), true);
+  const token = 'a'.repeat(32);
+  selected.recordV2Enqueued(token);
+  assert.equal(observeV2QueueStart('b'.repeat(32), () => {}, true), false);
+  assert.equal(observeV2QueueStart(token, attempt => events.push({
+    attempt, stage: 'controller_observed_track_start',
+  }), true), true);
+  assert.equal(observeV2QueueStart(token, () => {}, true), false);
+  selected.finish({ outcome: 'success', chosenId: 'joint-candidate' });
+  assert.deepEqual(events.filter(event => event.event_type === 'v2_lifecycle').map(event => event.stage), [
+    'selected', 'selected', 'enqueued',
+  ]);
+  assert.deepEqual(events.at(-2), { attempt: 'attempt-43', stage: 'controller_observed_track_start' });
+  assert.equal(JSON.stringify(events).includes(token), false, 'private tokens never enter the audit log');
 });
 
 test('Essentia summary counts observed distinct exposures and correlates only successful Agent choices', () => {
@@ -240,6 +269,12 @@ test('source wiring observes existing boundaries without adding model or search 
   assert.match(agent, /seen: auditSeen/);
   assert.match(agent, /audit\.captureCandidates\(extras\.seen\.keys\(\)\)/);
   assert.match(agent, /audit\.finish\(\{\s*outcome: 'error', fallbackPath: 'pool'/);
+  assert.ok(
+    agent.indexOf('const selectedFromV2Joint = audit.captureV2Selection(song.id)')
+      > agent.indexOf('if (albumHours > 0)'),
+    'v2 attribution must use the final candidate after artist and album repicks',
+  );
+  assert.match(agent, /selectedFromV2Joint \? receipt => audit\.recordV2Enqueued\(receipt\.token\)/);
   assert.match(pool, /onAuditCandidates\?\.\(candidates\.map\(\(c\) => c\?\.id\)\)/);
   assert.match(pool, /CANDIDATE_CAP = 18/);
   assert.match(scheduler, /TARGET_POOL = 40/);

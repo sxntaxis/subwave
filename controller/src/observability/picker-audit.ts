@@ -85,6 +85,16 @@ export interface PickerAuditEvent {
   music_v2?: PickerMusicV2Audit;
 }
 
+export interface PickerAuditLifecycleEvent {
+  event_type: 'v2_lifecycle';
+  lifecycle_version: 1;
+  timestamp: string;
+  attempt_id: string;
+  stage: 'selected' | 'enqueue_rejected' | 'enqueued' | 'controller_observed_track_start';
+  v2_joint_offered?: boolean;
+  outcome?: string;
+}
+
 const ENABLED = process.env.SUBWAVE_PICKER_AUDIT === '1';
 const AUDIT_DIR = '/run/subwave-picker-audit';
 const MAX_QUEUED = 128;
@@ -125,7 +135,7 @@ async function pruneOldFiles(today: string, directory: string): Promise<void> {
   }
 }
 
-export async function appendPickerAuditEvent(event: PickerAuditEvent, directory = AUDIT_DIR): Promise<void> {
+export async function appendPickerAuditEvent(event: PickerAuditEvent | PickerAuditLifecycleEvent, directory = AUDIT_DIR): Promise<void> {
   try {
     const dir = await lstat(directory);
     if (!dir.isDirectory() || dir.isSymbolicLink() || (dir.mode & 0o077) !== 0
@@ -172,6 +182,10 @@ export interface PickerAuditRecorder {
   noteV2Joint(unavailable: boolean): void;
   noteV2Compare(): void;
   captureV2Profiles(ids: Iterable<string | null | undefined>): void;
+  captureV2JointCandidates(ids: Iterable<string | null | undefined>): void;
+  captureV2Selection(id: string): boolean;
+  recordV2EnqueueRejected(outcome: string): void;
+  recordV2Enqueued(token: string): void;
   finish(result: PickerAuditResult): void;
 }
 
@@ -216,7 +230,7 @@ export function createPickerAuditRecorder(
     enabled: boolean;
     attemptId: string | null;
     now?: () => Date;
-    write: (event: PickerAuditEvent) => void;
+    write: (event: PickerAuditEvent | PickerAuditLifecycleEvent) => void;
   },
 ): PickerAuditRecorder {
   let showAtIso = showAt instanceof Date
@@ -242,6 +256,8 @@ export function createPickerAuditRecorder(
   let v2CompareCalls = 0;
   let v2ProfileObserved = false;
   const v2ProfileIds = new Set<string>();
+  const v2JointIds = new Set<string>();
+  let selectedJoint = false;
   let finished = false;
   return {
     setShowId(id) { resolvedShowId = id ?? null; },
@@ -310,6 +326,31 @@ export function createPickerAuditRecorder(
       v2ProfileObserved = true;
       for (const id of ids) if (v2ProfileIds.size < 100_000 && typeof id === 'string' && id) v2ProfileIds.add(id);
     },
+    captureV2JointCandidates(ids) {
+      if (!options.enabled || finished) return;
+      v2Observed = true;
+      for (const id of ids) if (v2JointIds.size < 100_000 && typeof id === 'string' && id) v2JointIds.add(id);
+    },
+    captureV2Selection(id) {
+      if (!options.enabled || finished) return false;
+      selectedJoint = v2JointIds.has(id);
+      if (v2Observed) writeLifecycle(options, {
+        stage: 'selected',
+        v2_joint_offered: selectedJoint,
+      });
+      return selectedJoint;
+    },
+    recordV2EnqueueRejected(outcome) {
+      if (!options.enabled || finished || !selectedJoint) return;
+      writeLifecycle(options, { stage: 'enqueue_rejected', outcome: outcome.slice(0, 32) });
+    },
+    recordV2Enqueued(token) {
+      if (!options.enabled || finished || !selectedJoint || !/^[0-9a-f]{32}$/.test(token)) return;
+      const attemptId = options.attemptId;
+      if (!attemptId) return;
+      writeLifecycle(options, { stage: 'enqueued' });
+      rememberV2Acceptance(token, attemptId);
+    },
     finish(result) {
       if (!options.enabled || finished) return;
       finished = true;
@@ -359,6 +400,48 @@ export function createPickerAuditRecorder(
   };
 }
 
+type AuditOptions = { enabled: boolean; attemptId: string | null; now?: () => Date; write: (event: PickerAuditEvent | PickerAuditLifecycleEvent) => void };
+function writeLifecycle(options: AuditOptions, fields: Omit<PickerAuditLifecycleEvent, 'event_type' | 'lifecycle_version' | 'timestamp' | 'attempt_id'>) {
+  if (!options.enabled || !options.attemptId) return;
+  options.write({
+    event_type: 'v2_lifecycle', lifecycle_version: 1,
+    timestamp: (options.now ?? (() => new Date()))().toISOString(),
+    attempt_id: options.attemptId, ...fields,
+  });
+}
+
+const v2Accepted = new Map<string, { attemptId: string; at: number }>();
+function rememberV2Acceptance(token: string, attemptId: string): void {
+  const now = Date.now();
+  for (const [key, item] of v2Accepted) if (now - item.at > 24 * 60 * 60 * 1000) v2Accepted.delete(key);
+  if (v2Accepted.size >= 2048) v2Accepted.delete(v2Accepted.keys().next().value!);
+  v2Accepted.set(token, { attemptId, at: now });
+}
+
+export function observeV2QueueStart(
+  token: unknown,
+  emit: (attemptId: string) => void = attemptId => {
+    writeLifecycle({
+      enabled: true, attemptId,
+      write(event) { queueAuditEvent(event); },
+    }, { stage: 'controller_observed_track_start' });
+  },
+  enabled = ENABLED,
+): boolean {
+  if (!enabled || typeof token !== 'string' || !/^[0-9a-f]{32}$/.test(token)) return false;
+  const accepted = v2Accepted.get(token);
+  if (!accepted) return false;
+  v2Accepted.delete(token);
+  try { emit(accepted.attemptId); } catch { /* attribution is best effort */ }
+  return true;
+}
+
+function queueAuditEvent(event: PickerAuditEvent | PickerAuditLifecycleEvent): void {
+  if (queued >= MAX_QUEUED) { dropped++; return; }
+  queued++;
+  writeChain = writeChain.then(() => appendPickerAuditEvent(event)).catch(() => { noteError(); }).finally(() => { queued--; });
+}
+
 // No filesystem access occurs until a complete normal attempt has an outcome.
 // Candidate collection is an in-memory ordered set and never consumes RNG.
 export function beginPickerAudit(
@@ -371,9 +454,7 @@ export function beginPickerAudit(
     enabled: ENABLED,
     attemptId: trace?.traceId ?? null,
     write(event) {
-      if (queued >= MAX_QUEUED) { dropped++; return; }
-      queued++;
-      writeChain = writeChain.then(() => appendPickerAuditEvent(event)).catch(() => { noteError(); }).finally(() => { queued--; });
+      queueAuditEvent(event);
     },
   });
 }

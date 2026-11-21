@@ -144,6 +144,8 @@ export interface QueueItem {
   // protocol records ready/failed against it, so queue membership is never
   // mistaken for resolution state.
   resolveProbeId?: string;
+  /** Private exact insertion identity for opt-in picker audit only. */
+  queueToken?: string;
   transitionSfx?: string;
   startedAt?: string;
   endedAt?: string;
@@ -180,6 +182,11 @@ export interface QueuePushArgs {
   allowDuplicate?: boolean;
   linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
   linkClockAt?: Date | number | null;
+}
+
+export interface QueueInsertionReceipt {
+  item: QueueItem;
+  token: string;
 }
 
 // One row in the rolling recent-plays sidecar (the picker's repeat window).

@@ -58,6 +58,7 @@ export interface PickerScope {
     noteV2Joint?(unavailable: boolean): void;
     noteV2Compare?(): void;
     captureV2Profiles?(ids: Iterable<string | null | undefined>): void;
+    captureV2JointCandidates?(ids: Iterable<string | null | undefined>): void;
   };
   // Optional attempt-local accumulator. The track picker supplies this so it
   // can snapshot the same IDs exposed through PickerExtras even if the agent

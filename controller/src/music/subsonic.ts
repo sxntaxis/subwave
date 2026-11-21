@@ -844,13 +844,16 @@ export function getPlayableUri(song, resolveProbeId: string | null = null) {
 export function escAnnotate(s) {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
-export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null } = {}) {
+export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null; queueToken?: string | null } = {}) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
   ];
+  if (opts.queueToken != null) {
+    if (/^[0-9a-f]{32}$/.test(opts.queueToken)) fields.push(`subwave_queue_token="${opts.queueToken}"`);
+  }
   // Era year, never the raw `year` (#1418) — a reissue anthology carries the
   // reissue's date and every downstream surface inherits it. Unknown emits NO
   // year field rather than a wrong one.
@@ -916,6 +919,7 @@ export function getClipUri(song, clipPath: string, crossSec: number) {
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
     'subwave_clip="1"',
+    'subwave_queue_token=""',
     `liq_cross_duration="${escAnnotate(crossSec)}"`,
   ];
   // No liq_amplify: the render already gain-matched both sources, so a stamp

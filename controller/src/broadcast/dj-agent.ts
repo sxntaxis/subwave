@@ -490,20 +490,29 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const dissolve = wants('dissolve');
   const chop = wants('chop');
   const loop = wants('loop');
+  // Guards may repick from the model's seen set. Attribute only if the final
+  // candidate being committed was actually returned by v2 joint discovery.
+  const selectedFromV2Joint = audit.captureV2Selection(song.id);
   // Attach the link to the pick so it airs as the pick starts (back-announcing
   // the track on-air now), instead of immediately over that on-air track (#189).
   // Stamp `current` as the link's back-announce target so the queue can drop the
   // link if a request jumps ahead of this pick before it airs.
-  const queued = await enqueuePick(queue, song, object.reason, 'agent', link, current, { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt: linkAirAt }, target);
+  const queued = await enqueuePick(
+    queue, song, object.reason, 'agent', link, current,
+    { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt: linkAirAt }, target,
+    selectedFromV2Joint ? receipt => audit.recordV2Enqueued(receipt.token) : undefined,
+  );
   // Pick was already queued/on-air and got deduped — don't record a session turn
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
   if (queued === 'stale') {
+    audit.recordV2EnqueueRejected('stale');
     audit.finish({ outcome: 'collision', chosenId: song.id ?? null, toolCalls: toolCalls.length, acousticSearchToolCalls });
     emitPickDecision({ ...pickDecisionBase(ctx, current, showAt, target, predecessorOverride ? current : null, prior), decisionPath: 'collision_or_stale', chosenTrackId: null, fallback: true, fallbackReason: 'stale' });
     return 'stale';
   }
   if (queued !== 'queued') {
+    audit.recordV2EnqueueRejected(queued);
     audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length, acousticSearchToolCalls });
     return false;
   }

@@ -1,16 +1,58 @@
-import test from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { requestAgent } from '../src/broadcast/dj-agent/agents.js';
-import { pickerScope, withPickerSeedFixtureForTest } from '../src/llm/internal/tools/picker/scope.js';
-import { withAgentRunnerForTest } from '../src/llm/internal/agent-factory.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { djAgent } from '../src/llm/internal/strategy/agent.js';
-import { withAcousticProbeForTest } from '../src/music/library-db/acoustic-index.js';
-import { buildPickerContext } from '../src/llm/internal/tools/picker/scope.js';
+
+const previousStateDir = process.env.STATE_DIR;
+const stateDir = mkdtempSync(join(tmpdir(), 'pilot-request-route-'));
+process.env.STATE_DIR = stateDir;
+const [
+  { requestAgent },
+  { pickerScope, withPickerSeedFixtureForTest, buildPickerContext },
+  { withAgentRunnerForTest },
+  { withAcousticProbeForTest },
+  library,
+  libraryDb,
+] = await Promise.all([
+  import('../src/broadcast/dj-agent/agents.js'),
+  import('../src/llm/internal/tools/picker/scope.js'),
+  import('../src/llm/internal/agent-factory.js'),
+  import('../src/music/library-db/acoustic-index.js'),
+  import('../src/music/library.js'),
+  import('../src/music/library-db.js'),
+]);
+const songs = Array.from({ length: 18 }, (_, i) => ({
+  id: `fixture-${i}`, title: `track ${i}`, artist: `artist ${i}`, duration: 180,
+}));
+await library.load();
+for (const song of songs) libraryDb.upsertTrackMeta(song.id, song);
+// Give both executions the same mixed airing history: some candidates have
+// durable plays and others are provably unaired. The DB is loaded and seeded
+// before either run, so the rescue tool cannot warm history between them.
+for (let i = 6; i < songs.length; i++) {
+  libraryDb.recordPlay({
+    trackId: songs[i].id,
+    title: songs[i].title,
+    artist: songs[i].artist,
+    album: null,
+    playedAt: new Date(Date.now() - (i - 5) * 86400000).toISOString(),
+    source: 'ai',
+    requestedBy: null,
+    showId: null,
+    showName: null,
+  });
+}
+
+after(() => {
+  library.shutdown();
+  if (previousStateDir === undefined) delete process.env.STATE_DIR;
+  else process.env.STATE_DIR = previousStateDir;
+  rmSync(stateDir, { recursive: true, force: true });
+});
 
 test('actual requestAgent.run offers identical request candidates with flag off and on', async () => {
-  const songs = Array.from({ length: 18 }, (_, i) => ({
-    id: `fixture-${i}`, title: `track ${i}`, artist: `artist ${i}`, duration: 180,
-  }));
   async function run(flag: string) {
     const previous = process.env.PICKER_VNEXT_AGENT, random = Math.random, fetch = globalThis.fetch;
     process.env.PICKER_VNEXT_AGENT = flag;
@@ -47,7 +89,13 @@ test('actual requestAgent.run offers identical request candidates with flag off 
       Math.random = random; globalThis.fetch = fetch;
     }
   }
-  assert.deepEqual(await run('0'), await run('1'));
+  const off = await run('0');
+  const on = await run('1');
+  assert.deepEqual(off, on);
+  assert.ok((off.offered as any[]).some(item => item.id === 'fixture-0' && item.unaired === true),
+    'the deterministic history fixture retains the unaired annotation');
+  assert.ok((off.offered as any[]).some(item => item.id.startsWith('fixture-') && !item.unaired
+    && typeof item.play_count === 'number'), 'played candidates retain their history-derived fields');
   const probe = { starts: 0, lookups: 0 };
   const ctx = buildPickerContext(pickerScope({ selection: { predecessorId: 'anchor', recentAiredIds: [] } }));
   await withAcousticProbeForTest(probe, () => ctx.collectAsync(songs));

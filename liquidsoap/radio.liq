@@ -320,7 +320,9 @@ def poll_queue() =
     contents = string.trim(file.contents("#{state_dir}/next.txt"))
     file.remove("#{state_dir}/next.txt")
     if contents != "" then
-      log("Queueing: #{redact_subhttp_uri(contents)}")
+      # The annotated URI can contain private controller attribution metadata.
+      # Never log the URI or annotations, including when its source fails.
+      log("Queueing controller track handoff")
       ignore(dj_queue.push(request.create(contents)))
     end
   end
@@ -1482,6 +1484,12 @@ def on_meta(m) =
   album = m["album"]
   filename = m["filename"]
   subsonic_id = m["subsonic_id"]
+  is_clip = m["subwave_clip"] == "1"
+  token_candidate = m["subwave_queue_token"]
+  # The controller strictly validates 32 lowercase hex characters before
+  # attribution. Preserve the source annotation only on full-track metadata;
+  # clips and malformed values cannot attribute an accepted queue item.
+  queue_token = if is_clip then "" else token_candidate end
   # BEDS — an instrumental the controller pushed into dj_queue for the DJ to
   # talk over BETWEEN songs (broadcast/beds.ts). It rides the music chain but is
   # NOT a song: never reaches now-playing.json, never pushes an ICY title. It
@@ -1504,7 +1512,7 @@ def on_meta(m) =
   elsif title != "" or artist != "" then
     bed_on_air := false
     jingle_now_on_air := false
-    log("on_meta: title=#{title} | artist=#{artist} | album=#{album} | id=#{subsonic_id}")
+    log("on_meta: music metadata received")
     ts = int_of_float(time())
     # json.stringify, not interpolation: titles with embedded quotes or
     # backslashes produce invalid JSON.
@@ -1513,6 +1521,8 @@ def on_meta(m) =
       artist = artist,
       album = album,
       subsonic_id = subsonic_id,
+      subwave_queue_token = if queue_token == "" then null else queue_token end,
+      subwave_clip = is_clip,
       filename = filename,
       timestamp = ts
     })

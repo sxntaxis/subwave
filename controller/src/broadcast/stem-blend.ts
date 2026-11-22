@@ -64,7 +64,7 @@ export async function maybeRenderBlend(
   const s = settings.get();
   if (s?.transitions?.stemBlends !== true) return null;
   if (s?.transitions?.pairDrain === false) return null; // blends ride pair drains
-  if (!settings.getEffectivePersona()?.djMode) return null;
+  if (!settings.effectsActive()) return null;
   if (!outTrack?.id || !inTrack?.id) return null;
   if (opts.outCapped) return null;      // a capped exit already owns that ending
   // Dead-air trim veto (music/silence-trim.ts). The incoming head is

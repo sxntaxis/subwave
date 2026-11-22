@@ -6,10 +6,10 @@ Editorial guidance shared by BOTH pick strategies — the session agent
 track is chosen, which is the whole reason `PICKER_CRITERIA` was shared in code
 before it lived here.
 
-**effects** renders only when transition effects are active (the on-air persona's
-`djMode` — `settings.effectsActive`), so a non-DJ persona never sees it and
-leaves the `transition` field null. Keep it compact: it rides on EVERY DJ-mode
-pick on both paths, and the agent path pays for it alongside the schema
+**effects** renders only when musical effects are enabled through
+`settings.effectsActive`: legacy DJ-mode behavior or the independent
+`SUBWAVE_MUSIC_MIXING_V1` opt-in. The latter does not authorize speech.
+Keep this compact: it rides on every effect-enabled pick on both paths, and the agent path pays for it alongside the schema
 description. The station validates every ask against the audio analysis
 (`queue.applyMixTransition`) and silently drops one that doesn't land, so this
 only needs to teach WHEN to reach for each effect — trigger and

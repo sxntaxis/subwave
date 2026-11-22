@@ -24,7 +24,8 @@ export const PICK_SCHEMA = z.object({
   id: z.string().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE}`),
   reason: z.string().describe('internal scratchpad only — max 12 words, never shown to the listener; do not justify, just note what makes THIS pick a fresh step (a shift in energy/era/texture, or an artist genuinely new to the rotation), not a vibe label you would recycle pick after pick (e.g. "warmer, driving energy", never a repeated "mellow reflective step"). Only call a pick a "new artist" when it has no "artist_play_count"/"artist_last_played_days_ago"; "unaired" means this song is new to the station, not that its artist is. If the artist shows recent or frequent plays, describe the real reason instead (energy shift, texture, flow)'),
   say: z.string().nullable().describe('when the latest event message says to write a spoken link, set this to one or two natural sentences in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). Never state a clock time unless the event message tells you when the link airs — then use exactly that time. When the event says stay silent, set this to null'),
-  // Only honoured when the system prompt offers them (settings.effectsActive).
+  // Only honoured when the system prompt offers them (settings.effectsActive,
+  // now independent of the voice persona under the music-mixing opt-in).
   // Keep this a pointer: the full coaching is dj.effectsGuidance(), and
   // repeating it here sends the effects text twice per call.
   transition: z.enum(['normal', 'blend', 'sweep', 'washout', 'dissolve', 'chop', 'loop']).nullable().describe('transition treatment per the TRANSITION EFFECTS guidance: "washout"/"loop" end THIS pick (loop needs measured tempo), "sweep"/"dissolve"/"chop" carry the previous track across a clash (chop only out of beat-driven material), "blend" only for an exceptionally locked pair; "normal" or null for a plain crossfade'),
@@ -38,8 +39,8 @@ export const PICK_SCHEMA_NO_FX = PICK_SCHEMA.extend({
   transition: z.enum(['normal', 'blend', 'sweep', 'washout', 'dissolve', 'chop', 'loop']).nullable().describe('always set to null — transition effects are not available for this persona'),
 });
 
-// The live pick schema, resolved per run: transition coaching follows the
-// on-air persona's djMode and the `say` length its scriptLength. This is the
+// The live pick schema, resolved per run: music transition coaching follows
+// effectsActive(), while spoken links retain the on-air persona style and length. This is the
 // plain un-wrapped object, for callers that need to .extend() (repickFromSeen
 // pins `id` to the run's candidates) — extend THIS then re-wrap with
 // modelTolerant, since a ZodPreprocess pipe has no .extend.

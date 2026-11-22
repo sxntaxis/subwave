@@ -428,7 +428,8 @@ export function chopPeriodFor(bpm: number | null): number {
 }
 
 // A flourish to fire across the blend, or null (the common case). Caller still
-// gates on djMode, sfx.enabled and a cooldown. Names are built-in SFX
+// gates on sfx.enabled and the cadence rules. Music mixing alone never enables
+// stingers. Names are built-in SFX
 // (broadcast/sfx.ts).
 export function transitionSfxFor(
   cur: Analysis,

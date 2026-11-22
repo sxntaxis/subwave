@@ -106,7 +106,7 @@ export async function enqueuePick(
   // occasionally carry the slightly longer reading.
   const introLink = dropEchoedLink(trimLinkToIntro(link, song), queue);
   const track: any = trackFields(song);
-  // Transition effects (DJ mode only); getAnnotatedUri stamps the liq_* flags
+  // Music transition effects (independent of persona voice when opted in); getAnnotatedUri stamps liq_* flags
   // and radio.liq ramps them. sweep muffles the crossfade INTO this pick;
   // dissolve/chop act on the PREVIOUS track under this pick; washout rings this
   // track out as it ENDS.

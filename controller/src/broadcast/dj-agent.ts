@@ -959,11 +959,19 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // The real Subsonic id is surfaced so similarSongs / tracksLikeThis have
     // one to pass; without it the agent fabricates a slug and Navidrome answers
     // "data not found".
-    const eventText = `Now playing "${current?.title}" by ${current?.artist}`
-      + (current?.id ? ` [id: ${current.id}]` : '')
-      + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
-      + '. Pick the track to play next.'
-      + linkClause;
+    // A held pair-drain successor is a PLANNED predecessor, never a verified
+    // airplay. Keep this separate from the already verified historical arc.
+    const eventText = settings.musicMixingEnabled() && predecessor
+      ? `The next pick will FOLLOW the queued, NOT-YET-AIRED track "${current?.title}" by ${current?.artist}`
+        + (current?.id ? ` [id: ${current.id}]` : '')
+        + (previous ? `; actual now-playing is "${previous.title}" by ${previous.artist}` : '')
+        + '. Use the queued track as the intended transition predecessor, not as verified airplay. Pick its successor.'
+        + linkClause
+      : `Now playing "${current?.title}" by ${current?.artist}`
+        + (current?.id ? ` [id: ${current.id}]` : '')
+        + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
+        + '. Pick the track to play next.'
+        + linkClause;
     // All three readers share this same frozen verified-start snapshot. Queued
     // picks and filtered scoring context must never become historical evidence.
     const verifiedHistory = trajectoryEnabled()
@@ -1020,7 +1028,9 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         : directionSnapshot.replanDue
           ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
           : 'Continue the established movement; normally return direction:null. ')
-      + 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.';
+      + (settings.musicMixingEnabled()
+        ? 'When two or more eligible tracks are available, compare at least two genuinely different musical continuations (energy, texture, era, or rhythmic fit) before choosing; a first plausible song is not itself a reason to commit. A strict show playlist may be the only legitimate discovery source: compare distinct tracks within it instead of making redundant off-show tool calls. Respect the real airtime deadline and do not invent unavailable candidates.'
+        : 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.');
     const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${temporalClause}${directionClause}${trajectoryClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,

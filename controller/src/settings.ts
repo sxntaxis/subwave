@@ -211,7 +211,7 @@ export {
   effectiveFrequency,
   effectiveMaxTrackSec,
   effectiveMinTrackSec,
-  effectsActive,
+  effectsActive, musicMixingEnabled,
   getActivePersona,
   getEffectivePersona,
   getOnAirRoster,

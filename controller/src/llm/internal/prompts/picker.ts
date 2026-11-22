@@ -27,11 +27,11 @@ export type PoolEditorialDirection =
 // Coaching for the DJ transition effects (the "transition" output field),
 // shared by both pick strategies — the conversational agent (dj-agent.ts
 // pickSystem) and the pool picker below — so the craft guidance can't drift
-// between them. Returns '' when effects are off (the on-air persona isn't in
-// DJ mode — settings.effectsActive), so callers append it unconditionally.
+// between them. Returns '' when effects are off (settings.effectsActive),
+// independent of the voice persona with the new opt-in; callers append it unconditionally.
 // Lives here rather than in broadcast/dj-agent.ts because llm/ must not
 // import from broadcast/.
-// Compact by design (~250 words, was ~600): this block rides on EVERY DJ-mode
+// Compact by design (~250 words, was ~600): this block rides on EVERY effects-enabled
 // pick on both paths, and the agent path pays for it alongside the schema
 // description. The station validates every ask against the audio analysis
 // (queue.applyMixTransition), so the prompt only needs to teach WHEN to reach

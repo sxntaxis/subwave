@@ -40,13 +40,17 @@ export function effectiveFrequency(persona: unknown = getEffectivePersona()) {
   return FREQUENCIES[Math.min(i + 1, FREQUENCIES.length - 1)];
 }
 
-// Single gate for the transition effects (filter sweep + echo washout): they're
-// on whenever the on-air persona is in DJ mode — no separate toggle. The picker
-// schema/prompt builders use this to decide whether to offer the DJ the
-// `transition` choice; when off, the guidance is never shown and nothing is
-// applied.
+// Musical mixcraft is independent of speech and DJ persona behavior. The opt-in
+// guard preserves the exact v2.5.1 policy unless enabled; a music-only station
+// may request effects without increasing voice, ident or SFX frequency.
+// Keep the legacy djMode branch for existing installations.
+export function musicMixingEnabled(): boolean {
+  return process.env.SUBWAVE_MUSIC_MIXING_V1 === '1';
+}
+
 export function effectsActive(persona: unknown = getEffectivePersona()): boolean {
-  return !!(persona as { djMode?: unknown } | null | undefined)?.djMode;
+  return musicMixingEnabled()
+    || !!(persona as { djMode?: unknown } | null | undefined)?.djMode;
 }
 
 // True only when the effective persona's linkStyle is explicitly 'announce'.

@@ -974,11 +974,27 @@ class Queue {
   }
 
   applyMixTransition(item: QueueItem) {
-    const persona: Persona | null = settings.getEffectivePersona();
     if (!item?.track) return;
-    // Persona flipped out of DJ mode between pick and drain: no flag may survive.
-    if (!persona?.djMode) {
+    // One bounded record of the effective transition policy. Logging never
+    // supplies evidence that Liquidsoap actually rendered an effect.
+    const requestedEffects = TRANSITION_EFFECTS.filter(kind => !!item.track[kind]);
+    const rejectionReasons: Record<string, string> = {};
+    const observe = (stage: string, reason: string | null = null) => {
+      if (!settings.musicMixingEnabled()) return;
+      const admitted = TRANSITION_EFFECTS.filter(kind => !!item.track[kind]);
+      logEvent('mix.transition.policy', {
+        trackId: item.track.id || null, stage, reason,
+        requested: requestedEffects, admitted,
+        rejected: requestedEffects.filter(kind => !admitted.includes(kind))
+          .map(kind => ({ kind, reason: rejectionReasons[kind] ?? reason ?? 'validation' })),
+        exitCrossSec: item.track.crossSec ?? null,
+      });
+    };
+    // The persona may flip between pick and drain; only the audio-mixing gate
+    // decides whether the queued treatment survives. Voice remains separate.
+    if (!settings.effectsActive()) {
       if (item.track.sweep || item.track.washout || item.track.blend || item.track.dissolve || item.track.chop || item.track.loop) this.stripEffect(item.track, 'dj mode off');
+      observe('disabled', 'music_effects_disabled');
       return;
     }
 
@@ -988,6 +1004,7 @@ class Queue {
     for (const kind of TRANSITION_EFFECTS) {
       if (item.track[kind] && !settings.effectEnabled(kind)) {
         delete item.track[kind];
+        rejectionReasons[kind] = 'operator_effect_switch_off';
         this.log('mix', `${kind} dropped (switched off in settings)`);
       }
     }
@@ -997,6 +1014,7 @@ class Queue {
     if (!prevTrack) {
       // Nothing on-air to validate against: an effect would garnish silence.
       if (item.track.sweep || item.track.washout || item.track.blend || item.track.dissolve || item.track.chop || item.track.loop) this.stripEffect(item.track, 'no predecessor');
+      observe('no_predecessor', 'no_predecessor');
       return;
     }
 
@@ -1065,6 +1083,7 @@ class Queue {
       for (const k of ['sweep', 'blend', 'dissolve', 'chop'] as const) {
         if (item.track[k]) {
           delete item.track[k];
+          rejectionReasons[k] = 'rendered_stem_seam';
           this.log('mix', `${k} dropped (the seam into this pick is a rendered stem blend)`);
         }
       }
@@ -1083,6 +1102,7 @@ class Queue {
         : item.track.washoutAuto ? null : 'normal';
     const last2 = this._recentEffects.slice(-2);
     if (choice && choice !== 'normal' && last2.length >= 2 && last2.every(k => k === choice)) {
+      rejectionReasons[choice] = 'third_identical_effect';
       this.stripEffect(item.track, `variety — third ${choice} in a row`);
     }
     if (choice) {
@@ -1094,10 +1114,12 @@ class Queue {
     // stripping here keeps the pick log honest.
     if (item.track.sweep && prevTrack.loop) {
       delete item.track.sweep;
+      rejectionReasons.sweep = 'prior_exit';
       this.log('mix', 'sweep dropped (previous track already exits through a loop)');
     }
     if (item.track.sweep && !mix.effectAllowedFor('sweep', cur, next)) {
       delete item.track.sweep;
+      rejectionReasons.sweep = 'incompatible_pair';
       this.log('mix', 'sweep dropped (tracks too compatible — beat-blend beats a sweep)');
     }
     if (item.track.sweep) this.log('mix', `sweep armed → ${item.track.title}`);
@@ -1105,10 +1127,12 @@ class Queue {
     // since the handover exposes a clash rather than hiding it.
     if (item.track.blend && prevTrack.loop) {
       delete item.track.blend;
+      rejectionReasons.blend = 'prior_exit';
       this.log('mix', 'blend dropped (previous track already exits through a loop)');
     }
     if (item.track.blend && !mix.effectAllowedFor('blend', cur, next)) {
       delete item.track.blend;
+      rejectionReasons.blend = 'incompatible_pair';
       this.log('mix', 'blend dropped (tracks clash — a handover needs a compatible pair)');
     }
     if (item.track.blend) this.log('mix', `blend armed → ${item.track.title}`);
@@ -1117,10 +1141,12 @@ class Queue {
     // both shape the same outgoing ending.
     if (item.track.dissolve && (prevTrack.washout || prevTrack.loop)) {
       delete item.track.dissolve;
+      rejectionReasons.dissolve = 'prior_exit';
       this.log('mix', `dissolve dropped (previous track already exits through a ${prevTrack.washout ? 'washout' : 'loop'})`);
     }
     if (item.track.dissolve && !mix.effectAllowedFor('dissolve', cur, next)) {
       delete item.track.dissolve;
+      rejectionReasons.dissolve = 'incompatible_pair';
       this.log('mix', 'dissolve dropped (tracks too compatible — a blend keeps the groove a wash would kill)');
     }
     if (item.track.dissolve) this.log('mix', `dissolve armed → ${item.track.title}`);
@@ -1129,10 +1155,12 @@ class Queue {
     // been sent. Yields to a previous-track washout, same as the dissolve.
     if (item.track.chop && (prevTrack.washout || prevTrack.loop)) {
       delete item.track.chop;
+      rejectionReasons.chop = 'prior_exit';
       this.log('mix', `chop dropped (previous track already exits through a ${prevTrack.washout ? 'washout' : 'loop'})`);
     }
     if (item.track.chop && !mix.effectAllowedFor('chop', cur, next)) {
       delete item.track.chop;
+      rejectionReasons.chop = 'incompatible_pair';
       this.log('mix', 'chop dropped (tracks too compatible — a beat-blend beats a cut)');
     }
     if (item.track.chop) {
@@ -1144,6 +1172,7 @@ class Queue {
     // tempo. Hard data gate: it needs a measured BPM for a bar length.
     if (item.track.loop && !(next.bpm && next.bpm > 0)) {
       delete item.track.loop;
+      rejectionReasons.loop = 'missing_tempo';
       this.log('mix', 'loop dropped (no measured tempo — a loop needs a bar length)');
     }
     if (item.track.loop) {
@@ -1171,6 +1200,7 @@ class Queue {
         this.log('mix', `transition stinger armed (${fx}) → ${item.track.title}`);
       }
     }
+    observe('validated');
   }
 
   // Seconds before the on-air track's EFFECTIVE end (min of tagged duration
@@ -1289,12 +1319,11 @@ class Queue {
     return cut.cueOutSec;
   }
 
-  // Whether pair-aware drains are in effect. DJ-mode only: both consumers of
-  // the hold no-op without djMode, so holding would cost dj_queue visibility
-  // for nothing. Non-DJ personas keep the eager drain byte-for-byte.
+  // Pair-aware mixing is music policy, not voice policy. Default OFF for
+  // non-DJ personas unless explicitly opted in (v2.5.1 parity).
   pairDrainActive(): boolean {
     return settings.get().transitions?.pairDrain !== false
-      && !!settings.getEffectivePersona()?.djMode;
+      && settings.effectsActive();
   }
 
   // Basenames of rendered transition clips that haven't AIRED yet. A clip rides
@@ -1316,7 +1345,7 @@ class Queue {
   // ending-aware canvas is narrowed, never widened (the pair value wins only
   // when SHORTER).
   applyPairStamps(item: QueueItem, successor: QueueItem) {
-    if (!settings.getEffectivePersona()?.djMode) return;
+    if (!settings.effectsActive()) return;
     if (item.track.washout || item.track.loop) return;
     const cur = this.mixAnalysisFor(item.track);
     const next = this.mixAnalysisFor(successor.track);
@@ -1334,6 +1363,10 @@ class Queue {
     item.track.crossSec = existing != null ? Math.min(existing, secs) : secs;
     this.log('mix', `pair blend ${item.track.crossSec}s: ${item.track.title} → ${successor.track.title}`
       + (existing != null && existing < secs ? ' (ending canvas kept)' : ''));
+    if (settings.musicMixingEnabled()) logEvent('mix.transition.pair_stamped', {
+      outgoingId: item.track.id || null, incomingId: successor.track.id || null,
+      crossSec: item.track.crossSec, source: existing != null && existing < secs ? 'ending_canvas' : 'pair_analysis',
+    });
   }
 
   // Walk `upcoming` and feed unsent items to Liquidsoap one at a time, spaced
@@ -1423,7 +1456,7 @@ class Queue {
         if (!this.upcoming.includes(item)) continue;
 
         // Shape the transition INTO this track from its compatibility with the
-        // one it follows. Gated on djMode and on both tracks being analysed.
+        // one it follows. Gated on eligible music mix policy and both tracks being analysed.
         this.applyMixTransition(item);
 
         // Loudness normalisation, on EVERY track, not just DJ mode.
@@ -1539,6 +1572,11 @@ class Queue {
           : item.priorityLane === 'operator' ? config.liquidsoap.operatorPriorityFile
           : config.liquidsoap.queueFile;
         await writeHandoff(handoffFile, uri, { maxWaitMs: 5000 });
+        if (settings.musicMixingEnabled()) logEvent('mix.transition.handoff', {
+          trackId: item.track.id || null, outgoingCrossSec: item.track.crossSec ?? null,
+          entryEffects: TRANSITION_EFFECTS.filter(kind => !!item.track[kind]),
+          hasKnownSuccessor: !!successor, stemClipPrepared: !!item.stemBlend,
+        });
         if (item.stemBlend) {
           // The clip rides behind its outgoing track, annotated as the INCOMING
           // one so now-playing flips at the blend. Reuse the successor the blend
@@ -2357,6 +2395,24 @@ class Queue {
         source: 'auto',
       };
       this.log('playing', `${np.title} — ${np.artist}`, { source: 'auto' });
+    }
+
+    // A mixer start confirms WHICH pair occurred, not that any particular
+    // Liquidsoap FX branch was audible. Avoid an invented effect-success claim.
+    if (settings.musicMixingEnabled() && outgoingPrev?.track) {
+      const idMatches = !!np.subsonic_id && np.subsonic_id === this.current.track.id;
+      logEvent('mix.transition.mixer_start', {
+        outgoingId: outgoingPrev.track.id || null,
+        incomingId: np.subsonic_id || null,
+        identityMatchesQueue: idMatches,
+        plannedOutgoingCrossSec: outgoingPrev.track.crossSec ?? null,
+        outgoingExitEffects: TRANSITION_EFFECTS.filter(kind =>
+          (kind === 'washout' || kind === 'loop') && !!outgoingPrev.track[kind]),
+        incomingEntryEffects: idMatches ? TRANSITION_EFFECTS.filter(kind =>
+          kind !== 'washout' && kind !== 'loop' && !!this.current.track[kind]) : [],
+        // No audible duration/FX confirmation is available without mixer instrumentation.
+        audibleEffectConfirmed: false,
+      });
     }
 
     // Record the play into the live session's chat history.

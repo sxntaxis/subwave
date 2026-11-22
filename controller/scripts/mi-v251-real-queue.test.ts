@@ -191,7 +191,24 @@ test('H02: real queue + exact-id library + verified mixer + durable editorial me
     assert.equal(events().length,beforeStem+1,'full-song stem continuation is not a second event');
     assert.equal(queue.current?.stemClipStarted,true);
 
-    assert.equal(musicDirection.recentVerifiedAirplay(12).length,events().filter(x=>x.trackId).length);
+    // Durable factual history records every distinct verified mixer start,
+    // including the mismatched marker whose musical identity is unknown.
+    // The narrower acoustic trajectory feed admits only identity-proven starts.
+    const durableRecent = events().slice(0,12);
+    const recentAirplay = musicDirection.recentVerifiedAirplay(12);
+    assert.deepEqual(
+      recentAirplay.map(e=>({eventId:e.eventId,trackId:e.trackId})),
+      durableRecent.map(e=>({eventId:e.eventId,trackId:e.trackId})),
+      'factual history retains the mismatched mixer start with a null track ID',
+    );
+    assert.equal(recentAirplay.filter(e=>e.trackId===null).length,1,
+      'one confirmed start remains explicitly unidentified');
+    assert.deepEqual(
+      musicDirection.recentVerifiedStarts(null,8).map(e=>({eventId:e.eventId,trackId:e.trackId})),
+      durableRecent.filter(e=>e.trackId!==null).slice(0,8)
+        .map(e=>({eventId:e.eventId,trackId:e.trackId})),
+      'trajectory identity feed excludes unknown IDs and retains the eight most recent proven starts',
+    );
     assert.ok(queueWrites>0,'real Queue invoked its usual persistence chokepoint');
   } finally {
     Object.assign(queue,saved);

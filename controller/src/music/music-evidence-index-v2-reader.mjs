@@ -30,13 +30,19 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
   const benchmark = process.env.MUSIC_V2_BENCH_TIMINGS === '1';
   const started = benchmark ? performance.now() : 0;
   const { preferences, requiredFamilies = [], eligibleIds = null, limit = 8 } = request ?? {};
+  // Page offsets are ranks, NOT unverified/uncapped filesystem scans. The
+  // preexisting path (offset omitted) remains byte-for-byte unchanged.
+  const paged = request?.offset !== undefined;
+  const offset = paged ? request.offset : 0;
+  if (paged && (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000
+      || (offset > 0 && (typeof request?.revision !== 'string' || request.revision.length > 128)))) return null;
   if (!Array.isArray(preferences) || !preferences.length || preferences.length > 16
       || !Array.isArray(requiredFamilies) || requiredFamilies.length > 7
       || !Number.isInteger(limit) || limit < 1 || limit > 12
       || (eligibleIds !== null && (!Array.isArray(eligibleIds) || eligibleIds.length > 128
           || new Set(eligibleIds).size !== eligibleIds.length
           || eligibleIds.some(id => typeof id !== 'string' || !id || id.length > 256)))) return null;
-  if (eligibleIds?.length === 0) return { results: [], rankedCount: 0, rejectedFreshness: 0 };
+  if (eligibleIds?.length === 0 && !paged) return { results: [], rankedCount: 0, rejectedFreshness: 0 };
   const specs = [];
   for (const p of preferences) {
     if (!p || Object.keys(p).some(k => !['family', 'key', 'direction', 'weight'].includes(k))
@@ -56,6 +62,17 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
     db.pragma('query_only = ON');
     const contract = db.prepare('SELECT version,models_sha256 FROM contract WHERE id=1').get();
     if (!contract || contract.version !== 3 || contract.models_sha256 !== expectedModelsHash) return null;
+    const cursor = paged ? db.prepare('SELECT segment_id FROM cursor_state WHERE id=1').get() : null;
+    if (paged && (!cursor || !Number.isSafeInteger(cursor.segment_id))) return null;
+    const revision = paged ? `${contract.models_sha256}:${cursor.segment_id}` : null;
+    if (paged && (offset > 0 || request.revision !== undefined) && request.revision !== revision) {
+      return { status: 'stale', results: [], rankedCount: 0, rejectedFreshness: 0,
+        checkedCount: 0, verificationLimited: false, nextOffset: null, revision };
+    }
+    if (paged && eligibleIds?.length === 0) return {
+      status: 'ok', results: [], rankedCount: 0, rejectedFreshness: 0,
+      checkedCount: 0, verificationLimited: false, nextOffset: null, revision,
+    };
     const predicates = specs.map(() => '(h.model_id=? AND h.class_name=?)').join(' OR ');
     const pivot = specs.map((_, i) =>
       `MAX(CASE WHEN h.model_id=? AND h.class_name=? THEN h.mean END) AS v${i}`).join(',');
@@ -99,6 +116,44 @@ export function searchMusicEvidence(indexPath, sourcePath, expectedModelsHash, r
     // Filesystem probes can block on the music disk: never stat an unbounded
     // library while handling a single socket request.
     const freshnessCeiling = 128;
+    if (paged) {
+      // A physical page verifies at most 128 ranks. Resuming uses the EXACT
+      // ranked offset consumed, even if a 12-track stat batch checked beyond
+      // the requested limit. Unreturned verified rows are never skipped.
+      let consumed = 0;
+      for (let rankOffset = offset; rankOffset < ranked.length
+          && consumed < freshnessCeiling && results.length < limit;) {
+        const batch = ranked.slice(rankOffset, Math.min(rankOffset + 12,
+          offset + freshnessCeiling, ranked.length));
+        const checked = readMusicEvidence(indexPath, sourcePath, expectedModelsHash, batch.map(item => item.id));
+        if (!checked) return null;
+        const valid = new Set(checked.map(([id]) => id));
+        for (const item of batch) {
+          checkedCount++;
+          consumed++;
+          rankOffset++;
+          if (!valid.has(item.id)) rejectedFreshness++;
+          else results.push(item);
+          if (results.length >= limit) break;
+        }
+      }
+      // Snapshot invalidation: a follow-mode indexer advancing while a page
+      // was ranked makes a continuation untrustworthy, not a short catalog.
+      const after = db.prepare('SELECT segment_id FROM cursor_state WHERE id=1').get();
+      if (!after || after.segment_id !== cursor.segment_id) return {
+        status: 'stale', results: [], rankedCount: 0, rejectedFreshness: 0,
+        checkedCount: 0, verificationLimited: false, nextOffset: null, revision: null,
+      };
+      const nextOffset = offset + consumed < ranked.length ? offset + consumed : null;
+      if (benchmark) process.stderr.write(JSON.stringify({
+        benchmark: 'music-v2-page', queryMs: +(queried - started).toFixed(2),
+        rankingMs: +(rankedAt - queried).toFixed(2),
+        freshnessMs: +(performance.now() - rankedAt).toFixed(2), checkedCount,
+      }) + '\n');
+      return { status: 'ok', results, rankedCount: ranked.length, rejectedFreshness,
+        checkedCount, nextOffset, revision,
+        verificationLimited: results.length < limit && nextOffset != null && consumed >= freshnessCeiling };
+    }
     for (let offset = 0; offset < Math.min(ranked.length, freshnessCeiling) && results.length < limit; offset += 12) {
       const batch = ranked.slice(offset, Math.min(offset + 12, freshnessCeiling));
       const checked = readMusicEvidence(indexPath, sourcePath, expectedModelsHash, batch.map(x => x.id));

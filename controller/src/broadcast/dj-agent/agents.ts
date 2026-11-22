@@ -20,6 +20,8 @@ export interface PickerRunArgs {
   // Forecast air time for the pick's link, prompt only — not a discovery
   // constraint, so it stays outside the scope.
   showAt?: Date | null;
+  // When available, derived from the live queue and the target seam.
+  airtimeTimeoutMs?: number | null;
 }
 
 export interface RequestRunArgs {
@@ -44,6 +46,8 @@ export const pickerAgent = defineAgent<PickerRunArgs, PickerExtras>({
   // since a caller's pinned step cap can be load-bearing.
   providerDiscoveryBudget: true,
   timeoutMs: agentDeadline,
+  resolveRunTimeout: ({ airtimeTimeoutMs }) => process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+    && airtimeTimeoutMs != null && airtimeTimeoutMs > 0 ? airtimeTimeoutMs : undefined,
   buildSystem: ({ showAt, scope }) => pickSystem(showAt ?? null, !!scope?.playlistTracks?.length),
   buildTools: ({ scope }) => {
     const { tools, seen } = buildPickerTools(scope);

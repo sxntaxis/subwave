@@ -51,6 +51,7 @@ import tracksTowardJourney from './tools/tracks-toward-journey.js';
 import identifyRequestedTrack from './tools/identify-requested-track.js';
 import findByAudioTraits from './tools/find-by-audio-traits.js';
 import compareMusicalCandidates from './tools/compare-musical-candidates.js';
+import inspectRecentMusicalArc from './tools/inspect-recent-musical-arc.js';
 
 // Registration order — this is the order the model sees the tools in, so keep
 // it stable rather than alphabetising: it matches the historical object literal.
@@ -74,6 +75,7 @@ export const PICKER_TOOLS: readonly PickerToolModule[] = [
   tracksTowardJourney,
   findByAudioTraits,
   compareMusicalCandidates,
+  inspectRecentMusicalArc,
   identifyRequestedTrack,
 ];
 

@@ -145,12 +145,14 @@ export function pickSystem(showAt: Date | null = null, playlistResolved = true) 
   // tools") is unfollowable and corners the model at the forced commit; on a
   // wider one, claiming a single round wastes the exploration. Takes the
   // MINIMUM across legs, since the prompt is built before failover picks one.
-  const rounds = dj.promptDiscoverySteps();
+  const rounds = dj.promptDiscoverySteps(process.env.SUBWAVE_MI_EXPANDED_PICKER === '1');
   const findingCandidates = rounds > 1
     ? instruction('picker', 'finding-candidates-multi', { rounds })
     : instruction('picker', 'finding-candidates');
   const musicEvidence = process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
-    ? `\n\n${instruction('picker', 'music-evidence-v2')}` : '';
+    ? `\n\n${instruction('picker', 'music-evidence-v2')}`
+      + (process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+        ? `\n\n${instruction('picker', 'music-evidence-expanded')}` : '') : '';
   return `${settings.agentPersonaPreamble(persona)}
 
 ${instruction('picker', 'frame')}${djModeLine}${showLine}${musicLean}${playlistLean}

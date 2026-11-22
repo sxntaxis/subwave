@@ -47,6 +47,8 @@ export interface AgentDefinition<TArgs = Record<string, any>, TExtras = any> {
   // live setting (settings.llm.agentTimeoutMs) instead of being frozen at
   // module load.
   timeoutMs?: number | (() => number);
+  // Only the picker supplies a per-run deadline computed from observed air time.
+  resolveRunTimeout?: (args: TArgs) => number | undefined;
   temperature?: number;
   maxOutputTokens?: number;
   // Acceptance check on the native path's object, given this run's buildTools
@@ -130,7 +132,7 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         tools: built.tools,
         schema: resolveSchema(def.schema),
         maxSteps: def.maxSteps,
-        timeoutMs: resolveTimeout(def.timeoutMs),
+        timeoutMs: def.resolveRunTimeout?.(toolArgs) ?? resolveTimeout(def.timeoutMs),
         temperature: def.temperature,
         maxOutputTokens: def.maxOutputTokens,
         kind: def.kind,

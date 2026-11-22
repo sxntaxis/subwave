@@ -116,12 +116,17 @@ function buildDoneTool(schema: z.ZodTypeAny) {
 // only `done` is active, guaranteeing a call before the step cap. `toolChoice`
 // is the leg's forced value ('required', or 'auto' when the operator downgrades
 // it for a crash-prone server, #570); the activeTools pinning holds either way.
-function gatedDiscoveryPrepareStep(discoveryToolNames: string[], toolChoice: 'required' | 'auto', commitAfter: number) {
+function gatedDiscoveryPrepareStep(discoveryToolNames: string[], toolChoice: 'required' | 'auto', commitAfter: number, flexible = false) {
   return async ({ stepNumber }: { stepNumber: number }) => {
     if (stepNumber >= commitAfter) {
       return { activeTools: ['done'], toolChoice };
     }
-    return { activeTools: discoveryToolNames, toolChoice };
+    // In high-context mode the DJ may finish after any meaningful discovery,
+    // rather than being compelled to waste all 16 rounds before it can choose.
+    // The first round still prohibits done (a pick must come from a real tool),
+    // and the last remains done-only for the existing recovery contract.
+    return { activeTools: flexible && stepNumber > 0
+      ? [...discoveryToolNames, 'done'] : discoveryToolNames, toolChoice };
   };
 }
 
@@ -270,7 +275,10 @@ export async function djAgent({
       const plan = agentPlan(leg.cfg, schema, toolCount);
       // The opt-in is the caller's; the budget is read off the LEG, so a
       // failover to a backup on a different provider re-resolves it.
-      const discoverySteps = runDiscoverySteps(leg.cfg, providerDiscoveryBudget);
+      const flexibleDiscovery = kind === 'djAgentPick'
+        && process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+        && leg.cfg.provider === 'chatgpt-plan';
+      const discoverySteps = runDiscoverySteps(leg.cfg, providerDiscoveryBudget, flexibleDiscovery);
       const gatedMaxSteps = discoverySteps + 1;
       // Branches override before their await, so a failure record always
       // attributes to the path actually attempted.
@@ -383,7 +391,7 @@ export async function djAgent({
 
         const discoveryToolNames = tools ? Object.keys(tools) : [];
         const useGatedDiscovery = useDoneTool && discoveryToolNames.length > 0;
-        const prepareStep = useGatedDiscovery ? gatedDiscoveryPrepareStep(discoveryToolNames, forcedChoice, discoverySteps) : undefined;
+        const prepareStep = useGatedDiscovery ? gatedDiscoveryPrepareStep(discoveryToolNames, forcedChoice, discoverySteps, flexibleDiscovery) : undefined;
         // On a gated run the cap is DERIVED, not the caller's: exactly
         // discoverySteps + 1. Lower ends the loop before the forced `done` step
         // runs; higher hands the model extra `done` steps to decline in.
@@ -399,7 +407,7 @@ export async function djAgent({
           stopWhen: [isStepCount(effectiveMaxSteps), hasToolCall('done')],
           temperature,
           maxOutputTokens,
-          timeout: { toolMs: TOOL_TIMEOUT_MS },
+          timeout: { toolMs: flexibleDiscovery ? 35_000 : TOOL_TIMEOUT_MS },
           // Suppress thinking on providers that reject forced tools mid-reasoning.
           reasoning: reasoningFor(leg.cfg, { forceNoThink: useDoneTool }),
           ...(useDoneTool ? { toolChoice: forcedChoice } : {}),

@@ -11,6 +11,7 @@ export function selectionContext(
   showAt: Date | null,
   showId: string | null,
   showAtTime: (at: Date) => string | null,
+  historyLimit = 5,
 ): { predecessorId: string; recentAiredIds: string[] } | undefined {
   try {
     if (!showId || !showAt || !Number.isFinite(showAt.getTime()) || !target?.item?.track?.id
@@ -24,7 +25,7 @@ export function selectionContext(
       if (!item.track?.id || item.requestedBy || !item.startedAt) return false;
       const at = new Date(item.startedAt);
       return Number.isFinite(at.getTime()) && showAtTime(at) === showId;
-    }).slice(0, 5).map(item => item.track.id).filter((id): id is string => !!id);
+    }).slice(0, Math.max(1, Math.min(12, historyLimit))).map(item => item.track.id).filter((id): id is string => !!id);
     return { predecessorId: target.item.track.id, recentAiredIds };
   } catch {
     return undefined;

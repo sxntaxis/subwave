@@ -58,6 +58,8 @@ import * as likes from './likes.js';
 import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 import type { PickTarget } from './queue/types.js';
 import { selectionContext } from './dj-agent/selection-context.js';
+import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } from './dj-agent/airtime-reasoning.js';
+import { recentMusicalArc } from './dj-agent/musical-arc.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
   const show = ctx?.activeShow;
@@ -162,6 +164,9 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
+  const expanded = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1';
+  const initialShowId = expanded ? settings.resolveActiveShow(showAt ?? undefined)?.id ?? null : null;
+  const airSnapshot = expanded ? captureAirtimeSnapshot(queue, target, initialShowId) : null;
   const audit = beginPickerAudit('agent', null, showAt);
   const auditSeen = pickerAuditEnabled() ? new Map<string, any>() : undefined;
   const vnextAudit = process.env.PICKER_VNEXT_AGENT === '1' && pickerAuditEnabled();
@@ -268,6 +273,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
       target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,
       at => settings.resolveActiveShow(at)?.id ?? null,
+      expanded ? 12 : 5,
     ) } : {}),
     recentIds,
     recentKeys,
@@ -289,6 +295,18 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     excludedIds,
   });
 
+  if (airSnapshot && !airtimeSnapshotValid(airSnapshot, queue,
+      settings.resolveActiveShow(showAt ?? undefined)?.id ?? null)) {
+    audit.finish({ outcome: 'collision', fallbackReason: 'airtime_snapshot_invalidated' });
+    return 'stale';
+  }
+  const airtimeTimeoutMs = expanded ? airtimePickerTimeoutMs(queue, target) : null;
+  // Unknown runway uses the legacy agent timeout; insufficient runway falls
+  // through to the Pool without burning the final drain/commit safety margin.
+  if (airtimeTimeoutMs === 0) {
+    audit.finish({ outcome: 'fallback', fallbackPath: 'pool', fallbackReason: 'airtime_commit_reserve' });
+    return false;
+  }
   let run: Awaited<ReturnType<typeof pickerAgent.run>>;
   const auditRunStartedAt = pickerAuditEnabled() ? performance.now() : null;
   try {
@@ -296,6 +314,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       messages: session.windowMessages(),
       scope,
       showAt,
+      ...(expanded ? { airtimeTimeoutMs } : {}),
       ...(pickerAuditEnabled() ? { diagnostics: audit.agentDiagnosticsObserver() } : {}),
     });
   } catch (error) {
@@ -505,6 +524,12 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const loop = wants('loop');
   // Guards may repick from the model's seen set. Attribute only if the final
   // candidate being committed was actually returned by v2 joint discovery.
+  if (airSnapshot && !airtimeSnapshotValid(airSnapshot, queue,
+      settings.resolveActiveShow(showAt ?? undefined)?.id ?? null)) {
+    audit.finish({ outcome: 'collision', chosenId: song.id ?? null, fallbackReason: 'airtime_snapshot_invalidated',
+      toolCalls: toolCalls.length, acousticSearchToolCalls });
+    return 'stale';
+  }
   const selectedFromV2Joint = audit.captureV2Selection(song.id);
   // Attach the link to the pick so it airs as the pick starts (back-announcing
   // the track on-air now), instead of immediately over that on-air track (#189).
@@ -873,7 +898,11 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
       + '. Pick the track to play next.'
       + linkClause;
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}`;
+    const arc = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+      ? recentMusicalArc(queue.current, queue.history, 12) : [];
+    const arcClause = arc.length
+      ? ` Actual recent airplay (newest first; metadata only where known, not Essentia estimates): ${JSON.stringify(arc)}. Consider the whole arc, not just a single transition; contrast and surprise remain valid.` : '';
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

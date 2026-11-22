@@ -443,7 +443,7 @@ export function buildPickerContext(
     }
     return enriched;
   };
-  const collectAsync: PickerContext['collectAsync'] = async (list, cap = 8, opts = {}) => {
+  const collectAsync: PickerContext['collectAsync'] = async (list, cap = uncappedDiscovery ? 12 : 8, opts = {}) => {
     const enriched = await attachV2(await enrichEssentia(essentia, await collectSelection(list, cap, opts)));
     if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
       scope.essentiaAudit?.captureV2Profiles?.(enriched.filter(track => track?.musical_evidence).map(track => track?.id));

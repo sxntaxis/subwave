@@ -14,7 +14,8 @@ export interface EssentiaReader {
   lookup(ids: readonly string[]): Promise<Map<string, EssentiaEvidence> | null>;
   search(preferences: TraitPreferences): Promise<string[] | null>;
   searchJoint?(request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
-    eligibleIds?: string[] | null; limit?: number }): Promise<JointEvidenceResult | null>;
+    eligibleIds?: string[] | null; limit?: number;
+    offset?: number; revision?: string }): Promise<JointEvidenceResult | null>;
   lookupV2?(ids: readonly string[]): Promise<Map<string, MusicEvidenceV2> | null>;
   /** Opt-in v2.2 diagnostic lookup. Legacy clients retain null fail-open. */
   lookupV2Result?(ids: readonly string[]): Promise<MusicEvidenceLookupResult>;
@@ -48,6 +49,10 @@ export interface JointEvidenceResult {
   rejectedFreshness: number;
   checkedCount?: number;
   verificationLimited?: boolean;
+  // Optional additive paging contract; absent for all old clients.
+  status?: 'ok' | 'stale';
+  nextOffset?: number | null;
+  revision?: string | null;
 }
 
 /**
@@ -73,13 +78,20 @@ function jointSocketTimeoutMs(): number {
 export function searchJointSocket(
   path: string,
   request: { preferences: JointEvidencePreference[]; requiredFamilies?: string[];
-    eligibleIds?: string[] | null; limit?: number },
+    eligibleIds?: string[] | null; limit?: number;
+    offset?: number; revision?: string },
 ): Promise<JointEvidenceResult | null> {
   return queryV2Socket(path, { version: 2, op: 'searchJoint', ...request }, jointSocketTimeoutMs()).then(value => {
     if (!value || typeof value !== 'object') return null;
     const result = value as JointEvidenceResult;
     if (!Array.isArray(result.results) || !Number.isInteger(result.rankedCount)
         || !Number.isInteger(result.rejectedFreshness)) return null;
+    if (request.offset !== undefined && (result.status !== 'ok' && result.status !== 'stale'
+        || !('nextOffset' in result) || !('revision' in result)
+        || (result.nextOffset != null && (!Number.isInteger(result.nextOffset)
+          || result.nextOffset <= request.offset))
+        || (result.revision != null && (typeof result.revision !== 'string'
+          || !/^[a-f0-9]{64}:\d+$/.test(result.revision))))) return null;
     return result;
   });
 }

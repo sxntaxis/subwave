@@ -60,6 +60,10 @@ export interface ProviderCapabilities {
 // (settings.llm.agentTimeoutMs) — a tall budget would starve the recovery legs.
 export const DISCOVERY_STEPS_MIN = 1;
 export const DISCOVERY_STEPS_MAX = 5;
+// An explicitly enabled high-context DJ may explore longer, but a provider
+// that cannot handle iterative tools keeps its original conservative cap.
+// This is an SDK loop safety ceiling, not a token or musical-evidence budget.
+export const EXPANDED_PICKER_DISCOVERY_STEPS = 16;
 
 // Budget for providers that honour tool_choice and reason across tool results:
 // seed, refine, then cross-check a second axis before committing.
@@ -209,18 +213,21 @@ export function needsToolCallObject(cfg: any): boolean {
 // and fallback resolve independently. Clamped to [MIN, MAX] on both paths —
 // never zero, which would force `done` at step 0 with an empty `seen` map and
 // leave the model able only to fabricate an id.
-export function discoveryStepsFor(cfg: any): number {
+export function discoveryStepsFor(cfg: any, expandedPicker = false): number {
+  const expanded = expandedPicker && cfg?.provider === 'chatgpt-plan';
   const override = cfg?.discoverySteps;
   if (Number.isFinite(override as number) && (override as number) > 0) {
-    return clampDiscoverySteps(override as number);
+    return clampDiscoverySteps(override as number, expanded);
   }
+  if (expanded) return EXPANDED_PICKER_DISCOVERY_STEPS;
   const declared = capabilitiesFor(cfg?.provider).discoverySteps;
   if (!Number.isFinite(declared as number)) return DISCOVERY_STEPS_MIN;
-  return clampDiscoverySteps(declared as number);
+  return clampDiscoverySteps(declared as number, false);
 }
 
-function clampDiscoverySteps(n: number): number {
-  return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, Math.floor(n)));
+function clampDiscoverySteps(n: number, expanded: boolean): number {
+  return Math.min(expanded ? EXPANDED_PICKER_DISCOVERY_STEPS : DISCOVERY_STEPS_MAX,
+    Math.max(DISCOVERY_STEPS_MIN, Math.floor(n)));
 }
 
 // Step cap for a gated discovery run: every discovery step plus the ONE forced-
@@ -234,8 +241,8 @@ export function gatedMaxStepsFor(cfg: any): number {
 // opt-in (providerDiscoveryBudget); every other caller keeps the historical
 // single cornered step, because a caller's pinned cap can itself be load-bearing
 // (the segment director's maxSteps: 2 in skills/_agent.ts).
-export function runDiscoverySteps(cfg: any, followProvider: boolean): number {
-  return followProvider ? discoveryStepsFor(cfg) : DISCOVERY_STEPS_MIN;
+export function runDiscoverySteps(cfg: any, followProvider: boolean, expandedPicker = false): number {
+  return followProvider ? discoveryStepsFor(cfg, expandedPicker) : DISCOVERY_STEPS_MIN;
 }
 
 // tool_choice for the paths that force a tool call. Defaults to 'required';

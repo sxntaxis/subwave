@@ -148,6 +148,24 @@ test('private socket joint search reaches a rare candidate beyond the primary to
       { family: 'voice' as const, key: 'value', direction: 'low' as const },
       { family: 'instrument' as const, key: 'piano', direction: 'high' as const },
     ];
+    // Cursor pages are ranked before freshness and never silently skip valid
+    // IDs; stale index cursors fail as stale rather than reporting no music.
+    const firstPage = await searchJointSocket(join(socketDir, 'evidence.sock'),
+      { preferences: [{ family: 'arousal', key: 'value', direction: 'low' }], limit: 2, offset: 0 });
+    assert.equal(firstPage?.status, 'ok');
+    assert.equal(firstPage?.results.length, 2);
+    assert.ok(firstPage?.nextOffset != null && firstPage.revision);
+    const secondPage = await searchJointSocket(join(socketDir, 'evidence.sock'),
+      { preferences: [{ family: 'arousal', key: 'value', direction: 'low' }], limit: 2,
+        offset: firstPage!.nextOffset!, revision: firstPage!.revision! });
+    assert.equal(secondPage?.status, 'ok');
+    assert.equal(secondPage?.results.length, 2);
+    assert.equal(firstPage!.results.some(a => secondPage!.results.some(b => a.id === b.id)), false);
+    const stalePage = await searchJointSocket(join(socketDir, 'evidence.sock'),
+      { preferences: [{ family: 'arousal', key: 'value', direction: 'low' }], limit: 2,
+        offset: firstPage!.nextOffset!, revision: `${'b'.repeat(64)}:1` });
+    assert.equal(stalePage?.status, 'stale');
+    assert.deepEqual(stalePage?.results, []);
     const result = await searchJointSocket(join(socketDir, 'evidence.sock'), { preferences, limit: 2 });
     assert.ok(result);
     assert.equal(result.rankedCount, 262);

@@ -83,7 +83,7 @@ const server = createServer(socket => {
       const marker = readiness();
       const v2marker = request?.version === 2 && ['searchJoint', 'profiles'].includes(request.op) ? v2Readiness() : null;
       if (v2marker && request.op === 'searchJoint' && Object.keys(request).every(key =>
-        ['version', 'op', 'preferences', 'requiredFamilies', 'eligibleIds', 'limit', ...(reportLimits ? ['reportLimits'] : [])].includes(key))) {
+        ['version', 'op', 'preferences', 'requiredFamilies', 'eligibleIds', 'limit', 'offset', 'revision', ...(reportLimits ? ['reportLimits'] : [])].includes(key))) {
         result = searchMusicEvidence(indexV2Path, sourcePath, v2marker.models_sha256, request);
       }
       if (v2marker && request.op === 'profiles' && Object.keys(request).every(key =>

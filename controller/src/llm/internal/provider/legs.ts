@@ -87,17 +87,17 @@ export function fallbackLeg(): Leg | null {
 //
 // Non-throwing: a misconfigured leg falls to the floor rather than taking down
 // a prompt build.
-export function promptDiscoverySteps(): number {
+export function promptDiscoverySteps(expandedPicker = false): number {
   let steps: number;
   try {
-    steps = discoveryStepsFor(llmCfg());
+    steps = discoveryStepsFor(llmCfg(), expandedPicker);
   } catch {
     return DISCOVERY_STEPS_MIN;
   }
   const stored = settings.get().llm?.fallback;
   if (stored?.enabled) {
     try {
-      steps = Math.min(steps, discoveryStepsFor(stored));
+      steps = Math.min(steps, discoveryStepsFor(stored, expandedPicker));
     } catch {
       return DISCOVERY_STEPS_MIN;
     }

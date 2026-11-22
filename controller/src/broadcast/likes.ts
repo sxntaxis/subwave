@@ -317,13 +317,13 @@ export function topLiked({ windowDays = 30, limit = 10 }: { windowDays?: number;
 // part of pickSystem: the list changes as likes land, and re-rendering it there
 // would break the byte-stable prefix prompt caching keys on. Returns '' when not
 // opted in or nothing is liked, so the event turn stays byte-identical.
-export function favouritesClause(cfg: { enabled?: boolean; influenceDj?: boolean; windowDays?: number; maxTracks?: number } | null | undefined): string {
+export function favouritesClause(cfg: { enabled?: boolean; influenceDj?: boolean; windowDays?: number; maxTracks?: number } | null | undefined, asBookmark = false): string {
   if (!cfg?.enabled || !cfg?.influenceDj) return '';
   const favs = topLiked({ windowDays: cfg.windowDays, limit: cfg.maxTracks });
   if (!favs.length) return '';
-  return ` Listener favourites — the most-liked tracks on this station recently: ${favs
-    .map((f) => `"${f.track.title}" by ${f.track.artist || 'unknown'} (${f.count})`)
-    .join('; ')}. Treat these as a strong preference signal when they fit the moment — but keep variety, never loop the same favourites back-to-back.`;
+  const listed = favs.map(f => `"${f.track.title}" by ${f.track.artist || 'unknown'} (${f.count})`).join('; ');
+  if (asBookmark) return ` Recently saved songs (bookmarks/interest, not transition ratings): ${listed}. Treat as weak discovery context, never as proof of approval of a segue, movement or genre. Show and human direction take precedence.`;
+  return ` Listener favourites — the most-liked tracks on this station recently: ${listed}. Treat these as a strong preference signal when they fit the moment — but keep variety, never loop the same favourites back-to-back.`;
 }
 
 // Listener key truncated to a short handle: enough to spot "same listener",

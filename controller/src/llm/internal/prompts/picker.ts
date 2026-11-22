@@ -12,6 +12,17 @@ import { djObject } from '../strategy/object.js';
 import { instruction } from './instructions.js';
 
 export const PICKER_CRITERIA = instruction('pick-criteria', 'criteria');
+// MI v2.5 editorial prompt is opt-in alongside its corresponding runtime gate.
+// Preserve the original byte-for-byte v2.4 instructions when the flag is off.
+export const trajectoryPromptEnabled = () => process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1'
+  && process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1'
+  && process.env.SUBWAVE_MUSIC_TRAJECTORY_V1 === '1';
+export const pickerCriteria = () => trajectoryPromptEnabled()
+  ? instruction('pick-criteria', 'criteria-trajectory') : PICKER_CRITERIA;
+
+export type PoolEditorialDirection =
+  | { source: 'human'; kind: string; intent: string }
+  | { source: 'autonomous'; movement: string; destination: string; next: string; energy: string | null };
 
 // Coaching for the DJ transition effects (the "transition" output field),
 // shared by both pick strategies — the conversational agent (dj-agent.ts
@@ -117,21 +128,22 @@ export function showMusicLean(show?: ShowMusic | null): string {
     : '';
 }
 
-function pickerSystem(show?: ShowMusic | null) {
+function pickerSystem(show?: ShowMusic | null, withDirection = false) {
   const stationName = settings.get().station;
   const showLine = show?.topic
     ? `\n\n${instruction('pool-picker', 'show-brief', { topic: show.topic })}`
     : '';
+  const directed = trajectoryPromptEnabled();
   return `${instruction('pool-picker', 'frame', { station: stationName })}${showLine}${showMusicLean(show)}
 
-${PICKER_CRITERIA}
+${pickerCriteria()}
 
-${instruction('pool-picker', 'source-tags')}
+${instruction('pool-picker', directed ? 'source-tags-trajectory' : 'source-tags')}
 
-${instruction('pool-picker', 'recent-plays')}`;
+${instruction('pool-picker', directed ? 'recent-plays-trajectory' : 'recent-plays')}${directed && withDirection ? `\n\n${instruction('pool-picker', 'direction-trajectory')}` : ''}`;
 }
 
-export async function pickNextTrack({ candidates, recentPlays, context, show = null, current = null, recentTransitions = [] }: {
+export async function pickNextTrack({ candidates, recentPlays, context, show = null, current = null, recentTransitions = [], editorialDirection = null }: {
   candidates: any[];
   recentPlays: any;
   context: any;
@@ -146,6 +158,7 @@ export async function pickNextTrack({ candidates, recentPlays, context, show = n
   // third identical choice either way, this just keeps the model from wasting
   // picks on choices that will be stripped. Only used when effects are active.
   recentTransitions?: string[];
+  editorialDirection?: PoolEditorialDirection | null;
 }) {
   // Compact serialization on purpose: the old 2-space pretty-print spent a
   // few hundred tokens on whitespace per pick, and models read dense JSON
@@ -161,6 +174,7 @@ export async function pickNextTrack({ candidates, recentPlays, context, show = n
       current: current || undefined,
     },
     recentPlays,
+    ...(trajectoryPromptEnabled() && editorialDirection ? { editorialDirection } : {}),
     candidates,
   });
 
@@ -190,7 +204,7 @@ export async function pickNextTrack({ candidates, recentPlays, context, show = n
     : '';
 
   return djObject({
-    system: `${pickerSystem(show)}${fxGuidance}${fxHistory}`,
+    system: `${pickerSystem(show, !!editorialDirection)}${fxGuidance}${fxHistory}`,
     prompt: user,
     schema: z.object({
       id: idSchema,

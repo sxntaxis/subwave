@@ -34,7 +34,7 @@ export {
   generateProgrammeFeature,
   generateProgrammeExchange,
 } from './internal/prompts/programme.js';
-export { PICKER_CRITERIA, pickNextTrack, showMusicLean, effectsGuidance } from './internal/prompts/picker.js';
+export { PICKER_CRITERIA, pickerCriteria, pickNextTrack, showMusicLean, effectsGuidance } from './internal/prompts/picker.js';
 // The authored-prompt accessor (llm/instructions/*.md), re-exported so prompt
 // builders outside llm/ (broadcast/dj-agent/schemas.ts) address the blocks
 // through the barrel rather than reaching into internal/.

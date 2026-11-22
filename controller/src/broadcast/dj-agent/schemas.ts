@@ -169,18 +169,21 @@ export function pickSystem(showAt: Date | null = null, playlistResolved = true) 
   // wider one, claiming a single round wastes the exploration. Takes the
   // MINIMUM across legs, since the prompt is built before failover picks one.
   const rounds = dj.promptDiscoverySteps(process.env.SUBWAVE_MI_EXPANDED_PICKER === '1');
+  const trajectoryEditorial = process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1'
+    && process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1'
+    && process.env.SUBWAVE_MUSIC_TRAJECTORY_V1 === '1';
   const findingCandidates = rounds > 1
-    ? instruction('picker', 'finding-candidates-multi', { rounds })
-    : instruction('picker', 'finding-candidates');
+    ? instruction('picker', trajectoryEditorial ? 'finding-candidates-multi-trajectory' : 'finding-candidates-multi', { rounds })
+    : instruction('picker', trajectoryEditorial ? 'finding-candidates-trajectory' : 'finding-candidates');
   const musicEvidence = process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
     ? `\n\n${instruction('picker', 'music-evidence-v2')}`
       + (process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
-        ? `\n\n${instruction('picker', 'music-evidence-expanded')}` : '') : '';
+        ? `\n\n${instruction('picker', trajectoryEditorial ? 'music-evidence-expanded-trajectory' : 'music-evidence-expanded')}` : '') : '';
   return `${settings.agentPersonaPreamble(persona)}
 
 ${instruction('picker', 'frame')}${djModeLine}${showLine}${musicLean}${playlistLean}
 
-${dj.PICKER_CRITERIA}
+${dj.pickerCriteria()}
 
 ${instruction('picker', 'listener-requests', { listenerText: LISTENER_TEXT_CLAUSE })}${dj.REQUESTER_NAME_CLAUSE}
 

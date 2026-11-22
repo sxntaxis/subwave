@@ -656,7 +656,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; directionEnergy?: EnergyDirection | null; trajectoryActive?: boolean; trajectoryShowId?: string | null; trajectoryMovementStartedAt?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; directionEnergy?: EnergyDirection | null; editorialDirection?: { source: 'human'; kind: string; intent: string } | { source: 'autonomous'; movement: string; destination: string; next: string; energy: string | null } | null; trajectoryActive?: boolean; trajectoryShowId?: string | null; trajectoryMovementStartedAt?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
@@ -876,6 +876,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
         };
       }),
       recentPlays,
+      ...(trajectoryEnabled() && opts.editorialDirection ? { editorialDirection: opts.editorialDirection } : {}),
       context: ctx,
       // The on-air anchor: the criteria ask the model to match its tempo.
       current: currentTrack ? (() => {

@@ -676,6 +676,15 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
           return { trajectoryActive: !!snap?.movement && !snap.steering,
             trajectoryShowId: showId, trajectoryMovementStartedAt: snap?.movement?.startedAt ?? null };
         })(),
+        ...(trajectoryEnabled() ? { editorialDirection: (() => {
+          const snap = musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null);
+          if (snap?.steering) return { source: 'human' as const,
+            kind: snap.steering.kind, intent: snap.steering.intent };
+          if (snap?.movement) return { source: 'autonomous' as const,
+            movement: snap.movement.movement, destination: snap.movement.destination,
+            next: snap.movement.next, energy: snap.movement.energy };
+          return null;
+        })() } : {}),
         directionEnergy: (() => {
           const snap = musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null);
           return snap?.steering?.kind === 'lift' ? 'build' as const
@@ -928,7 +937,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // they change as likes land, and a per-call re-render breaks the
     // byte-stable prefix prompt caching keys on. windowMessages keeps only the
     // latest pick event, so the list never multiplies across the window.
-    const favClause = likes.favouritesClause(settings.get()?.likes);
+    const favClause = likes.favouritesClause(settings.get()?.likes, trajectoryEnabled());
     // Exploration nudge (ε-greedy seed break, music/airing.ts): a fraction of
     // picks steer the round toward the unaired shelf instead of walking the
     // on-air track's similarity cluster. Carries NO track id — a raw id in the

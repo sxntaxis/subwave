@@ -99,8 +99,11 @@ export async function searchEligibleCohortPage(
     const chunk: string[] = [];
     while (start < ids.length && chunk.length < 128) {
       const trial = [...chunk, ids[start]];
+      // Every later physical page includes its revision and a potentially
+      // wider offset. Reserve their maximum accepted wire widths up front so
+      // a chunk fitting page one cannot overflow the socket on page two.
       if (Buffer.byteLength(JSON.stringify({ version: 2, op: 'searchJoint', preferences,
-        eligibleIds: trial, limit: 12, offset: 0 }) + '\n') > 32768) break;
+        eligibleIds: trial, limit: 12, offset: 1_000_000, revision: 'x'.repeat(128) }) + '\n') > 32768) break;
       chunk.push(ids[start++]);
     }
     if (!chunk.length) return fail('invalid_cohort');

@@ -90,3 +90,27 @@ test('strict cohort pagination preserves global ranking across physical chunks',
     1000, 12, 12, first.revision, now);
   assert.deepEqual(changed, { status: 'incomplete', reason: 'stale' });
 });
+
+test('strict cohort reserves wire space for later-page offsets and revisions', async () => {
+  const ids = Array.from({ length: 128 }, (_, i) => `${String(i).padStart(3, '0')}${'a'.repeat(248)}`);
+  const preferences = [
+    { family: 'instrument' as const, key: 'piano', direction: 'low' as const },
+    { family: 'instrument' as const, key: 'piano', direction: 'low' as const },
+  ];
+  const revision = `${'a'.repeat(64)}:1`;
+  const wireSizes: number[] = [];
+  const result = await searchEligibleCohortPage(ids, preferences, async request => {
+    const wire = JSON.stringify({ version: 2, op: 'searchJoint', ...request }) + '\n';
+    wireSizes.push(Buffer.byteLength(wire));
+    if (Buffer.byteLength(wire) > 32768) return null;
+    const results = request.eligibleIds.slice(request.offset, request.offset + request.limit)
+      .map(id => makeRow(id, 0.5));
+    return { status: 'ok' as const, results, rankedCount: request.eligibleIds.length,
+      rejectedFreshness: 0, checkedCount: results.length, verificationLimited: false,
+      nextOffset: request.offset + results.length < request.eligibleIds.length
+        ? request.offset + results.length : null, revision };
+  }, performance.now() + 10000, 12, 12);
+  assert.equal(result.status, 'complete');
+  assert.ok(wireSizes.length > 1);
+  assert.ok(wireSizes.every(size => size <= 32768), `oversized request: ${wireSizes.join(', ')}`);
+});

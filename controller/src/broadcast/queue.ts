@@ -2444,16 +2444,19 @@ class Queue {
 
     if (musicalDirectionEnabled()) {
       try {
-        // Factual enrichment is downstream of the real mixer-start edge;
-        // exact ID matching is centralized and tested in the pure resolver.
-        const verifiedFacts = trajectoryEnabled()
+        // An insertion token may identify a queue item even when a malformed
+        // mixer marker names a different song. That can preserve queue recovery,
+        // but it cannot prove musical identity or authorize a human music anchor.
+        // Flag-off preserves the existing v2.3/v2.4 behavior exactly.
+        const exactMixerIdentity = !!np.subsonic_id && this.current.track?.id === np.subsonic_id;
+        const verifiedFacts = trajectoryEnabled() && exactMixerIdentity
           ? verifiedMixerStartFacts(np.subsonic_id, this.current.track) : null;
         musicDirection.onTrackStarted({
           eventId: key,
-          trackId: this.current.track?.id ?? null,
-          title: this.current.track?.title ?? np.title,
-          artist: this.current.track?.artist ?? np.artist ?? null,
-          source: verifiedEditorialSource,
+          trackId: trajectoryEnabled() && !exactMixerIdentity ? null : this.current.track?.id ?? null,
+          title: trajectoryEnabled() && !exactMixerIdentity ? np.title : this.current.track?.title ?? np.title,
+          artist: trajectoryEnabled() && !exactMixerIdentity ? np.artist ?? null : this.current.track?.artist ?? np.artist ?? null,
+          source: trajectoryEnabled() && !exactMixerIdentity ? 'auto' : verifiedEditorialSource,
           showId: onAirShow?.id ?? null,
           at: Date.parse(this.current.startedAt ?? '') || Date.now(),
           ...(musicalDirectorV2Enabled() ? {

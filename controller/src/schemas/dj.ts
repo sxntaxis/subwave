@@ -97,3 +97,13 @@ export const queueBlockSchema = z
   });
 
 export type QueueBlockBody = z.infer<typeof queueBlockSchema>;
+
+// MI v2.3 operator authority. Never accept listener text on this endpoint.
+export const musicSteerSchema = z.object({
+  kind: z.enum(['pivot', 'hold', 'lift', 'release']),
+  intent: z.string().trim().min(1).max(180),
+  scope: z.enum(['current-show', 'fixed-duration', 'station']).default('current-show'),
+  durationMinutes: z.number().int().min(1).max(180).optional(),
+  followingTracks: z.number().int().min(1).max(24).optional(),
+}).strict();
+export type MusicSteerBody = z.infer<typeof musicSteerSchema>;

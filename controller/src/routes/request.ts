@@ -208,6 +208,7 @@ function withWaitNotice(ack: string | null | undefined, trackId: string | null |
   if (!trackId) return ack;
   const idx = queue.upcoming.map(i => i.track?.id).lastIndexOf(trackId);
   if (idx < 0) return ack;
+  if (queue.upcoming[idx]?.priorityLane === 'listener' && !queue.upcoming.some(i => i.block?.locked)) return ack;
   // The LAST block ahead of it is the one still playing when this request comes
   // round, so it is the one worth naming.
   const blockLabel = [...queue.upcoming.slice(0, idx)].reverse().find(i => i.block)?.block?.label ?? null;
@@ -223,11 +224,13 @@ async function resolveRequest(entry) {
     entry.ack = ack || null;
     entry.track = track || null;
     entry.queuePosition = typeof queuePosition === 'number' ? queuePosition : null;
+    queue.finishListenerRequest(entry.id);
     recordOutcome(entry);
   };
   const failed = (message) => {
     entry.status = 'failed';
     entry.message = message;
+    queue.finishListenerRequest(entry.id);
     recordOutcome(entry);
   };
 
@@ -315,6 +318,7 @@ async function resolveRequest(entry) {
     introScript = guardedMlt.script;
     const pos = await queue.push({
       track: pick, requestedBy: requester, intent: 'more_like_this', introScript,
+      priorityLane: 'listener', humanRequestId: entry.id,
       introKind: 'dj-speak',
       // Voice it as whoever wrote it: render and air happen later and would
       // otherwise re-resolve the speaker off the wall clock.
@@ -353,7 +357,7 @@ async function resolveRequest(entry) {
   // Conversational DJ agent. On any failure fall through to the stateless
   // cascade below, so a request is never dropped.
   try {
-    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text });
+    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, humanRequestId: entry.id });
     if (agentRes) {
       // Thread the agent's own echo-guard verdict into the durable log; the
       // other paths set it inline.
@@ -654,6 +658,7 @@ async function resolveRequest(entry) {
     track: pick,
     requestedBy: requester,
     intent: matched.intent,
+    priorityLane: 'listener', humanRequestId: entry.id,
     introScript,
     introKind: 'dj-speak',
     introPersona: session.onAirPersona(),
@@ -790,6 +795,13 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),
   };
+  // This reservation happens before the async request resolver and before
+  // acknowledging HTTP 202. It fences already-running speculative AI picks.
+  try { queue.reserveListenerRequest(id); }
+  catch (err) {
+    queue.log('error', `human priority reservation failed: ${(err as Error).message}`);
+    return res.status(503).json({ success: false, message: 'Request line temporarily unavailable.' });
+  }
   requests.set(id, entry);
   lastByIp.set(ip, entry);
   queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})${stripped.injection ? ` [${stripped.injection} stripped]` : ''}`);
@@ -802,6 +814,7 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     queue.log('error', `Request resolution crashed: ${err.message}`);
     entry.status = 'failed';
     entry.message = 'Something went wrong in the booth — try again.';
+    queue.finishListenerRequest(entry.id);
     recordOutcome(entry);
   });
 });

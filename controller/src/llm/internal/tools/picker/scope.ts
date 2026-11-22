@@ -29,6 +29,7 @@ import type {
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { enrichEssentia, getEssentiaReader, lookupV2WithStatus, type EssentiaReader } from '../../../../music/essentia-evidence.js';
 import { attachCompactMusicEvidence, attachCompleteMusicEvidence } from '../../../../music/music-evidence-profile.js';
+import { orderByArousalDirection, type EnergyDirection } from '../../../../music/direction-rank.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -48,6 +49,8 @@ export function withPickerAcousticReaderForTest<T>(
 export interface PickerScope {
   // Set only by the autonomous track picker; requests remain isolated.
   essentiaDiscovery?: boolean;
+  // Bounded soft musical trajectory on already eligible discovery candidates.
+  directionEnergy?: EnergyDirection | null;
   // Set exclusively by the autonomous picker after validating its predecessor.
   selection?: { predecessorId: string; recentAiredIds: string[] };
   // Private opt-in audit observer; receives bounded counters only.
@@ -148,7 +151,7 @@ export interface PickerContext {
   // id choice against this.
   seen: Map<string, any>;
   collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
-  collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number }): Promise<any[]>;
+  collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number; directionRanking?: boolean }): Promise<any[]>;
   eligibleEvidenceIds(deadlineMs: number): Promise<{ status: 'complete'; ids: string[] } | { status: 'incomplete' }>;
   reserveMusicEvidence(maxBytes: number): { bytes: number; release(usedBytes: number): void } | null;
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
@@ -445,13 +448,16 @@ export function buildPickerContext(
   };
   const collectAsync: PickerContext['collectAsync'] = async (list, cap = uncappedDiscovery ? 12 : 8, opts = {}) => {
     const enriched = await attachV2(await enrichEssentia(essentia, await collectSelection(list, cap, opts)));
+    const result = process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1' && scope.essentiaDiscovery
+      && opts.directionRanking !== false
+      ? orderByArousalDirection(enriched, scope.directionEnergy ?? null) : enriched;
     if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
       scope.essentiaAudit?.captureV2Profiles?.(enriched.filter(track => track?.musical_evidence).map(track => track?.id));
     }
     scope.essentiaAudit?.captureProfileExposure(
       enriched.filter(track => track?.audio_profile).map(track => track?.id),
     );
-    return enriched;
+    return result;
   };
 
   // On an empty tool result, say WHY and what to try next: a bare [] draws a

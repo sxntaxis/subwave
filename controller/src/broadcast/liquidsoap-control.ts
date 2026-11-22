@@ -3,6 +3,7 @@
 // settings files the controller just wrote.
 
 import net from 'node:net';
+import { musicalDirectionEnabled } from './dj-agent/music-direction.js';
 import { cachedAsync } from '../util/ttl-cache.js';
 import { parseDjQueueStatus, type DjQueueStatus } from './skip-policy.js';
 import {
@@ -215,8 +216,10 @@ export async function idleStatus() {
 
 interface DjQueueSnapshot {
   ids: Set<string>;
+  queueByRid: Map<string, string>;
   // subsonic_id → Liquidsoap request id; first occurrence wins.
   ridBySubsonicId: Map<string, string>;
+  ridByLaneAndId: Map<string, string>;
   // Pre-rendered transition clips carry the INCOMING track's subsonic_id and
   // sit earlier in dj_queue, so first-occurrence would bind that id to the
   // clip's rid and a cancel would remove the clip, not the track. Kept here
@@ -241,10 +244,22 @@ async function fetchDjQueue(): Promise<DjQueueSnapshot> {
   const rids = res.trim().split(/\s+/).filter(Boolean);
   const ids = new Set<string>();
   const ridBySubsonicId = new Map<string, string>();
+  const ridByLaneAndId = new Map<string, string>();
   const clipRidBySubsonicId = new Map<string, string>();
   const bedRids = new Set<string>();
-
-  for (const rid of rids) {
+  const queueByRid = new Map<string, string>();
+  const byLane = [{ lane: 'dj_queue', rids }];
+  if (musicalDirectionEnabled()) {
+    const supported = await musicPrioritySupported();
+    if (supported) {
+      for (const lane of ['operator_priority_queue', 'listener_priority_queue']) {
+        const more = (await sendCommand(`${lane}.queue`, 2000)).trim().split(/\s+/).filter(Boolean);
+        byLane.push({ lane, rids: more });
+      }
+    }
+  }
+  for (const { lane, rids: laneRids } of byLane) for (const rid of laneRids) {
+    queueByRid.set(rid, lane);
     try {
       const meta = await sendCommand(`request.metadata ${rid}`, 2000);
       // An unprepared request is status=idle with no top-level metadata, but
@@ -258,6 +273,8 @@ async function fetchDjQueue(): Promise<DjQueueSnapshot> {
         } else {
           ids.add(match[1]);
           if (!ridBySubsonicId.has(match[1])) ridBySubsonicId.set(match[1], rid);
+          const laneKey = `${lane}:${match[1]}`;
+          if (!ridByLaneAndId.has(laneKey)) ridByLaneAndId.set(laneKey, rid);
         }
       }
       if (/subwave_kind=\\?"bed/.test(meta)) bedRids.add(rid);
@@ -266,7 +283,7 @@ async function fetchDjQueue(): Promise<DjQueueSnapshot> {
     }
   }
 
-  return { ids, ridBySubsonicId, clipRidBySubsonicId, orderedRids: rids, bedRids };
+  return { ids, ridBySubsonicId, ridByLaneAndId, clipRidBySubsonicId, orderedRids: rids, bedRids, queueByRid };
 }
 
 // Returns a Set of subsonic_ids currently in the queue (cached ~4s).
@@ -295,14 +312,16 @@ export async function getDjQueueIds(): Promise<Set<string>> {
 // Always a fresh read — cancel decisions can't ride the 4s cache. A bed has no
 // subsonic_id, so this is the only way an id-keyed cancel can find it.
 export async function resolveDjQueueRidWithBed(
-  subsonicId: string,
-): Promise<{ rid: string | null; bedRid: string | null }> {
+  subsonicId: string, preferredLane?: 'dj_queue' | 'listener_priority_queue' | 'operator_priority_queue',
+): Promise<{ rid: string | null; bedRid: string | null; lane: string }> {
   const snap = await fetchDjQueue();
   _djQueueCache = { timestamp: Date.now(), ...snap };
-  const rid = snap.ridBySubsonicId.get(subsonicId) ?? null;
-  if (!rid) return { rid: null, bedRid: null };
+  const rid = preferredLane
+    ? snap.ridByLaneAndId.get(`${preferredLane}:${subsonicId}`) ?? null
+    : snap.ridBySubsonicId.get(subsonicId) ?? null;
+  if (!rid) return { rid: null, bedRid: null, lane: 'dj_queue' };
   const prev = snap.orderedRids[snap.orderedRids.indexOf(rid) - 1];
-  return { rid, bedRid: prev && snap.bedRids.has(prev) ? prev : null };
+  return { rid, bedRid: prev && snap.bedRids.has(prev) ? prev : null, lane: snap.queueByRid.get(rid) || 'dj_queue' };
 }
 
 // Resolve the rid of a pending transition CLIP rendered for the given
@@ -316,8 +335,22 @@ export async function resolveClipRid(subsonicId: string): Promise<string | null>
 
 // False when Liquidsoap replies NOT_FOUND: the request already left the queue
 // (playing, played, or popped for prefetch), so there is nothing to cancel.
-export async function removeFromDjQueue(rid: string): Promise<boolean> {
-  const res = await sendCommand(`dj_queue_remove ${rid}`, 2000);
+export async function removeFromDjQueue(rid: string, lane: string = 'dj_queue'): Promise<boolean> {
+  if (!['dj_queue','listener_priority_queue','operator_priority_queue'].includes(lane)) throw new Error('invalid queue lane');
+  const res = await sendCommand(`${lane}_remove ${rid}`, 2000);
   _djQueueCache = null; // the queue just changed under the cache
   return res.trim() === 'OK';
+}
+
+// Probe the broadcast contract before the controller sends priority handoffs.
+// Old mixer images are safe: they simply do not answer with version "1".
+let priorityProbe: { until: number; supported: boolean } | null = null;
+export async function musicPrioritySupported(): Promise<boolean> {
+  if (!musicalDirectionEnabled()) return false;
+  if (priorityProbe && Date.now() < priorityProbe.until) return priorityProbe.supported;
+  let supported = false;
+  try { supported = (await sendCommand('music_priority_version', 1500)).trim() === '1'; }
+  catch { /* mixer still on v2.2: never assert priority */ }
+  priorityProbe = { until: Date.now() + 5000, supported };
+  return supported;
 }

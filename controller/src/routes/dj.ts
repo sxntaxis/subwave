@@ -7,6 +7,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import * as blocklist from '../music/blocklist.js';
 import { zipUpload } from '../middleware/upload.js';
 import { queue } from '../broadcast/queue.js';
+import { musicDirection, musicalDirectionEnabled } from '../broadcast/dj-agent/music-direction.js';
 import * as dj from '../llm/dj.js';
 import * as subsonic from '../music/subsonic.js';
 import * as library from '../music/library.js';
@@ -39,6 +40,8 @@ import { nextShowBoundaryMs } from '../broadcast/show-boundary.js';
 import { planBlock, blockLabel, blockPlayableSec, type BlockSong } from '../broadcast/block-queue.js';
 import {
   queueBlockSchema,
+  musicSteerSchema,
+  type MusicSteerBody,
   QUEUE_BLOCK_ARTIST_LIMIT_DEFAULT,
   QUEUE_BLOCK_MAX_TRACKS,
   type QueueBlockBody,
@@ -849,6 +852,8 @@ router.post('/dj/queue-track', requireAdmin, async (req, res) => {
   if (!track.id || !track.title) {
     return res.status(400).json({ error: 'id and title are required' });
   }
+  const placement = track.placement ?? 'append';
+  if (placement !== 'append' && placement !== 'next') return res.status(400).json({ error: 'placement must be append or next' });
   try {
     // Explicit operator action — bypass the request/AI dedup guard (#619) so a
     // deliberate manual queue always fires, even for an already-queued track.
@@ -860,6 +865,7 @@ router.post('/dj/queue-track', requireAdmin, async (req, res) => {
     // — see queue.pendingListenerRequests().
     const queuePosition = await queue.push({
       track, requestedBy: 'studio', operator: true, allowDuplicate: true,
+      ...(placement === 'next' ? { priorityLane: 'operator' as const } : {}),
     });
     if (queuePosition === -2) {
       // The blocklist is absolute: even manual queueing is refused.
@@ -869,6 +875,8 @@ router.post('/dj/queue-track', requireAdmin, async (req, res) => {
       ok: true,
       track: { title: track.title, artist: track.artist || null },
       queuePosition,
+      placement: placement === 'next' && queue.upcoming.some(i => i.operator && i.track.id === track.id && i.priorityLane === 'operator')
+        ? 'next-feasible' : 'append',
     });
   } catch (err) {
     queue.log('error', `/dj/queue-track failed: ${err.message}`);
@@ -1005,7 +1013,8 @@ router.post(
           requestedBy: 'studio',
           operator: true,
           allowDuplicate: true,
-          block: { id: blockId, label, index: queued + 1, size: plan.tracks.length },
+          block: { id: blockId, label, index: queued + 1, size: plan.tracks.length,
+            ...(musicalDirectionEnabled() ? { locked: true } : {}) },
         });
         if (pos === -2) {
           skipped.push({
@@ -1148,4 +1157,29 @@ router.post('/dj/skill-toggle', requireAdmin, async (req, res) => {
     queue.log('error', `/dj/skill-toggle failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// MI v2.3 station-local editorial steering, private under the existing admin
+// authorization. The route never changes show policy or queue eligibility.
+router.get('/dj/steer', requireAdmin, (_req, res) => {
+  res.json({ enabled: musicalDirectionEnabled(), direction: musicDirection.snapshot(settings.resolveActiveShow()?.id ?? null) });
+});
+router.post('/dj/steer', requireAdmin, validateBody(musicSteerSchema), (req, res) => {
+  if (!musicalDirectionEnabled()) return res.status(409).json({ error: 'music direction v1 is disabled' });
+  try {
+    const body = req.body as MusicSteerBody;
+    const direction = musicDirection.setAdmin({ ...body, showId: settings.resolveActiveShow()?.id ?? null });
+    queue.authorityEpoch++; // fence any in-flight autonomous pick
+    queue.log('steering', `operator ${body.kind} applied; direction revision ${direction?.revision}`);
+    res.json({ ok: true, direction });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+});
+router.delete('/dj/steer', requireAdmin, (_req, res) => {
+  if (!musicalDirectionEnabled()) return res.status(409).json({ error: 'music direction v1 is disabled' });
+  try {
+    const direction = musicDirection.clear(settings.resolveActiveShow()?.id ?? null);
+    queue.authorityEpoch++;
+    queue.log('steering', 'operator cleared musical direction');
+    res.json({ ok: true, direction });
+  } catch (err) { res.status(500).json({ error: (err as Error).message }); }
 });

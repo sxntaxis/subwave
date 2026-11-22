@@ -7,6 +7,7 @@ import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
+import { musicalDirectionEnabled } from './music-direction.js';
 import { speakClockAllowed } from '../clock-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 import { instruction } from '../../llm/dj.js';
@@ -60,8 +61,20 @@ export function pickSchemaBase() {
   const sayDescription = settings.announceLinks(session.onAirPersona())
     ? `when the latest event message says to write a spoken link, set this to EXACTLY one of: "This is <artist>." or "Next up, <artist>." — nothing before or after it: no title, album, year, feel, or clock. Use the artist name exactly as shown on the chosen track. When the event says stay silent, set this to null`
     : `when the latest event message says to write a spoken link, set this to ${dj.lengthPhrase('link')} of natural speech in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). ${clockRule} When the event says stay silent, set this to null`;
-  return base.extend({
+  const model = base.extend({
     say: z.string().nullable().describe(sayDescription),
+  });
+  if (!musicalDirectionEnabled()) return model;
+  // Nullable rather than optional: the strict Responses tool schema requires
+  // a stable required-key list. No direction is a valid cheap/obvious pick.
+  return model.extend({
+    direction: z.object({
+      movement: z.string().max(100).describe('compact musical chapter or movement, not a song list'),
+      destination: z.string().max(120).describe('sonic territory to approach over the next 15–40 minutes'),
+      next: z.string().max(120).describe('one feasible next musical step, preserving surprise'),
+      horizonMinutes: z.number().int().min(15).max(40),
+      energy: z.enum(['build','release','hold','contrast']).nullable().describe('relative long-range energy progression; not a BPM command'),
+    }).nullable().describe('Suggest only when there is no active movement or a human reroute demands replanning; otherwise null. Never override admin steering.'),
   });
 }
 

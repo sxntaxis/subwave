@@ -97,7 +97,7 @@ export interface QueueItem {
   //
   // `index`/`size` are stamped from the PLAN, so they describe the block as it
   // was queued and do not shrink as it plays out ("3 of 11" stays "3 of 11").
-  block?: { id: string; label: string; index: number; size: number };
+  block?: { id: string; label: string; index: number; size: number; locked?: boolean };
   intent?: string | null;
   introScript?: string | null;
   introKind?: string;
@@ -110,6 +110,10 @@ export interface QueueItem {
   // live fallback.
   introPersona?: Persona | null;
   aiPicked?: boolean;
+  /** MI v2.3 handoff source; absent is the legacy FIFO. */
+  priorityLane?: 'operator' | 'listener' | null;
+  /** Accepted request identity, not a listener name or untrusted message. */
+  humanRequestId?: string;
   linkPrev?: { id: string | null; title: string | null; artist: string | null } | null;
   // Epoch ms of the air moment this item's link was WRITTEN against — stamped
   // only when the generator actually handed the model a clock to speak
@@ -162,12 +166,14 @@ export interface QueueItem {
   // is pre-rendered) and it cues in past the head the clip already played.
   stemBlend?: { clipPath: string; blendStartSec: number; inCueSec: number } | null;
   stemSeam?: boolean;
+  /** Internal verified clip-to-full-track continuation hint (not a second start). */
+  stemClipStarted?: boolean;
   stemCueInSec?: number;
 }
 
 export type PickTarget =
-  | { kind: 'current'; item: QueueItem }
-  | { kind: 'held-tail'; item: QueueItem };
+  | { kind: 'current'; item: QueueItem; authorityEpoch?: number }
+  | { kind: 'held-tail'; item: QueueItem; authorityEpoch?: number };
 
 export interface QueuePushArgs {
   track: Track;
@@ -179,6 +185,8 @@ export interface QueuePushArgs {
   introKind?: string;
   introPersona?: Persona | null;
   aiPicked?: boolean;
+  priorityLane?: 'operator' | 'listener' | null;
+  humanRequestId?: string;
   allowDuplicate?: boolean;
   linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
   linkClockAt?: Date | number | null;

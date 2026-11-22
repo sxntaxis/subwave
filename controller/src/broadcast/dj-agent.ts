@@ -60,6 +60,7 @@ import type { PickTarget } from './queue/types.js';
 import { selectionContext } from './dj-agent/selection-context.js';
 import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } from './dj-agent/airtime-reasoning.js';
 import { recentMusicalArc } from './dj-agent/musical-arc.js';
+import { musicDirection, musicalDirectionEnabled } from './dj-agent/music-direction.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
   const show = ctx?.activeShow;
@@ -166,6 +167,11 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
   const expanded = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1';
   const initialShowId = expanded ? settings.resolveActiveShow(showAt ?? undefined)?.id ?? null : null;
+  // Model plans are speculative. Capture before ANY async tool, and commit only
+  // if the exact authority revision remains unchanged at queue admission.
+  const directionRevision = musicalDirectionEnabled() ? musicDirection.revision() : null;
+  const plannedShow = musicalDirectionEnabled() ? settings.resolveActiveShow(showAt ?? undefined)?.id ?? null : null;
+  const directionSnapshot = musicalDirectionEnabled() ? musicDirection.snapshot(plannedShow) : null;
   const airSnapshot = expanded ? captureAirtimeSnapshot(queue, target, initialShowId) : null;
   const audit = beginPickerAudit('agent', null, showAt);
   const auditSeen = pickerAuditEnabled() ? new Map<string, any>() : undefined;
@@ -267,6 +273,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     essentiaDiscovery: true,
+    ...(directionSnapshot?.steering?.kind === 'lift' ? { directionEnergy: 'build' as const }
+      : directionSnapshot?.steering?.kind === 'release' ? { directionEnergy: 'release' as const }
+      : directionSnapshot?.movement?.energy === 'build' || directionSnapshot?.movement?.energy === 'release'
+        ? { directionEnergy: directionSnapshot.movement.energy } : {}),
     ...(auditSeen ? { seen: auditSeen } : {}),
     ...(pickerAuditEnabled() ? { essentiaAudit: audit } : {}),
     ...(selectionAudit ? { selectionAudit } : {}),
@@ -554,6 +564,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length, acousticSearchToolCalls });
     return false;
   }
+  if (directionRevision !== null && song.id) {
+    // The live pick may carry a future chapter, but it becomes canonical only
+    // on the exact subsequent real airplay start (not on enqueue or prefetch).
+    musicDirection.offerProposal(song.id, directionRevision, plannedShow, object?.direction ?? null);
+  }
   session.appendTurn({
     role: 'dj', kind: 'pick',
     text: object.reason || `Selected "${song.title}".`,
@@ -810,7 +825,9 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // whoever speaks it.
     const announce = settings.announceLinks(session.onAirPersona());
 
-    const { rankTarget, audioWaypoint } = advanceRun(djMode, current);
+    // v2.3 direction owns the long horizon. The old stochastic run never
+    // competes with its energy/sonic destination when the flag is enabled.
+    const { rankTarget, audioWaypoint } = advanceRun(djMode && !musicalDirectionEnabled(), current);
     const inRun = runActive();
 
     // The "nod to it in the link" half is gated on wantLink, so a silent
@@ -902,7 +919,17 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       ? recentMusicalArc(queue.current, queue.history, 12) : [];
     const arcClause = arc.length
       ? ` Actual recent airplay (newest first; metadata only where known, not Essentia estimates): ${JSON.stringify(arc)}. Consider the whole arc, not just a single transition; contrast and surprise remain valid.` : '';
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}`;
+    const directionSnapshot = musicalDirectionEnabled()
+      ? musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null) : null;
+    const directionClause = !directionSnapshot ? '' :
+      ` Musical direction (authority order: admin > accepted listener anchor > soft model movement; no authority to bypass show locks): `
+      + JSON.stringify(directionSnapshot)
+      + '. A human anchor matters for the FOLLOWING songs, not just its immediate next transition. '
+      + (directionSnapshot.replanDue
+        ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
+        : 'Continue the established movement; normally return direction:null. ')
+      + 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.';
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${directionClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},
@@ -953,7 +980,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
 // Outcomes feed the shared breaker: same model, same done-tool harness.
 // The caller (routes/request.js) owns the request `event` turn; the agent only
 // appends its own `dj` reply here.
-export async function runRequest(queue: any, ctx: any, { requester, text }: { requester: string; text: string }) {
+export async function runRequest(queue: any, ctx: any, { requester, text, humanRequestId }: { requester: string; text: string; humanRequestId?: string }) {
   if (!settings.get().llm?.pickerAgent || breakerOpen()) return null;
   // Over the hard token cap the agent runs only when requests are exempt
   // (llm.exemptRequests, on by default); otherwise the caller's stateless
@@ -961,7 +988,7 @@ export async function runRequest(queue: any, ctx: any, { requester, text }: { re
   if (!budget.requestsAllowed()) return null;
 
   try {
-    const out = await runRequestViaAgent(queue, { requester, text });
+    const out = await runRequestViaAgent(queue, { requester, text, humanRequestId });
     breakerSuccess();
     return out;
   } catch (err) {
@@ -970,7 +997,7 @@ export async function runRequest(queue: any, ctx: any, { requester, text }: { re
   }
 }
 
-async function runRequestViaAgent(queue: any, { requester, text }: { requester: string; text: string }) {
+async function runRequestViaAgent(queue: any, { requester, text, humanRequestId }: { requester: string; text: string; humanRequestId?: string }) {
   return withTrace({ kind: 'request', requester }, async () => {
     // Requests stay near-unfiltered: listeners must be able to re-request a
     // song from earlier in the day, so the window is only 2h.
@@ -1115,6 +1142,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       track: trackFields(song),
       requestedBy: requester,
       intent: 'listener request',
+      priorityLane: 'listener', humanRequestId,
       introScript: intro || null,
       introKind: 'dj-speak',
       // Voice the intro as whoever wrote it (see the pool-pick push above).

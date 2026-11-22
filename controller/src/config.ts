@@ -171,6 +171,8 @@ export const config = {
   },
   liquidsoap: {
     queueFile: `${STATE_DIR}/next.txt`,
+    listenerPriorityFile: `${STATE_DIR}/listener-priority-next.txt`,
+    operatorPriorityFile: `${STATE_DIR}/operator-priority-next.txt`,
     // Priority handoff for an operator-triggered jingle. Separate from next.txt so
     // Liquidsoap can choose it before an already-filled dj_queue.
     jingleFile: `${STATE_DIR}/jingle-now.txt`,

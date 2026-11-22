@@ -313,6 +313,12 @@ protocol.add(temporary=true, syntax="subhttp:<full url>", doc="Navidrome stream 
 # every 1s into request.queue.
 
 dj_queue = request.queue(id="dj_queue")
+# MI v2.3: music-only human authority above the speculative DJ FIFO. These
+# sources share the EXACT cue, crossfade and metadata path below; no cut/skip.
+# A request already popped into cross() cannot be revoked; the controller
+# reports that physical boundary as an explicit late exception.
+listener_priority_queue = request.queue(id="listener_priority_queue")
+operator_priority_queue = request.queue(id="operator_priority_queue")
 jingle_now_queue = request.queue(id="jingle_now_queue")
 
 def poll_queue() =
@@ -328,6 +334,33 @@ def poll_queue() =
   end
 end
 thread.run(every=1.0, poll_queue)
+
+# Each priority channel has its own atomic handoff, eliminating competition for
+# next.txt. The corresponding telnet commands below expose pending removal.
+def poll_listener_priority() =
+  if file.exists("#{state_dir}/listener-priority-next.txt") then
+    contents = string.trim(file.contents("#{state_dir}/listener-priority-next.txt"))
+    file.remove("#{state_dir}/listener-priority-next.txt")
+    if contents != "" then
+      log("Queueing listener priority music handoff")
+      ignore(listener_priority_queue.push(request.create(contents)))
+    end
+  end
+end
+thread.run(every=0.5, poll_listener_priority)
+
+def poll_operator_priority() =
+  if file.exists("#{state_dir}/operator-priority-next.txt") then
+    contents = string.trim(file.contents("#{state_dir}/operator-priority-next.txt"))
+    file.remove("#{state_dir}/operator-priority-next.txt")
+    if contents != "" then
+      log("Queueing operator priority music handoff")
+      ignore(operator_priority_queue.push(request.create(contents)))
+    end
+  end
+end
+thread.run(every=0.5, poll_operator_priority)
+
 
 def poll_jingle_now() =
   if file.exists("#{state_dir}/jingle-now.txt") then
@@ -388,7 +421,7 @@ auto_playlist = playlist(
 music = fallback(
   id="music",
   track_sensitive=true,
-  [dj_queue, auto_playlist]
+  [operator_priority_queue, listener_priority_queue, dj_queue, auto_playlist]
 )
 
 # HARD TRACK-LENGTH CAP (#447) — the controller stamps liq_cue_out on autonomous
@@ -1927,6 +1960,46 @@ server.register(
       # Liquidsoap to flag it as leaked.
       list.iter(fun(r) -> request.destroy(r), matches)
       log("Removed request #{rid} from dj_queue via server command")
+      "OK"
+    end
+  end
+)
+
+# Versioned feature probe: a controller using music-priority lanes must see
+# exactly this response before enabling the new handoff path.
+server.register(
+  "music_priority_version",
+  description="Music priority handoff contract version",
+  usage="music_priority_version",
+  fun(_) -> "1"
+)
+
+server.register(
+  "listener_priority_queue_remove",
+  description="Remove an unstarted listener priority request by RID",
+  usage="listener_priority_queue_remove <rid>",
+  fun(arg) -> begin
+    rid = string.trim(arg)
+    q = listener_priority_queue.queue()
+    matches = list.filter(fun(r) -> "#{request.id(r)}" == rid, q)
+    if list.length(matches) == 0 then "NOT_FOUND" else
+      list.iter(fun(r) -> listener_priority_queue.remove(r), matches)
+      list.iter(fun(r) -> request.destroy(r), matches)
+      "OK"
+    end
+  end
+)
+server.register(
+  "operator_priority_queue_remove",
+  description="Remove an unstarted operator priority request by RID",
+  usage="operator_priority_queue_remove <rid>",
+  fun(arg) -> begin
+    rid = string.trim(arg)
+    q = operator_priority_queue.queue()
+    matches = list.filter(fun(r) -> "#{request.id(r)}" == rid, q)
+    if list.length(matches) == 0 then "NOT_FOUND" else
+      list.iter(fun(r) -> operator_priority_queue.remove(r), matches)
+      list.iter(fun(r) -> request.destroy(r), matches)
       "OK"
     end
   end

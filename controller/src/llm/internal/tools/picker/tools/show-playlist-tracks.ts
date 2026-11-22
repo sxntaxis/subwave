@@ -16,7 +16,7 @@ export default definePickerTool({
     execute: async () => {
       try {
         const playlistTracks = scope.playlistTracks ?? [];
-        const out = await collectAsync(playlistTracks, 12);
+        const out = await collectAsync(playlistTracks, 12, { directionRanking: false });
         // The show's mandated source must never return a bare [] — with the
         // strict music locks also applied here, an un-tagged playlist can
         // filter to empty, and pickSystem simultaneously tells the model

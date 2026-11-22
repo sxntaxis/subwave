@@ -89,6 +89,8 @@ import {
   voiceChannelFor,
 } from './queue/pure.js';
 import { pickTargetValid } from './queue/pick-target.js';
+import { choosePendingMusic, newReservation, verifiedHumanStart, type ListenerReservation } from './queue/human-priority.js';
+import { musicDirection, musicalDirectionEnabled } from './dj-agent/music-direction.js';
 import {
   PUSH_PROBE_INTERVAL_MS,
   PUSH_PROBE_MAX_READS,
@@ -197,6 +199,10 @@ class Queue {
   _nowPlayingFresh = false;            // true once the watcher's first tick has landed
   senderBusy = false;          // drain-to-Liquidsoap mutex
   pendingForceDrain = false;   // a forced drain arrived while senderBusy — re-run on release
+  pendingHumanDrain = false;   // high-priority request landed while the sender was busy
+  authorityEpoch = 0;         // fences asynchronous autonomous picks
+  requestSequence = 0;
+  listenerReservations: ListenerReservation[] = [];
   pickerBusy = false;          // prevent concurrent LLM picks
   autoPick = true;             // toggle: should we ask Ollama for next track when idle
   autoLink = true;             // toggle: random DJ links between auto tracks
@@ -237,6 +243,11 @@ class Queue {
           // not retain them or reconstruct attribution from a recovered queue.
           upcoming: this.upcoming.map(queueItemForPersistence),
           current: this.current ? queueItemForPersistence(this.current) : null,
+          ...(musicalDirectionEnabled() ? {
+            authorityEpoch: this.authorityEpoch,
+            requestSequence: this.requestSequence,
+            listenerReservations: this.listenerReservations,
+          } : {}),
           history: this.history.map(queueItemForPersistence),
           airMessages: this.airMessages,
           // The rotate's boundary count (#1619). Snapshotted for the same
@@ -285,6 +296,20 @@ class Queue {
       this.upcoming = (Array.isArray(stored.upcoming) ? stored.upcoming : [])
         .filter((i: QueueItem) => i?.track?.title && new Date(i.queuedAt || 0).getTime() > cutoff)
         .map((item: QueueItem) => { delete item.queueToken; return item; });
+      if (musicalDirectionEnabled()) {
+        this.authorityEpoch = Number.isSafeInteger(stored.authorityEpoch) && stored.authorityEpoch >= 0
+          ? stored.authorityEpoch : 0;
+        this.requestSequence = Number.isSafeInteger(stored.requestSequence) && stored.requestSequence >= 0
+          ? stored.requestSequence : 0;
+        const queued = new Set(this.upcoming.map(i => i.humanRequestId).filter(Boolean));
+        this.listenerReservations = (Array.isArray(stored.listenerReservations) ? stored.listenerReservations : [])
+          .filter((r: ListenerReservation) => r && typeof r.id === 'string'
+            && Number.isSafeInteger(r.sequence) && r.sequence >= 0
+            && r.status === 'queued' && queued.has(r.id))
+          .sort((a: ListenerReservation, b: ListenerReservation) => a.sequence - b.sequence).slice(0, 32);
+        // Unresolved resolvers were killed by restart. Recover only queued
+        // identities, which are already represented in the queue snapshot.
+      }
       this.current = stored.current || null;
       if (this.current) delete this.current.queueToken;
       this.history = Array.isArray(stored.history)
@@ -556,6 +581,69 @@ class Queue {
     };
   }
 
+  // MI v2.3: listener admission establishes arrival order BEFORE the LLM
+  // resolves the request. Never use a display name as a request identity.
+  reserveListenerRequest(id: string) {
+    if (!musicalDirectionEnabled()) return;
+    if (this.listenerReservations.some(r => r.id === id)) return;
+    this.authorityEpoch++;
+    this.listenerReservations.push(newReservation(id, ++this.requestSequence));
+    // The unresolved request might only be a chat message. Fence in-flight
+    // picks, but do not erase a real movement until music is actually admitted.
+    this.persist();
+  }
+
+  finishListenerRequest(id: string) {
+    if (!musicalDirectionEnabled()) return;
+    const idx = this.listenerReservations.findIndex(r => r.id === id);
+    if (idx < 0 || this.listenerReservations[idx].status === 'queued') return;
+    this.listenerReservations.splice(idx, 1);
+    this.persist();
+    void this.drainToLiquidsoap();
+  }
+
+  private retireListenerReservation(id: string | undefined) {
+    if (!id || !musicalDirectionEnabled()) return;
+    const idx = this.listenerReservations.findIndex(r => r.id === id);
+    if (idx >= 0) this.listenerReservations.splice(idx, 1);
+  }
+
+  private lockedBlockAwaitingStart(): boolean {
+    // A current block may not be split; once its last member starts, the next
+    // physical seam is free for the listener request.
+    return this.upcoming.some(i => i.block?.locked)
+      || !!(this.current?.block?.locked && this.current.block.index < this.current.block.size);
+  }
+
+  // AI picks that are still pending in Liquidsoap can be revoked. A prefetched
+  // request is NOT_FOUND and remains tracked: the mixer owns the physical seam.
+  // Never assume removal succeeded based on a queue reordering alone.
+  private async supersedePendingAi() {
+    if (!musicalDirectionEnabled()) return;
+    for (const item of [...this.upcoming]) {
+      if (!item.aiPicked) continue;
+      if (!item.sent) {
+        this.upcoming.splice(this.upcoming.indexOf(item), 1);
+        this.log('steering', 'uncommitted AI successor superseded by human priority');
+        continue;
+      }
+      if (!item.track?.id) continue;
+      try {
+        const { rid, lane } = await liquidsoapControl.resolveDjQueueRidWithBed(item.track.id, 'dj_queue');
+        if (rid && await liquidsoapControl.removeFromDjQueue(rid, lane)) {
+          const idx = this.upcoming.indexOf(item);
+          if (idx >= 0) this.upcoming.splice(idx, 1);
+          this.log('steering', 'pending AI successor removed from mixer');
+        } else {
+          this.log('steering', 'AI successor already prefetched; human next at next feasible seam');
+        }
+      } catch (err) {
+        this.log('error', `AI successor cancellation unconfirmed: ${(err as Error).message}`);
+      }
+    }
+    this.persist();
+  }
+
   // Add a track to `upcoming` and kick off the Liquidsoap sender.
   //
   // `introScript` is rendered to a WAV by the drain and aired by airIntro() only
@@ -572,9 +660,20 @@ class Queue {
   // the on-air track's remaining play and goes badly wrong when the pick misses
   // that seam and auto.m3u fills the slot.
   async push(
-    { track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: QueuePushArgs,
+    { track, requestedBy = null, operator = false, block = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null, priorityLane = null, humanRequestId }: QueuePushArgs,
     onAccepted?: (receipt: QueueInsertionReceipt) => void,
   ) {
+    // An explicit owner queue action fences a speculative Agent pick before
+    // any asynchronous mixer probe can surrender the event loop.
+    if (musicalDirectionEnabled() && operator) this.authorityEpoch++;
+    // Negotiate the physical handoff contract BEFORE the synchronous dedup +
+    // append point. A controller-only rollout must not claim physical priority
+    // when broadcast still runs an older Liquidsoap script.
+    const lane = musicalDirectionEnabled() && priorityLane && await liquidsoapControl.musicPrioritySupported()
+      ? priorityLane : null;
+    if (musicalDirectionEnabled() && priorityLane && !lane) {
+      this.log('steering', 'priority mixer unavailable; request joins legacy FIFO (not guaranteed next)');
+    }
     // The blocklist is absolute, so it sits above `allowDuplicate`.
     const blockHit = blocklist.hitOf(track);
     if (blockHit) {
@@ -590,16 +689,26 @@ class Queue {
     // song are both visible (#619) — no await between here and upcoming.push()
     // below, so it closes the race. `allowDuplicate` opts an operator action out.
     if (!allowDuplicate && track?.id) {
-      const dominated = this.upcoming.some(i => i.track?.id === track.id)
+      // A human may legitimately request a song the speculative AI already
+      // queued. Admit the HUMAN copy; the old AI copy is retired best-effort.
+      // Do not bypass duplicate HUMAN requests or repeat the current song.
+      const dominated = this.upcoming.some(i => i.track?.id === track.id
+        && !(musicalDirectionEnabled() && humanRequestId && i.aiPicked))
         || (this.current?.track?.id === track.id);
       if (dominated) {
         this.log('dedup-skip', `${track.title} -- ${track.artist} (already queued)`);
         return -1;
       }
     }
+    // Persist the authoritative reroute before exposing an item in upcoming.
+    // If private state cannot be saved, the queue remains unchanged.
+    if (musicalDirectionEnabled() && (operator || humanRequestId)) musicDirection.humanAdmitted();
     const item = {
       track, requestedBy, operator, intent, introScript, introKind, introPersona, aiPicked,
-      ...(onAccepted ? { queueToken: randomBytes(16).toString('hex') } : {}),
+      ...(lane ? { priorityLane: lane } : {}),
+      ...(humanRequestId && musicalDirectionEnabled() ? { humanRequestId } : {}),
+      ...(onAccepted || (musicalDirectionEnabled() && (humanRequestId || operator || lane))
+        ? { queueToken: randomBytes(16).toString('hex') } : {}),
       block: block ?? undefined,
       // Only stamp a back-announce target when there's actually an intro/link to
       // air against it; a bare track carries no claim about what preceded it.
@@ -617,6 +726,11 @@ class Queue {
       confirmedInLiquidsoap: false,
     };
     this.upcoming.push(item);
+    if (musicalDirectionEnabled() && humanRequestId) {
+      const reservation = this.listenerReservations.find(r => r.id === humanRequestId);
+      if (reservation) reservation.status = 'queued';
+    }
+    if (lane) this.pendingHumanDrain = true;
     if (onAccepted && item.queueToken) {
       try { onAccepted({ item, token: item.queueToken }); } catch { /* audit cannot affect queue acceptance */ }
     }
@@ -630,12 +744,14 @@ class Queue {
     }
     this.warnIfSwallowedByCrossfade(item);
     this.persist();
-    this.drainToLiquidsoap();  // fire-and-forget
+    if (lane && musicalDirectionEnabled()) void this.supersedePendingAi();
+    void this.drainToLiquidsoap();  // priority handoff must not wait on RID cleanup
     return this.upcoming.length;
   }
 
   async pushAiPick(args: QueuePushArgs, target: PickTarget, onAccepted?: (receipt: QueueInsertionReceipt) => void): Promise<number | 'stale'> {
-    if (!pickTargetValid(target, this.current, this.upcoming)) {
+    if ((musicalDirectionEnabled() && target.authorityEpoch !== this.authorityEpoch)
+        || !pickTargetValid(target, this.current, this.upcoming)) {
       this.log('stale-pick', `stale pick dropped: ${args.track.title} was selected for ${target.item.track.title}, but that successor slot changed before commit`);
       return 'stale';
     }
@@ -1226,6 +1342,7 @@ class Queue {
   // deadline the item drains with track-intrinsic stamps only.
   async drainToLiquidsoap(force = false) {
     if (this.senderBusy) {
+      if (musicalDirectionEnabled()) this.pendingHumanDrain = true;
       // A forced drain must not vanish into a busy sender (a render or slow TTS
       // can hold the mutex for tens of seconds). Flag it and the in-flight
       // drain re-runs forced on release.
@@ -1234,17 +1351,21 @@ class Queue {
     }
     this.senderBusy = true;
     try {
+      const priorityAvailable = musicalDirectionEnabled() && await liquidsoapControl.musicPrioritySupported();
       while (true) {
-        const item = this.upcoming.find(i => !i.sent);
+        const item = priorityAvailable
+          ? choosePendingMusic(this.upcoming, this.listenerReservations, this.lockedBlockAwaitingStart())
+          : this.upcoming.find(i => !i.sent) ?? null;
         if (!item) break;
 
         const idx = this.upcoming.indexOf(item);
-        const hasSuccessor = idx >= 0 && idx + 1 < this.upcoming.length;
+        const hasSuccessor = idx >= 0 && idx + 1 < this.upcoming.length
+          && !item.priorityLane && !this.upcoming[idx + 1]?.priorityLane;
         // The clock governing this item's drain is the end of the track it will
         // FOLLOW — the on-air clock extended past sent-but-unaired items ahead,
         // or every other seam loses its pair stamps. `force` (clip-as-track
         // recovery) never holds, but a known successor still earns its stamps.
-        const action = force
+        const action = item.priorityLane ? 'send-intrinsic' : force
           ? (hasSuccessor ? 'send-pair' : 'send-intrinsic')
           : drainAction({
               pairDrain: this.pairDrainActive(),
@@ -1305,9 +1426,9 @@ class Queue {
         // Loudness normalisation, on EVERY track, not just DJ mode.
         await this.applyLoudnessGain(item.track);
 
-        // The bed, if wanted. dj_queue is FIFO, so it goes over BEFORE the
-        // track URI below.
-        await this.maybePushBed(item);
+        // Priority lanes have no associated bed lane. Never strand a bed in
+        // normal dj_queue ahead of a human-authorized track.
+        if (!item.priorityLane) await this.maybePushBed(item);
 
         const maxDurationSec = item.requestedBy ? null : settings.effectiveMaxTrackSec();
         const itemDurSec = knownDurationSec(item.track);
@@ -1407,7 +1528,14 @@ class Queue {
         // Longer than the default 1.5s wait: with a clip following, two
         // back-to-back writes are normal and a missed 1.0s poll must not
         // overwrite an unconsumed handoff.
-        await writeHandoff(config.liquidsoap.queueFile, uri, { maxWaitMs: 5000 });
+        // Cancellation or a newer human request may have invalidated an AI
+        // item during a slow gain/trim/intro await. Never hand it off anyway.
+        if (!this.upcoming.includes(item)) continue;
+        const handoffFile = item.priorityLane === 'listener'
+          ? config.liquidsoap.listenerPriorityFile
+          : item.priorityLane === 'operator' ? config.liquidsoap.operatorPriorityFile
+          : config.liquidsoap.queueFile;
+        await writeHandoff(handoffFile, uri, { maxWaitMs: 5000 });
         if (item.stemBlend) {
           // The clip rides behind its outgoing track, annotated as the INCOMING
           // one so now-playing flips at the blend. Reuse the successor the blend
@@ -1438,7 +1566,11 @@ class Queue {
       this.senderBusy = false;
       if (this.pendingForceDrain) {
         this.pendingForceDrain = false;
+        this.pendingHumanDrain = false;
         void this.drainToLiquidsoap(true);
+      } else if (this.pendingHumanDrain) {
+        this.pendingHumanDrain = false;
+        void this.drainToLiquidsoap();
       }
     }
   }
@@ -1688,6 +1820,24 @@ class Queue {
   // airPendingVoice so no second matcher can drift out of step.
   matchUpcomingIndex(np: NowPlaying | null): number {
     if (!np) return -1;
+    // A rendered stem seam IS the first audible portion of the incoming AI
+    // track. Its clip intentionally carries no queue token; bind only the
+    // already-sent exact successor explicitly stamped stemSeam, never a
+    // queued human copy with the same Subsonic id.
+    if (musicalDirectionEnabled() && (np.subwave_clip === true || np.subwave_clip === '1')) {
+      return this.upcoming.findIndex(u => u.sent && u.aiPicked && u.stemSeam
+        && u.track.id && u.track.id === np.subsonic_id);
+    }
+    // When a token is present it is authoritative. A stale/rescinded track
+    // with the same Subsonic id must never steal the later request's identity.
+    if (typeof np.subwave_queue_token === 'string' && /^[0-9a-f]{32}$/.test(np.subwave_queue_token)) {
+      const byToken = this.upcoming.findIndex(u => u.sent && u.queueToken === np.subwave_queue_token);
+      if (byToken >= 0) return byToken;
+      // A recovered item has no token by design; permit legacy fallback only
+      // for these un-attributable recovered items, not any live tokened item.
+      const recovered = this.upcoming.findIndex(u => u.sent && !u.queueToken && u.track.id === np.subsonic_id);
+      return recovered;
+    }
     let idx = -1;
     if (np.subsonic_id) {
       idx = this.upcoming.findIndex(u => u.track.id && u.track.id === np.subsonic_id);
@@ -1696,6 +1846,14 @@ class Queue {
       idx = this.upcoming.findIndex(
         u => u.track.title === np.title && (u.track.artist || '') === (np.artist || '')
       );
+    }
+    if (musicalDirectionEnabled() && idx >= 0) {
+      // Never borrow a live, tokened HUMAN request's identity from a merely
+      // matching auto/older-AI play. A post-restart item has no token and may
+      // be reconciled for queue progress, but is not a verified human anchor.
+      return this.upcoming.findIndex(u => u.sent && !u.queueToken
+        && ((np.subsonic_id && u.track.id === np.subsonic_id)
+          || (u.track.title === np.title && (u.track.artist || '') === (np.artist || ''))));
     }
     return idx;
   }
@@ -2054,14 +2212,41 @@ class Queue {
     // song identity but never this token.
     const queueToken = exactV2StartToken(np, this.current, this.upcoming);
     if (queueToken) observeV2QueueStart(queueToken);
-    const key = `${np.subsonic_id || ''}|${np.title}|${np.artist || ''}`;
+    // Use the mixer's stable start stamp, not the controller's watcher clock.
+    // After a process restart, the same currently-airing track must NOT be
+    // counted a second time as a fresh human anchor or movement advance.
+    const mixerStamp = typeof np.timestamp === 'number' && Number.isSafeInteger(np.timestamp) && np.timestamp > 0
+      ? String(np.timestamp) : null;
+    const key = `${np.subsonic_id || ''}|${np.title}|${np.artist || ''}`
+      + (musicalDirectionEnabled()
+        ? `|${np.subwave_queue_token || ''}|${mixerStamp ?? ''}` : '');
     if (key === this.lastSeenKey) return;
+    // A full track beginning at the cue-in after its stem-blend clip is the
+    // SAME audible song, not a second track start. The clip's source item and
+    // token are still on `current`; require that exact token to suppress the
+    // continuation, not just a matching title or Subsonic ID.
+    if (musicalDirectionEnabled() && np.subwave_clip !== true && np.subwave_clip !== '1'
+        && this.current?.stemClipStarted && np.subsonic_id === this.current.track.id
+        && (typeof np.timestamp === 'number' && Number.isSafeInteger(np.timestamp))
+        && Number.isFinite(Date.parse(this.current.startedAt ?? ''))
+        && Math.abs(np.timestamp * 1000 - Date.parse(this.current.startedAt!)) <= 120_000
+        && (!this.current.queueToken || np.subwave_queue_token === this.current.queueToken)) {
+      this.lastSeenKey = key;
+      return;
+    }
+    if (musicalDirectionEnabled() && mixerStamp && musicDirection.alreadyObservedStart(key)
+        && this.current?.track?.id === np.subsonic_id && this.current?.track?.title === np.title) {
+      this.lastSeenKey = key;
+      return;
+    }
 
     // Metadata matching a NOT-YET-SENT item means a rendered clip annotated as
     // that track is airing while the track never reached Liquidsoap. Consuming
     // it as played would orphan the track, so force-drain (bypassing the pair
     // hold) and leave lastSeenKey unset for the track's real fire.
-    if (np.subsonic_id && this.upcoming.some(u => !u.sent && u.track.id === np.subsonic_id)) {
+    if (np.subsonic_id && this.upcoming.some(u => !u.sent && u.track.id === np.subsonic_id)
+        && (!musicalDirectionEnabled() || np.subwave_clip === true || np.subwave_clip === '1')
+        && !this.upcoming.some(u => u.sent && u.queueToken && u.queueToken === np.subwave_queue_token)) {
       this.log('scheduler', `"${np.title}" fired while its queue item was still unsent — force-draining it (clip-as-track guard)`);
       void this.drainToLiquidsoap(true);
       return;
@@ -2116,18 +2301,25 @@ class Queue {
 
     // Same matcher airPendingVoice used above, so the two agree on the item.
     const idx = this.matchUpcomingIndex(np);
+    let verifiedEditorialSource: 'listener' | 'admin' | 'auto' = 'auto';
 
     if (idx >= 0) {
       // FIFO, so `idx > 0` means Liquidsoap already consumed those items (a
       // restart missed their transitions). Splice them or they linger forever.
-      const consumed = this.upcoming.splice(0, idx + 1);
-      if (idx > 0) {
+      const consumed = musicalDirectionEnabled()
+        ? this.upcoming.splice(idx, 1)
+        : this.upcoming.splice(0, idx + 1);
+      if (idx > 0 && !musicalDirectionEnabled()) {
         this.log('scheduler',
           `Dropped ${idx} queue item(s) Liquidsoap played during the downtime`);
       }
       const item = consumed[consumed.length - 1];
+      if (musicalDirectionEnabled()) verifiedEditorialSource = verifiedHumanStart(item, typeof np.subwave_queue_token === 'string' ? np.subwave_queue_token : null);
+      this.retireListenerReservation(item.humanRequestId);
       const source = item.aiPicked ? 'ai' : 'request';
-      this.current = { ...item, startedAt: new Date().toISOString(), source };
+      this.current = { ...item, startedAt: new Date().toISOString(), source,
+        ...(musicalDirectionEnabled() && (np.subwave_clip === true || np.subwave_clip === '1')
+          ? { stemClipStarted: true } : {}) };
       // A pre-render is keyed by the queued item and `current` is a spread
       // clone, so carry the lifecycle across before airIntro reuses it.
       this._introRenders.transfer(item, this.current);
@@ -2248,6 +2440,25 @@ class Queue {
       },
     });
 
+    if (musicalDirectionEnabled()) {
+      try {
+        musicDirection.onTrackStarted({
+          eventId: key,
+          trackId: this.current.track?.id ?? null,
+          title: this.current.track?.title ?? np.title,
+          artist: this.current.track?.artist ?? np.artist ?? null,
+          source: verifiedEditorialSource,
+          showId: onAirShow?.id ?? null,
+          at: Date.parse(this.current.startedAt ?? '') || Date.now(),
+        });
+      } catch (err) {
+        this.log('error', `musical direction update failed: ${(err as Error).message}`);
+      }
+      // A newly started human track releases the next reserved request; the
+      // end of a locked block releases the priority lane at this boundary.
+      void this.drainToLiquidsoap();
+    }
+
     this.persist();  // upcoming/current/history all just changed
 
     // Auto-DJ: with nothing queued, hand a track-started event to the session
@@ -2268,8 +2479,8 @@ class Queue {
   // Fire-and-forget; pickerBusy is the reentry guard.
   runPickCycle({ isAutonomous, predecessorItem = null }: { isAutonomous: boolean; predecessorItem?: QueueItem | null }) {
     const pickTarget: PickTarget = predecessorItem
-      ? { kind: 'held-tail', item: predecessorItem }
-      : { kind: 'current', item: this.current! };
+      ? { kind: 'held-tail', item: predecessorItem, ...(musicalDirectionEnabled() ? { authorityEpoch: this.authorityEpoch } : {}) }
+      : { kind: 'current', item: this.current!, ...(musicalDirectionEnabled() ? { authorityEpoch: this.authorityEpoch } : {}) };
     let wantLink = false;
     if (this.autoLink && isAutonomous && this.history[0]) {
       this.tracksUntilLink--;
@@ -2541,8 +2752,10 @@ class Queue {
     const trackId = item.track?.id || '';
 
     if (item.sent) {
-      const { rid, bedRid } = await liquidsoapControl.resolveDjQueueRidWithBed(trackId);
-      if (!rid || !(await liquidsoapControl.removeFromDjQueue(rid))) {
+      const { rid, bedRid, lane } = await liquidsoapControl.resolveDjQueueRidWithBed(
+        trackId, item.priorityLane === 'listener' ? 'listener_priority_queue'
+          : item.priorityLane === 'operator' ? 'operator_priority_queue' : 'dj_queue');
+      if (!rid || !(await liquidsoapControl.removeFromDjQueue(rid, lane))) {
         return { ok: false, reason: 'already-playing' };
       }
       // The bed ahead of this track is its own dj_queue entry with no
@@ -2600,6 +2813,8 @@ class Queue {
 
     const idx = this.upcoming.indexOf(item);
     if (idx !== -1) this.upcoming.splice(idx, 1);
+    this.retireListenerReservation(item.humanRequestId);
+    if (musicalDirectionEnabled()) this.authorityEpoch++;
     this.log('scheduler', `operator removed from queue: ${item.track.title} — ${item.track.artist}`);
     this.persist();
     return { ok: true };

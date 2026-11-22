@@ -132,7 +132,7 @@ export default definePickerTool({
         }
         await library.load();
         const list = blocklist.rejectBlocked(ids.slice(0, 128).map(id => library.slimById(id)).filter(Boolean));
-        const tracks = await ctx.collectAsync(list);
+        const tracks = await ctx.collectAsync(list, undefined, { directionRanking: false });
         if (v2Used) {
           ctx.scope.essentiaAudit?.captureV2JointCandidates?.(tracks.map(track => track?.id));
         }

@@ -135,6 +135,21 @@ export function evaluateForwardPaths(
   return paths;
 }
 
+/** One canonical path per first ID. The displayed explanation must describe
+ * the SAME proposal whose utility affected shortlist ordering. */
+export function selectForwardPaths(
+  paths: readonly TrajectoryPath[], preferContrast = false,
+): TrajectoryPath[] {
+  const selected = new Map<string, TrajectoryPath>();
+  for (const path of paths) {
+    const prior = selected.get(path.firstId);
+    if (!prior || (preferContrast && prior.character !== 'contrast' && path.character === 'contrast')) {
+      selected.set(path.firstId, path);
+    }
+  }
+  return [...selected.values()];
+}
+
 /** Soft optional path utility. Original order retains at least 88% influence. */
 export function orderWithForwardPaths<T extends { id?: string }>(
   candidates: readonly T[], paths: readonly TrajectoryPath[], weight = 0.12,

@@ -91,6 +91,8 @@ import {
 import { pickTargetValid } from './queue/pick-target.js';
 import { choosePendingMusic, newReservation, verifiedHumanStart, type ListenerReservation } from './queue/human-priority.js';
 import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
+import { trajectoryEnabled } from '../music/trajectory-runtime.js';
+import { verifiedMixerStartFacts } from './dj-agent/verified-airplay-facts.js';
 import {
   PUSH_PROBE_INTERVAL_MS,
   PUSH_PROBE_MAX_READS,
@@ -2442,6 +2444,10 @@ class Queue {
 
     if (musicalDirectionEnabled()) {
       try {
+        // Factual enrichment is downstream of the real mixer-start edge;
+        // exact ID matching is centralized and tested in the pure resolver.
+        const verifiedFacts = trajectoryEnabled()
+          ? verifiedMixerStartFacts(np.subsonic_id, this.current.track) : null;
         musicDirection.onTrackStarted({
           eventId: key,
           trackId: this.current.track?.id ?? null,
@@ -2452,9 +2458,12 @@ class Queue {
           at: Date.parse(this.current.startedAt ?? '') || Date.now(),
           ...(musicalDirectorV2Enabled() ? {
             queueToken: queueToken ?? null,
-            energy: typeof this.current.track.energy === 'string' ? this.current.track.energy : null,
-            moods: Array.isArray(this.current.track.moods) ? this.current.track.moods : null,
-            genre: typeof this.current.track.genre === 'string' ? this.current.track.genre : null,
+            energy: trajectoryEnabled() ? verifiedFacts?.energy ?? null
+              : typeof this.current.track.energy === 'string' ? this.current.track.energy : null,
+            moods: trajectoryEnabled() ? verifiedFacts?.moods ?? null
+              : Array.isArray(this.current.track.moods) ? this.current.track.moods : null,
+            genre: trajectoryEnabled() ? verifiedFacts?.genre ?? null
+              : typeof this.current.track.genre === 'string' ? this.current.track.genre : null,
           } : {}),
         });
       } catch (err) {

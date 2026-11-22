@@ -34,6 +34,7 @@ import { trajectoryEnabled, cachedPredecessor } from '../../../../music/trajecto
 import { trajectoryRankCandidates } from '../../../../music/trajectory-rank.js';
 import { searchEligibleCohort } from '../../../../music/music-evidence-cohort.js';
 import { logEvent } from '../../../../observability/events.js';
+import type { VerifiedAirplayContext } from '../../../../broadcast/dj-agent/verified-airplay-context.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -58,6 +59,9 @@ export interface PickerScope {
   trajectoryActive?: boolean;
   trajectoryShowId?: string | null;
   trajectoryMovementStartedAt?: string | null;
+  // V2.5.1 private factual history, independent of strict scoring eligibility.
+  verifiedHistory?: VerifiedAirplayContext | null;
+  autonomousMovementIntent?: 'build' | 'release' | 'hold' | 'contrast' | null;
   // Set exclusively by the autonomous picker after validating its predecessor.
   selection?: { predecessorId: string; recentAiredIds: string[] };
   // Private opt-in audit observer; receives bounded counters only.
@@ -407,7 +411,10 @@ export function buildPickerContext(
               const acoustic = evidence(byId.get(s.id));
               const score = scoreSelection({ enabled: true, sameShow: true, anchorReliable: true, predecessor,
                 recentAired: aired, candidate: acoustic ?? {}, baselineRank: i, candidateCount: eligible.length,
-                softBoundPlaylistMember: !playlistLock && playlistIds.has(s.id) });
+                softBoundPlaylistMember: !playlistLock && playlistIds.has(s.id),
+                ...(trajectoryEnabled() ? { coverageAware: true,
+                  movementIntent: scope.autonomousMovementIntent ?? null } : {}),
+              });
               const joint = jointScores?.get(s.id);
               const utility = joint === undefined ? score.utility
                 : score.utility * 0.90 + joint * 0.10;
@@ -528,7 +535,8 @@ export function buildPickerContext(
       ? cachedPredecessor(scope.selection?.predecessorId,
         scope.trajectoryShowId ?? null, scope.trajectoryMovementStartedAt) : null;
     const result = predecessorPoint && scope.essentiaDiscovery && opts.directionRanking !== false
-      ? trajectoryRankCandidates(enriched, predecessorPoint, scope.directionEnergy ?? null, true)
+      ? trajectoryRankCandidates(enriched, predecessorPoint, scope.directionEnergy ?? null, true,
+          scope.autonomousMovementIntent === 'contrast' ? 'contrast' : null)
       : process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1' && scope.essentiaDiscovery
         && opts.directionRanking !== false
         ? orderByArousalDirection(enriched, scope.directionEnergy ?? null) : enriched;

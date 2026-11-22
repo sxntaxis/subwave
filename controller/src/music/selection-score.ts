@@ -21,6 +21,9 @@ export interface SelectionScoreInput {
   baselineRank: number;
   candidateCount: number;
   softBoundPlaylistMember?: boolean | null;
+  // Only enabled by the full MI v2.5 gate. Old score bytes stay identical.
+  coverageAware?: boolean;
+  movementIntent?: 'build' | 'release' | 'hold' | 'contrast' | null;
 }
 export interface SelectionScore {
   baseline: number;
@@ -85,8 +88,12 @@ export function scoreSelection(input: SelectionScoreInput): SelectionScore {
     const similarities = input.recentAired.slice(0, 5).map(x => acousticSimilarity(x.vector, b.vector)).filter((v): v is number => v != null);
     if (similarities.length >= 2) result.novelty = clamp(1 - Math.max(...similarities));
   }
-  const flowWeight = result.flow == null ? 0 : 0.4;
-  const noveltyWeight = result.novelty == null ? 0 : 0.1;
+  const contrast = input.coverageAware === true && input.movementIntent === 'contrast';
+  const flowWeight = result.flow == null ? 0
+    : input.coverageAware === true
+      ? (contrast ? 0.15 : 0.40) * result.confidence
+      : 0.4;
+  const noveltyWeight = result.novelty == null ? 0 : contrast ? 0.20 : 0.1;
   result.utility = clamp((1 - flowWeight - noveltyWeight) * baseline
     + flowWeight * (result.flow ?? 0) + noveltyWeight * (result.novelty ?? 0)
     + (input.softBoundPlaylistMember === true ? 0.08 : 0));

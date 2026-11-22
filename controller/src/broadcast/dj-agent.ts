@@ -63,6 +63,7 @@ import { recentMusicalArc } from './dj-agent/musical-arc.js';
 import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
 import { incomingShowPhase } from './dj-agent/show-phase.js';
 import { trajectoryEnabled, inspectVerifiedTrajectory } from '../music/trajectory-runtime.js';
+import { projectVerifiedAirplay, type VerifiedAirplayContext } from './dj-agent/verified-airplay-context.js';
 import type { QueueInsertionReceipt } from './queue/types.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
@@ -167,7 +168,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget }): Promise<boolean | 'stale'> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, prior = null, predecessorOverride = false, showAt = null, rankTarget = null, linkAirAt = null, target, verifiedHistory = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; prior?: any | null; predecessorOverride?: boolean; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; target: PickTarget; verifiedHistory?: VerifiedAirplayContext | null }): Promise<boolean | 'stale'> {
   const expanded = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1';
   const initialShowId = expanded ? settings.resolveActiveShow(showAt ?? undefined)?.id ?? null : null;
   // Model plans are speculative. Capture before ANY async tool, and commit only
@@ -277,6 +278,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     essentiaDiscovery: true,
+    ...(trajectoryEnabled() ? {
+      verifiedHistory,
+      autonomousMovementIntent: directionSnapshot?.steering ? null
+        : directionSnapshot?.movement?.energy ?? null,
+    } : {}),
     ...(trajectoryEnabled() ? { trajectoryActive: !!directionSnapshot?.movement && !directionSnapshot.steering,
       trajectoryShowId: activeShow?.id ?? null, trajectoryMovementStartedAt: directionSnapshot?.movement?.startedAt ?? null } : {}),
     ...(directionSnapshot?.steering?.kind === 'lift' ? { directionEnergy: 'build' as const }
@@ -445,7 +451,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     }),
     poolRescue: (avoidArtist) => pickViaPool(
       queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
-      { avoidArtist }, target, predecessorOverride, prior,
+      { avoidArtist, ...(trajectoryEnabled() ? { verifiedHistory } : {}) }, target, predecessorOverride, prior,
     ),
     log: (line) => queue.log('picker', line),
     logEvent,
@@ -651,7 +657,7 @@ function linkAirContext(ctx: any, airAt: Date | null) {
 // answer sends the guard back to its own same-artist pick, and only 'empty'
 // means the pool truly held no other artist — the relaxation event says which
 // (#1187).
-async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}, target: PickTarget, predecessorOverride = false, prior: any | null = null): Promise<'queued' | 'empty' | 'collision' | 'stale'> {
+async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { wantLink: boolean; current?: any; showAt?: Date | null }, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; verifiedHistory?: VerifiedAirplayContext | null } = {}, target: PickTarget, predecessorOverride = false, prior: any | null = null): Promise<'queued' | 'empty' | 'collision' | 'stale'> {
   // A DJ-mode mini-run (feature 4) anchors the pool re-rank to the run's
   // tempo/key target instead of the current track. null → today's behaviour.
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
@@ -674,7 +680,9 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
           const showId = settings.resolveActiveShow(showAt ?? undefined)?.id ?? null;
           const snap = musicDirection.snapshot(showId);
           return { trajectoryActive: !!snap?.movement && !snap.steering,
-            trajectoryShowId: showId, trajectoryMovementStartedAt: snap?.movement?.startedAt ?? null };
+            trajectoryShowId: showId, trajectoryMovementStartedAt: snap?.movement?.startedAt ?? null,
+            ...(trajectoryEnabled() ? { movementIntent: snap?.steering ? null : snap?.movement?.energy ?? null } : {}),
+          };
         })(),
         ...(trajectoryEnabled() ? { editorialDirection: (() => {
           const snap = musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null);
@@ -956,10 +964,19 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
       + '. Pick the track to play next.'
       + linkClause;
+    // All three readers share this same frozen verified-start snapshot. Queued
+    // picks and filtered scoring context must never become historical evidence.
+    const verifiedHistory = trajectoryEnabled()
+      ? projectVerifiedAirplay(musicDirection.recentVerifiedAirplay(12),
+        settings.resolveActiveShow(showAt ?? undefined)?.id ?? null) : null;
     const arc = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
       ? recentMusicalArc(queue.current, queue.history, 12) : [];
-    const arcClause = arc.length
-      ? ` Actual recent airplay (newest first; metadata only where known, not Essentia estimates): ${JSON.stringify(arc)}. Consider the whole arc, not just a single transition; contrast and surprise remain valid.` : '';
+    const arcClause = trajectoryEnabled()
+      ? verifiedHistory?.entries.length
+        ? ` Actual verified airplay (newest first, local historyRefs are NOT selectable IDs; missing facts remain unknown): ${JSON.stringify(verifiedHistory.entries)}. Respect current/previous-show context and intentional contrast.`
+        : ''
+      : arc.length
+        ? ` Actual recent airplay (newest first; metadata only where known, not Essentia estimates): ${JSON.stringify(arc)}. Consider the whole arc, not just a single transition; contrast and surprise remain valid.` : '';
     const directionSnapshot = musicalDirectionEnabled()
       ? musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null) : null;
     const showPhase = musicalDirectorV2Enabled() ? incomingShowPhase(showAt) : null;
@@ -1017,6 +1034,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         const queued = await pickViaAgent(queue, ctx, {
            wantLink, audioWaypoint, current, prior: previous, predecessorOverride: !!predecessor, showAt, rankTarget,
           linkAirAt: linkClockStampFor(airAt, !!airClock), target,
+          ...(trajectoryEnabled() ? { verifiedHistory } : {}),
         });
         breakerSuccess();
         if (queued === 'stale') return;
@@ -1038,7 +1056,8 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         }
       }
     }
-    const pooled = await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint, {}, target, !!predecessor, previous);
+    const pooled = await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
+      trajectoryEnabled() ? { verifiedHistory } : {}, target, !!predecessor, previous);
     if (pooled === 'stale') return;
   });
 }

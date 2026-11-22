@@ -110,6 +110,12 @@ export class MusicDirectionStore {
       .map(s => ({ eventId: s.eventId, showId: s.showId, trackId: s.trackId }));
   }
   revision(): number { return this.state.revision; }
+  /** Factual mixer-derived starts, without scoring eligibility or pending picks. */
+  recentVerifiedAirplay(limit = 12) {
+    if (!this.enabled || !musicalDirectorV2Enabled()) return [];
+    return (this.state.memory?.recent ?? []).slice(0, Math.min(12, Math.max(0, limit)))
+      .map(e => ({ ...e, moods: [...e.moods] }));
+  }
   /** Allows watcher restart to recognize the same mixer-stamped airing. */
   alreadyObservedStart(eventId: string): boolean {
     return this.enabled && !!eventId && this.state.lastStart === eventId;

@@ -3,7 +3,7 @@
 
 import { ANALYSIS_VERSION, AUDIO_EMBEDDING_DIM, SQL_HAS_MOODS, TAGGER_VERSION, getEmbeddingDim, requireDb } from './handle.js';
 import type { TagWrite, TrackEnrichment, TrackKeyRange, TrackMeta, TrackOutro, TrackPaceSpan, TrackRecord, TrackRow, TrackSection } from './types.js';
-import { normaliseYear, rowToTrack, safeParseArray } from './rows.js';
+import { normaliseYear, rowToTrack, safeParseArray, parsePaceSpans } from './rows.js';
 import { runDdl } from './schema.js';
 import { resolveEraYear } from '../era-year.js';
 
@@ -12,6 +12,26 @@ export function getTrack(id: string): TrackRecord | null {
     .prepare(`SELECT * FROM tracks WHERE id = ?`)
     .get(id) as TrackRow | undefined;
   return row ? rowToTrack(row) : null;
+}
+
+/** Private, bounded verified-airplay metadata read. Scalar fields plus only
+ * the already-existing pace curve; no structure/vocals/beats/lyrics/windows. */
+export function getVerifiedAirplayTrackLite(id: string) {
+  const row = requireDb().prepare(`SELECT title, artist, genres, genre, moods, energy, year, original_year, is_compilation, era_untrusted, bpm, musical_key, pace_json FROM tracks WHERE id = ?`)
+    .get(id) as Pick<TrackRow, 'title' | 'artist' | 'genres' | 'genre' | 'moods' | 'energy' | 'year' | 'original_year' | 'is_compilation' | 'era_untrusted' | 'bpm' | 'musical_key' | 'pace_json'> | undefined;
+  if (!row) return null;
+  const pace = row.pace_json ? parsePaceSpans(row.pace_json) : null;
+  const values = pace?.map(p => p.value).filter(v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1) ?? [];
+  return {
+    title: row.title, artist: row.artist,
+    genres: row.genres ? safeParseArray(row.genres) : [], genre: row.genre,
+    moods: row.moods ? safeParseArray(row.moods) : [], energy: row.energy,
+    year: row.year, originalYear: row.original_year,
+    isCompilation: row.is_compilation == null ? null : !!row.is_compilation,
+    yearUntrusted: row.is_compilation === 1 || row.era_untrusted === 1,
+    bpm: row.bpm, musicalKey: row.musical_key,
+    paceMean: values.length ? Math.round(values.reduce((a,b) => a + b, 0) / values.length * 1000) / 1000 : null,
+  };
 }
 
 export interface TrackLite {

@@ -1,6 +1,6 @@
 // Optional MI v2.5 shortlist assessment. Never admits a new ID and never
 // supplies a playable item outside the caller's already-eligible candidates.
-import { evaluateForwardPaths, orderWithForwardPaths, type SonicPoint, type CandidateSonicPoint } from './trajectory-engine.js';
+import { evaluateForwardPaths, orderWithForwardPaths, selectForwardPaths, type SonicPoint, type CandidateSonicPoint } from './trajectory-engine.js';
 
 export interface TrajectoryCandidate {
   id?: string;
@@ -27,15 +27,17 @@ export function trajectoryRankCandidates<T extends TrajectoryCandidate>(
   candidates: readonly T[], predecessor: SonicPoint | null,
   direction: 'build' | 'release' | null,
   includeHints = false,
+  movementIntent: 'contrast' | null = null,
 ): T[] {
   if (candidates.length < 3 || !predecessor) return [...candidates];
   const eligible: CandidateSonicPoint[] = candidates.slice(0, 24).filter(x => !!x.id)
     .map(x => ({ id: x.id!, artist: x.artist, ...pointFromDiscovery(x) }));
   const paths = evaluateForwardPaths(eligible, predecessor, direction);
   if (!paths.length) return [...candidates];
-  const reordered = orderWithForwardPaths(candidates, paths);
+  const selectedPaths = selectForwardPaths(paths, movementIntent === 'contrast');
+  const reordered = orderWithForwardPaths(candidates, selectedPaths);
   if (!includeHints) return reordered;
-  const pathFor = new Map(paths.map(p => [p.firstId, p]));
+  const pathFor = new Map(selectedPaths.map(p => [p.firstId, p]));
   return reordered.map(track => {
     const p = pathFor.get(track.id ?? '');
     return !p ? track : { ...track, trajectory_option: {

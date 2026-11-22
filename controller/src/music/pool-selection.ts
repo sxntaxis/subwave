@@ -19,6 +19,7 @@ export async function composePoolSelection<T extends { id?: string; artist?: str
   baseline: T[],
   selection: { predecessorId: string; recentAiredIds: string[] } | undefined,
   observe?: (observation: PickerSelectionObservation) => void,
+  scoring?: { coverageAware?: boolean; movementIntent?: 'build' | 'release' | 'hold' | 'contrast' | null },
 ): Promise<T[]> {
   const report = (reason: PickerSelectionObservation['reason'], lookupMs?: number,
                   orderedShortlistChanged?: boolean) => {
@@ -66,7 +67,9 @@ export async function composePoolSelection<T extends { id?: string; artist?: str
     const ranked = baseline.map((value, i) => {
       const acoustic = evidence(byId.get(value.id!));
       const score = scoreSelection({ enabled: true, sameShow: true, anchorReliable: true,
-        predecessor, recentAired, candidate: acoustic ?? {}, baselineRank: i, candidateCount: baseline.length });
+        predecessor, recentAired, candidate: acoustic ?? {}, baselineRank: i, candidateCount: baseline.length,
+        ...(scoring?.coverageAware ? { coverageAware: true, movementIntent: scoring.movementIntent ?? null } : {}),
+      });
       return { value, id: value.id!, artistKey: artistKey(value), baselineIndex: i,
         utility: score.utility, acoustic, flow: score.flow };
     });

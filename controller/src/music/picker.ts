@@ -27,6 +27,8 @@ import { attachCompleteMusicEvidence } from './music-evidence-profile.js';
 import { orderByArousalDirection, type EnergyDirection } from './direction-rank.js';
 import { trajectoryEnabled, cachedPredecessor } from './trajectory-runtime.js';
 import { trajectoryRankCandidates } from './trajectory-rank.js';
+import { resolveEraYear } from './era-year.js';
+import { poolVerifiedHistory, type VerifiedAirplayContext } from '../broadcast/dj-agent/verified-airplay-context.js';
 
 // Raw Subsonic child, slimTrack library row, or Last.fm stub. A structural
 // superset of show-filter's FilterTrack and recency's CandidateLike.
@@ -40,6 +42,7 @@ interface Candidate {
   isCompilation?: boolean | null;
   yearUntrusted?: boolean | null;
   year?: number | string | null;
+  originalYear?: number | null;
   genre?: string | null;
   duration?: number | null;
   // Library rows spell it `durationSec`; both names must stay or the #1573
@@ -656,7 +659,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; directionEnergy?: EnergyDirection | null; editorialDirection?: { source: 'human'; kind: string; intent: string } | { source: 'autonomous'; movement: string; destination: string; next: string; energy: string | null } | null; trajectoryActive?: boolean; trajectoryShowId?: string | null; trajectoryMovementStartedAt?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; directionEnergy?: EnergyDirection | null; editorialDirection?: { source: 'human'; kind: string; intent: string } | { source: 'autonomous'; movement: string; destination: string; next: string; energy: string | null } | null; verifiedHistory?: VerifiedAirplayContext | null; movementIntent?: 'build' | 'release' | 'hold' | 'contrast' | null; trajectoryActive?: boolean; trajectoryShowId?: string | null; trajectoryMovementStartedAt?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
@@ -728,7 +731,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     ? rawCandidates.filter((t) => t?.id && !excludedIds.has(t.id))
     : rawCandidates;
   const composed = opts.poolVnext
-    ? await composePoolSelection(eligibleCandidates, opts.selection, opts.selectionAudit)
+    ? await composePoolSelection(eligibleCandidates, opts.selection, opts.selectionAudit,
+        trajectoryEnabled() ? { coverageAware: true, movementIntent: opts.movementIntent ?? null } : undefined)
     : eligibleCandidates;
   // Shared, bounded acoustic evidence after the usual hard eligibility and
   // transition-aware MMR. This is a soft *reorder*, never discovery expansion,
@@ -750,7 +754,8 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           ? cachedPredecessor(opts.selection?.predecessorId,
             opts.trajectoryShowId ?? null, opts.trajectoryMovementStartedAt) : null;
         candidates = predecessorPoint
-          ? trajectoryRankCandidates(enriched, predecessorPoint, opts.directionEnergy ?? null)
+          ? trajectoryRankCandidates(enriched, predecessorPoint, opts.directionEnergy ?? null, false,
+              opts.movementIntent === 'contrast' ? 'contrast' : null)
           : orderByArousalDirection(enriched, opts.directionEnergy ?? null);
       }
     } catch { /* unavailable evidence never blocks the pool */ }
@@ -814,7 +819,14 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
 
   const airedNow = library.lastAiredInfo();
 
-  const recentPlays = summariseRecent(queue);
+  const verifiedInput = trajectoryEnabled() && opts.verifiedHistory?.entries.length
+    ? currentTrack === queue.current?.track
+      ? poolVerifiedHistory(opts.verifiedHistory, queue.current?.track?.id, queue.current?.startedAt)
+      // A held-tail predecessor has not aired. Keep the real on-air song in
+      // history and never assign its H-ref to the speculative predecessor.
+      : { recentPlays: opts.verifiedHistory.entries, currentHistoryRef: undefined }
+    : null;
+  const recentPlays = verifiedInput ? verifiedInput.recentPlays : summariseRecent(queue);
   // Guarded: picker-test.mjs uses a stub queue with no such method.
   const recentTransitions = typeof queue.recentTransitionChoices === 'function'
     ? queue.recentTransitionChoices()
@@ -851,7 +863,10 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           artist: c.artist,
           // Absent-when-empty throughout; nulls cost hundreds of tokens.
           album: slimAlbum(c.album, c.title),
-          year: c.year || undefined,
+          year: trajectoryEnabled()
+            ? resolveEraYear(c.year ?? rec?.year, c.originalYear ?? rec?.originalYear,
+                c.yearUntrusted ?? rec?.yearUntrusted ?? c.isCompilation ?? rec?.isCompilation) ?? undefined
+            : c.year || undefined,
           // All genre tags comma-joined, not just the primary one.
           genre: subsonic.songGenres(c).join(', ') || undefined,
           moods: moods.length ? moods : undefined,
@@ -885,6 +900,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
         return {
           title: currentTrack.title,
           artist: currentTrack.artist,
+          ...(verifiedInput?.currentHistoryRef ? { historyRef: verifiedInput.currentHistoryRef } : {}),
           bpm: ca.bpm ?? undefined,
           key: ca.key ?? undefined,
           pace: currentTrack.paceMean ?? crec?.paceMean ?? undefined,

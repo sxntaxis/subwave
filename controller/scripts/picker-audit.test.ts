@@ -516,7 +516,8 @@ test('source wiring observes existing boundaries without adding model or search 
       > agent.indexOf('if (albumHours > 0)'),
     'v2 attribution must use the final candidate after artist and album repicks',
   );
-  assert.match(agent, /selectedFromV2Joint \? receipt => audit\.recordV2Enqueued\(receipt\.token\)/);
+  assert.match(agent, /receipt => \{\s*acceptedReceipt = receipt;\s*if \(selectedFromV2Joint\) audit\.recordV2Enqueued\(receipt\.token\);\s*\}/);
+  assert.match(agent, /const token = \(acceptedReceipt as QueueInsertionReceipt \| null\)\?\.token \?\? null;/);
   assert.match(pool, /onAuditCandidates\?\.\(candidates\.map\(\(c\) => c\?\.id\)\)/);
   assert.match(pool, /CANDIDATE_CAP = 18/);
   assert.match(scheduler, /TARGET_POOL = 40/);

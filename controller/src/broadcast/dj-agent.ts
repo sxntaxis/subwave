@@ -62,6 +62,7 @@ import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } 
 import { recentMusicalArc } from './dj-agent/musical-arc.js';
 import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
 import { incomingShowPhase } from './dj-agent/show-phase.js';
+import { trajectoryEnabled, inspectVerifiedTrajectory, cachedTrajectory } from '../music/trajectory-runtime.js';
 import type { QueueInsertionReceipt } from './queue/types.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
@@ -276,6 +277,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // in dj-agent/agents.ts for why that matters).
   const scope = pickerScope({
     essentiaDiscovery: true,
+    ...(trajectoryEnabled() ? { trajectoryActive: !!directionSnapshot?.movement && !directionSnapshot.steering,
+      trajectoryShowId: activeShow?.id ?? null, trajectoryMovementStartedAt: directionSnapshot?.movement?.startedAt ?? null } : {}),
     ...(directionSnapshot?.steering?.kind === 'lift' ? { directionEnergy: 'build' as const }
       : directionSnapshot?.steering?.kind === 'release' ? { directionEnergy: 'release' as const }
       : directionSnapshot?.movement?.energy === 'build' || directionSnapshot?.movement?.energy === 'release'
@@ -667,6 +670,12 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
       ...(pickerAuditEnabled() ? { onAuditCandidates: ids => audit.captureCandidates(ids) } : {}),
       ...(poolVnext ? { poolVnext, selection: poolSelection, selectionAudit: poolSelectionAudit } : {}),
       ...(musicalDirectorV2Enabled() ? {
+        ...(() => {
+          const showId = settings.resolveActiveShow(showAt ?? undefined)?.id ?? null;
+          const snap = musicDirection.snapshot(showId);
+          return { trajectoryActive: !!snap?.movement && !snap.steering,
+            trajectoryShowId: showId, trajectoryMovementStartedAt: snap?.movement?.startedAt ?? null };
+        })(),
         directionEnergy: (() => {
           const snap = musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null);
           return snap?.steering?.kind === 'lift' ? 'build' as const
@@ -945,6 +954,23 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     const directionSnapshot = musicalDirectionEnabled()
       ? musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null) : null;
     const showPhase = musicalDirectorV2Enabled() ? incomingShowPhase(showAt) : null;
+    // v2.5: only verified airplay is eligible for acoustic trajectory evidence.
+    // No new LLM call, no speculative queue state, and no music selection here.
+    const trajectory = trajectoryEnabled() && directionSnapshot?.movement && !directionSnapshot.steering
+      ? await inspectVerifiedTrajectory(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null,
+        musicDirection.recentVerifiedStarts(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null,
+          8, directionSnapshot.movement.startedAt),
+        directionSnapshot.movement.energy, directionSnapshot.movement.startedAt)
+      : null;
+    if (trajectory && trajectory.status === 'measured') logEvent('direction.trajectory', {
+      status: trajectory.status, observed: trajectory.observed,
+      arousalChange: trajectory.arousal?.change ?? null,
+      arousalAlignment: trajectory.arousal?.alignment ?? null,
+    });
+    const trajectoryClause = trajectory
+      ? ` Verified-acoustic trajectory (complete sampled Essentia evidence, not aesthetic quality or proof of reaching a textual destination): ${JSON.stringify(trajectory)}. `
+        + 'Use this as one fallible signal alongside actual airplay and the show. Do not claim completion based on this estimate alone.'
+      : '';
     const temporalClause = !showPhase ? ''
       : ` Incoming show timing (factual, not a scheduling override): ${JSON.stringify(showPhase)}. `
         + 'A closing phase may warrant a deliberate resolution or handoff. '
@@ -965,7 +991,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
           ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
           : 'Continue the established movement; normally return direction:null. ')
       + 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.';
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${temporalClause}${directionClause}`;
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${temporalClause}${directionClause}${trajectoryClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

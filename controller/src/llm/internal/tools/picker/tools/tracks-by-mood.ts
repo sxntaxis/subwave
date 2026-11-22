@@ -22,7 +22,7 @@ export default definePickerTool({
         await library.load();
         const moodRows = library.songsByMood(mood);
         const rows = energy ? moodRows.filter((r: any) => r.energy === energy) : moodRows;
-        const out = await collectAsync(rows);
+        const out = await collectAsync(rows, undefined, { trajectoryExpansion: true });
         if (out.length) return out;
         // Empty for three distinct reasons — tell the model which, so a
         // tag-coverage gap never reads as an empty library (observed:

@@ -100,6 +100,15 @@ export class MusicDirectionStore {
       ...(musicalDirectorV2Enabled() ? { directorVersion: 2,
         memory: musicalMemoryView(s.memory ?? emptyMemory(), showId) } : {}) };
   }
+  // Private, verified-only identity feed for optional acoustic trajectory reads.
+  // A picked/enqueued item does not enter this ledger until the mixer starts it.
+  recentVerifiedStarts(showId: string | null, limit = 8, since: string | null = null) {
+    if (!this.enabled) return [];
+    return (this.state.memory?.recent ?? []).filter(s => s.showId === showId && !!s.trackId
+      && (since === null || Number.isFinite(Date.parse(since)) && Date.parse(s.at) >= Date.parse(since)))
+      .slice(0, Math.min(8, Math.max(0, limit)))
+      .map(s => ({ eventId: s.eventId, showId: s.showId, trackId: s.trackId }));
+  }
   revision(): number { return this.state.revision; }
   /** Allows watcher restart to recognize the same mixer-stamped airing. */
   alreadyObservedStart(eventId: string): boolean {

@@ -19,6 +19,9 @@ type Steering = { kind: string; intent: string; scope: string;
 type DirectionEnvelope = {
   enabled: boolean; directorV2?: boolean; show: string | null;
   showPhase: { phase: string; minutesRemaining: number | null } | null;
+  trajectoryV1?: boolean;
+  measuredTrajectory?: { status: 'measured' | 'insufficient'; observed: number; missing: number;
+    arousal: { change: number; alignment: string } | null; note: string; observedAt?: string } | null;
   direction: { revision: number; steering: Steering | null; movement: Movement | null;
     replanDue: boolean; memory?: { showStarts: number; distinctArtists: number; taggedEnergyTrend: string | null; artistConcentration: string | null;
       recentMovements: { movement: string; outcome: string; followOn?: string }[] } } | null;
@@ -113,6 +116,14 @@ export function MusicalDirectionCard() {
           {steering ? 'Human steering is active; no autonomous movement supersedes it.'
             : 'Next successful Agent pick may propose an arc. Nothing is forced.'}
         </p>}
+        {data.trajectoryV1 && <div className="border border-separator-strong p-2.5 text-[10px] text-muted">
+          <strong className="text-ink">Verified acoustic trajectory</strong>
+          {data.measuredTrajectory?.status === 'measured' && data.measuredTrajectory.arousal
+            ? <p>{data.measuredTrajectory.observed} complete-window observations · arousal {data.measuredTrajectory.arousal.alignment}
+              {' ('}{data.measuredTrajectory.arousal.change > 0 ? '+' : ''}{data.measuredTrajectory.arousal.change.toFixed(3)}{')'}</p>
+            : <p>Insufficient complete acoustic history; no destination score is inferred.</p>}
+          <p>Model estimates only · not a quality rating or a completed movement.</p>
+        </div>}
         {data.direction?.memory && <div className="text-[10px] text-muted">
           {data.direction.memory.showStarts} verified recent starts in this show · {data.direction.memory.distinctArtists} distinct artists
           {data.direction.memory.taggedEnergyTrend && <span> · catalogued energy: {data.direction.memory.taggedEnergyTrend}</span>}

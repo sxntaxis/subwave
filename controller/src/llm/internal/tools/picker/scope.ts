@@ -30,6 +30,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { enrichEssentia, getEssentiaReader, lookupV2WithStatus, type EssentiaReader } from '../../../../music/essentia-evidence.js';
 import { attachCompactMusicEvidence, attachCompleteMusicEvidence } from '../../../../music/music-evidence-profile.js';
 import { orderByArousalDirection, type EnergyDirection } from '../../../../music/direction-rank.js';
+import { trajectoryEnabled, cachedPredecessor } from '../../../../music/trajectory-runtime.js';
+import { trajectoryRankCandidates } from '../../../../music/trajectory-rank.js';
+import { searchEligibleCohort } from '../../../../music/music-evidence-cohort.js';
+import { logEvent } from '../../../../observability/events.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
 const seedFixtureScope = new AsyncLocalStorage<SeedFixture>();
@@ -51,6 +55,9 @@ export interface PickerScope {
   essentiaDiscovery?: boolean;
   // Bounded soft musical trajectory on already eligible discovery candidates.
   directionEnergy?: EnergyDirection | null;
+  trajectoryActive?: boolean;
+  trajectoryShowId?: string | null;
+  trajectoryMovementStartedAt?: string | null;
   // Set exclusively by the autonomous picker after validating its predecessor.
   selection?: { predecessorId: string; recentAiredIds: string[] };
   // Private opt-in audit observer; receives bounded counters only.
@@ -151,7 +158,7 @@ export interface PickerContext {
   // id choice against this.
   seen: Map<string, any>;
   collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
-  collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number; directionRanking?: boolean }): Promise<any[]>;
+  collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number; directionRanking?: boolean; trajectoryExpansion?: boolean }): Promise<any[]>;
   eligibleEvidenceIds(deadlineMs: number): Promise<{ status: 'complete'; ids: string[] } | { status: 'incomplete' }>;
   reserveMusicEvidence(maxBytes: number): { bytes: number; release(usedBytes: number): void } | null;
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
@@ -295,6 +302,7 @@ export function buildPickerContext(
   };
 
   const attempt = scope.selection ? createSelectionAttempt() : null;
+  let trajectoryCohortUsed = false; // at most one indexed eligible-cohort probe per Agent pick
   const collectSelection: PickerContext['collectAsync'] = (list, cap = uncappedDiscovery ? 12 : 8, opts = {}) => {
     if (!attempt || !scope.selection) {
       const accepted = collect(list, cap, opts);
@@ -314,6 +322,46 @@ export function buildPickerContext(
         recentIds, recentKeys, hardRecentIds, hardRecentKeys,
         seenIds: new Set(seen.keys()), maxPerArtist: Infinity, cap: Infinity,
       });
+      // The three broad discovery tools may ask the existing joint index to
+      // examine up to 64 eligible members of THEIR source pool, before the
+      // usual 12-result cap. Hard show/playlist/recent rules already applied.
+      // This is a bounded source-cohort probe, not a global catalog sweep.
+      let jointScores: Map<string, number> | null = null;
+      if (trajectoryEnabled() && scope.trajectoryActive && opts.trajectoryExpansion && !trajectoryCohortUsed
+          && scope.directionEnergy && essentia?.searchJoint && eligible.length >= 14) {
+        trajectoryCohortUsed = true;
+        const sample = eligible.slice(0, 64).map(s => s.id).filter((id): id is string => typeof id === 'string');
+        if (new Set(sample).size === sample.length) {
+          try {
+            // Arousal follows the movement's explicit energy intent. If the
+            // verified predecessor has complete valence evidence, optionally
+            // use its broad polarity as a *low-weight* palette-continuity hint.
+            // No text destination is parsed into fabricated numerical targets.
+            const previous = cachedPredecessor(scope.selection?.predecessorId,
+              scope.trajectoryShowId ?? null, scope.trajectoryMovementStartedAt);
+            const preferences = [
+              { family: 'arousal' as const, key: 'value',
+                direction: scope.directionEnergy === 'build' ? 'high' as const : 'low' as const, weight: 1 },
+              ...(previous?.valence === null || previous?.valence === undefined ? [] : [{
+                family: 'valence' as const, key: 'value',
+                direction: previous.valence >= 0.5 ? 'high' as const : 'low' as const,
+                weight: 0.25,
+              }]),
+            ];
+            const result = await searchEligibleCohort(sample, preferences,
+              essentia.searchJoint, performance.now() + 1400);
+            if (result.status === 'complete' && result.results.length >= 2) {
+              jointScores = new Map(result.results.filter(r => r.tier === 'full')
+                .map(r => [r.id, r.score] as const));
+            }
+            logEvent('direction.trajectory_cohort', {
+              status: result.status, reason: result.status === 'incomplete' ? result.reason : null,
+              eligible: eligible.length, sampled: sample.length,
+              verified: result.status === 'complete' ? result.results.length : 0,
+            });
+          } catch { /* failed optional evidence changes nothing */ }
+        }
+      }
       const baseline = () => filterPickerCandidates(eligible, { maxPerArtist, cap });
       let accepted = baseline();
       let reason: PickerSelectionObservation['reason'] = 'no_eligible_context';
@@ -360,10 +408,13 @@ export function buildPickerContext(
               const score = scoreSelection({ enabled: true, sameShow: true, anchorReliable: true, predecessor,
                 recentAired: aired, candidate: acoustic ?? {}, baselineRank: i, candidateCount: eligible.length,
                 softBoundPlaylistMember: !playlistLock && playlistIds.has(s.id) });
-              return { value: s, id: s.id, artistKey: artistKey(s), baselineIndex: i, utility: score.utility, acoustic, flow: score.flow };
+              const joint = jointScores?.get(s.id);
+              const utility = joint === undefined ? score.utility
+                : score.utility * 0.90 + joint * 0.10;
+              return { value: s, id: s.id, artistKey: artistKey(s), baselineIndex: i, utility, acoustic, flow: score.flow };
             });
             // Missing evidence must not turn MMR into a different baseline.
-            if (ranked.some(item => item.flow !== null)) {
+            if (ranked.some(item => item.flow !== null) || (jointScores?.size ?? 0) >= 2) {
               accepted = composeSelection(ranked, cap, maxPerArtist);
               const baselineIds = baseline().map(s => s.id);
               const acceptedIds = accepted.map(s => s.id);
@@ -390,6 +441,31 @@ export function buildPickerContext(
             reason = 'scorer_exception';
           }
         }
+      }
+      // No predecessor acoustic index? The verified joint cohort can still
+      // provide a small, soft membership improvement. Missing data remains
+      // neutral and the same MMR artist limits continue to apply.
+      if (jointScores && jointScores.size >= 2) {
+        // Large source lists can contain thousands of tracks. Never defeat
+        // the existing 256-ID ceiling by composing the whole catalogue: keep
+        // the normal shortlist and at most 12 verified, in-source alternatives.
+        const selected = new Map<string, any>(accepted.map(s => [s.id, s]));
+        for (const s of eligible) {
+          if (selected.size >= cap + 12) break;
+          if (jointScores.has(s.id) && !selected.has(s.id)) selected.set(s.id, s);
+        }
+        const shortlist = [...selected.values()];
+        const n = shortlist.length;
+        const ranked = shortlist.map((s, i) => ({ value: s, id: s.id,
+          artistKey: artistKey(s), baselineIndex: i, acoustic: null,
+          utility: 0.9 * (n === 1 ? 1 : (n - 1 - i) / (n - 1))
+            + 0.1 * (jointScores.get(s.id) ?? (n === 1 ? 1 : (n - 1 - i) / (n - 1))) }));
+        const beforeIds = accepted.map(s => s.id);
+        accepted = composeSelection(ranked, cap, maxPerArtist);
+        const afterIds = accepted.map(s => s.id);
+        const beforeSet = new Set(beforeIds);
+        reason = beforeSet.size !== new Set(afterIds).size || afterIds.some(id => !beforeSet.has(id))
+          ? 'scored_membership_change' : 'scored_no_membership_change';
       }
       scope.selectionAudit?.({
         reason, eligibleCandidates: eligible.length, offeredCandidates: accepted.length, lookupMs,
@@ -448,9 +524,14 @@ export function buildPickerContext(
   };
   const collectAsync: PickerContext['collectAsync'] = async (list, cap = uncappedDiscovery ? 12 : 8, opts = {}) => {
     const enriched = await attachV2(await enrichEssentia(essentia, await collectSelection(list, cap, opts)));
-    const result = process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1' && scope.essentiaDiscovery
-      && opts.directionRanking !== false
-      ? orderByArousalDirection(enriched, scope.directionEnergy ?? null) : enriched;
+    const predecessorPoint = trajectoryEnabled() && scope.trajectoryActive
+      ? cachedPredecessor(scope.selection?.predecessorId,
+        scope.trajectoryShowId ?? null, scope.trajectoryMovementStartedAt) : null;
+    const result = predecessorPoint && scope.essentiaDiscovery && opts.directionRanking !== false
+      ? trajectoryRankCandidates(enriched, predecessorPoint, scope.directionEnergy ?? null, true)
+      : process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1' && scope.essentiaDiscovery
+        && opts.directionRanking !== false
+        ? orderByArousalDirection(enriched, scope.directionEnergy ?? null) : enriched;
     if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
       scope.essentiaAudit?.captureV2Profiles?.(enriched.filter(track => track?.musical_evidence).map(track => track?.id));
     }

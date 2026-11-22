@@ -12,7 +12,7 @@ export default definePickerTool({
       try {
         await library.load();
         const list = library.songsByEnergy(energy);
-        const out = await collectAsync(list);
+        const out = await collectAsync(list, undefined, { trajectoryExpansion: true });
         return out.length ? out : emptyResult(list.length, `no ${energy}-energy tracks available — choose from your other tool results this round`);
       }
       catch (err) { return { error: (err as Error).message }; }

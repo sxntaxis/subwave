@@ -7,7 +7,7 @@ import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
-import { musicalDirectionEnabled } from './music-direction.js';
+import { musicalDirectionEnabled, musicalDirectorV2Enabled } from './music-direction.js';
 import { speakClockAllowed } from '../clock-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 import { instruction } from '../../llm/dj.js';
@@ -67,14 +67,24 @@ export function pickSchemaBase() {
   if (!musicalDirectionEnabled()) return model;
   // Nullable rather than optional: the strict Responses tool schema requires
   // a stable required-key list. No direction is a valid cheap/obvious pick.
-  return model.extend({
+  const directionModel = model.extend({
     direction: z.object({
       movement: z.string().max(100).describe('compact musical chapter or movement, not a song list'),
       destination: z.string().max(120).describe('sonic territory to approach over the next 15–40 minutes'),
       next: z.string().max(120).describe('one feasible next musical step, preserving surprise'),
       horizonMinutes: z.number().int().min(15).max(40),
       energy: z.enum(['build','release','hold','contrast']).nullable().describe('relative long-range energy progression; not a BPM command'),
-    }).nullable().describe('Suggest only when there is no active movement or a human reroute demands replanning; otherwise null. Never override admin steering.'),
+    }).nullable().describe(musicalDirectorV2Enabled()
+      ? 'Suggest only when there is no active movement and no human steering; otherwise null. The active show may end before the horizon.'
+      : 'Suggest only when there is no active movement or a human reroute demands replanning; otherwise null. Never override admin steering.'),
+  });
+  if (!musicalDirectorV2Enabled()) return directionModel;
+  return directionModel.extend({
+    development: z.object({
+      decision: z.enum(['continue','resolve','reroute']).describe('continue an established movement, resolve it deliberately, or reroute without overriding human authority'),
+      next: z.string().max(120).describe('the newly useful next musical step after this specific candidate airs'),
+      alternate: z.string().max(120).describe('a credible alternative future direction that remains available, not a predetermined track'),
+    }).nullable().describe('Only for an existing autonomous movement, and only after considering at least two plausible continuations. Null otherwise. Human steering always wins.'),
   });
 }
 

@@ -90,7 +90,7 @@ import {
 } from './queue/pure.js';
 import { pickTargetValid } from './queue/pick-target.js';
 import { choosePendingMusic, newReservation, verifiedHumanStart, type ListenerReservation } from './queue/human-priority.js';
-import { musicDirection, musicalDirectionEnabled } from './dj-agent/music-direction.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
 import {
   PUSH_PROBE_INTERVAL_MS,
   PUSH_PROBE_MAX_READS,
@@ -2450,6 +2450,12 @@ class Queue {
           source: verifiedEditorialSource,
           showId: onAirShow?.id ?? null,
           at: Date.parse(this.current.startedAt ?? '') || Date.now(),
+          ...(musicalDirectorV2Enabled() ? {
+            queueToken: queueToken ?? null,
+            energy: typeof this.current.track.energy === 'string' ? this.current.track.energy : null,
+            moods: Array.isArray(this.current.track.moods) ? this.current.track.moods : null,
+            genre: typeof this.current.track.genre === 'string' ? this.current.track.genre : null,
+          } : {}),
         });
       } catch (err) {
         this.log('error', `musical direction update failed: ${(err as Error).message}`);

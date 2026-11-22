@@ -60,7 +60,9 @@ import type { PickTarget } from './queue/types.js';
 import { selectionContext } from './dj-agent/selection-context.js';
 import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } from './dj-agent/airtime-reasoning.js';
 import { recentMusicalArc } from './dj-agent/musical-arc.js';
-import { musicDirection, musicalDirectionEnabled } from './dj-agent/music-direction.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
+import { incomingShowPhase } from './dj-agent/show-phase.js';
+import type { QueueInsertionReceipt } from './queue/types.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {
   const show = ctx?.activeShow;
@@ -175,7 +177,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const airSnapshot = expanded ? captureAirtimeSnapshot(queue, target, initialShowId) : null;
   const audit = beginPickerAudit('agent', null, showAt);
   const auditSeen = pickerAuditEnabled() ? new Map<string, any>() : undefined;
-  const vnextAudit = process.env.PICKER_VNEXT_AGENT === '1' && pickerAuditEnabled();
+  const agentSelectionVnext = process.env.PICKER_VNEXT_AGENT === '1' || musicalDirectorV2Enabled();
+  const vnextAudit = agentSelectionVnext && pickerAuditEnabled();
   const selectionAudit = bindPickerSelectionAudit(audit, vnextAudit);
   let toolCallCount: number | undefined;
   let acousticSearchToolCalls: number | undefined;
@@ -280,7 +283,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     ...(auditSeen ? { seen: auditSeen } : {}),
     ...(pickerAuditEnabled() ? { essentiaAudit: audit } : {}),
     ...(selectionAudit ? { selectionAudit } : {}),
-    ...(process.env.PICKER_VNEXT_AGENT === '1' ? { selection: selectionContext(
+    ...(agentSelectionVnext ? { selection: selectionContext(
       target, queue.current, queue.upcoming, queue.history, showAt, activeShow?.id ?? null,
       at => settings.resolveActiveShow(at)?.id ?? null,
       expanded ? 12 : 5,
@@ -545,10 +548,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // the track on-air now), instead of immediately over that on-air track (#189).
   // Stamp `current` as the link's back-announce target so the queue can drop the
   // link if a request jumps ahead of this pick before it airs.
+  let acceptedReceipt: QueueInsertionReceipt | null = null;
   const queued = await enqueuePick(
     queue, song, object.reason, 'agent', link, current,
     { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt: linkAirAt }, target,
-    selectedFromV2Joint ? receipt => audit.recordV2Enqueued(receipt.token) : undefined,
+    receipt => { acceptedReceipt = receipt; if (selectedFromV2Joint) audit.recordV2Enqueued(receipt.token); },
   );
   // Pick was already queued/on-air and got deduped — don't record a session turn
   // for a track that never airs. Returning false lets runTrackEvent fall through
@@ -565,9 +569,19 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     return false;
   }
   if (directionRevision !== null && song.id) {
-    // The live pick may carry a future chapter, but it becomes canonical only
-    // on the exact subsequent real airplay start (not on enqueue or prefetch).
-    musicDirection.offerProposal(song.id, directionRevision, plannedShow, object?.direction ?? null);
+    // A proposal is only speculative. The mixer must report this exact queue
+    // token on the *actual* start before state can change (v2.4).
+    const token = (acceptedReceipt as QueueInsertionReceipt | null)?.token ?? null;
+    if (musicalDirectorV2Enabled()) {
+      if (object?.direction && !directionSnapshot?.movement) {
+        musicDirection.offerProposal(song.id, directionRevision, plannedShow, object.direction, token,
+          incomingShowPhase(showAt).minutesRemaining);
+      } else if (object?.development && directionSnapshot?.movement) {
+        musicDirection.offerDevelopment(song.id, token, directionRevision, plannedShow, object.development);
+      }
+    } else {
+      musicDirection.offerProposal(song.id, directionRevision, plannedShow, object?.direction ?? null);
+    }
   }
   session.appendTurn({
     role: 'dj', kind: 'pick',
@@ -640,7 +654,7 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // A sonic journey (Phase 2) additionally anchors the audio-KNN source to the
   // run's current waypoint vector, drifting the pool toward the destination.
   const audit = beginPickerAudit('pool', ctx?.activeShow?.id, showAt);
-  const poolVnext = process.env.PICKER_VNEXT_POOL === '1';
+  const poolVnext = process.env.PICKER_VNEXT_POOL === '1' || musicalDirectorV2Enabled();
   const poolSelectionAudit = bindPickerSelectionAudit(audit, poolVnext && pickerAuditEnabled());
   const poolSelection = poolVnext ? selectionContext(
     target, queue.current, queue.upcoming, queue.history, showAt, ctx?.activeShow?.id ?? null,
@@ -652,6 +666,15 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
       ...opts,
       ...(pickerAuditEnabled() ? { onAuditCandidates: ids => audit.captureCandidates(ids) } : {}),
       ...(poolVnext ? { poolVnext, selection: poolSelection, selectionAudit: poolSelectionAudit } : {}),
+      ...(musicalDirectorV2Enabled() ? {
+        directionEnergy: (() => {
+          const snap = musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null);
+          return snap?.steering?.kind === 'lift' ? 'build' as const
+            : snap?.steering?.kind === 'release' ? 'release' as const
+            : snap?.movement?.energy === 'build' || snap?.movement?.energy === 'release'
+              ? snap.movement.energy : null;
+        })(),
+      } : {}),
     }, current);
   } catch (error) {
     audit.finish({ outcome: 'error', fallbackReason: 'pool_candidate_build_or_model_error' });
@@ -921,15 +944,28 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       ? ` Actual recent airplay (newest first; metadata only where known, not Essentia estimates): ${JSON.stringify(arc)}. Consider the whole arc, not just a single transition; contrast and surprise remain valid.` : '';
     const directionSnapshot = musicalDirectionEnabled()
       ? musicDirection.snapshot(settings.resolveActiveShow(showAt ?? undefined)?.id ?? null) : null;
+    const showPhase = musicalDirectorV2Enabled() ? incomingShowPhase(showAt) : null;
+    const temporalClause = !showPhase ? ''
+      : ` Incoming show timing (factual, not a scheduling override): ${JSON.stringify(showPhase)}. `
+        + 'A closing phase may warrant a deliberate resolution or handoff. '
+        + 'Never propose a new movement longer than the known remaining show time; '
+        + 'if fewer than 15 minutes remain, choose direction:null and develop an appropriate closing pick. '
+        + 'Do not force a crescendo or a rigid chapter structure.';
     const directionClause = !directionSnapshot ? '' :
       ` Musical direction (authority order: admin > accepted listener anchor > soft model movement; no authority to bypass show locks): `
       + JSON.stringify(directionSnapshot)
       + '. A human anchor matters for the FOLLOWING songs, not just its immediate next transition. '
-      + (directionSnapshot.replanDue
-        ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
-        : 'Continue the established movement; normally return direction:null. ')
+      + (musicalDirectorV2Enabled()
+        ? directionSnapshot.steering
+          ? 'Human steering is authoritative. Pick to honor it, set direction:null and development:null; do not reassert an old autonomous plan. '
+          : directionSnapshot.movement
+            ? 'The movement is active. Set direction:null; use development to specify whether THIS chosen song continues, resolves, or reroutes the movement, then update the next editorial step and name one plausible alternate future path. Ground these in actual aired context and eligible music; no fabricated song IDs. An obvious continuation needs no extra tools, but a significant pivot merits comparing distinct alternatives when time permits. '
+            : 'No autonomous movement is active. If this pick opens a useful 15–40 minute direction within the show boundary, propose direction; otherwise direction:null. Set development:null until a movement is active. '
+        : directionSnapshot.replanDue
+          ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
+          : 'Continue the established movement; normally return direction:null. ')
       + 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.';
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${directionClause}`;
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}${arcClause}${temporalClause}${directionClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

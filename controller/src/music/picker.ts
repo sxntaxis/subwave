@@ -22,6 +22,9 @@ import { poolAnchor } from './picker-anchor.js';
 import { composePoolSelection } from './pool-selection.js';
 import type { PickerSelectionObservation } from '../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { getEssentiaReader, lookupV2WithStatus } from './essentia-evidence.js';
+import { attachCompleteMusicEvidence } from './music-evidence-profile.js';
+import { orderByArousalDirection, type EnergyDirection } from './direction-rank.js';
 
 // Raw Subsonic child, slimTrack library row, or Last.fm stub. A structural
 // superset of show-filter's FilterTrack and recency's CandidateLike.
@@ -651,7 +654,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 // genuinely holds no other artist is the RIGHT answer there: the caller then
 // keeps its own pick and logs the relaxation. Unset on every other call, which
 // leaves the ordinary pool byte-identical.
-export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
+export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null; directionEnergy?: EnergyDirection | null; onAuditCandidates?: (ids: Array<string | undefined>) => void; poolVnext?: boolean; selection?: { predecessorId: string; recentAiredIds: string[] }; selectionAudit?: (observation: PickerSelectionObservation) => void } = {}, explicitCurrent?: Candidate | null) {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total`, which counts only tagged tracks.
@@ -722,9 +725,27 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   const eligibleCandidates = excludedIds
     ? rawCandidates.filter((t) => t?.id && !excludedIds.has(t.id))
     : rawCandidates;
-  const candidates = opts.poolVnext
+  const composed = opts.poolVnext
     ? await composePoolSelection(eligibleCandidates, opts.selection, opts.selectionAudit)
     : eligibleCandidates;
+  // Shared, bounded acoustic evidence after the usual hard eligibility and
+  // transition-aware MMR. This is a soft *reorder*, never discovery expansion,
+  // and never invents evidence for unanalysed material. Two 12-id batches max.
+  let candidates = composed;
+  if (process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1' && opts.directionEnergy && composed.length > 1) {
+    try {
+      const reader = getEssentiaReader();
+      if (reader?.lookupV2) {
+        const rows = new Map<string, any>();
+        const ids: string[] = [...new Set<string>(composed.map(c => c.id).filter((id): id is string => typeof id === 'string' && !!id))].slice(0, 24);
+        for (let offset = 0; offset < ids.length; offset += 12) {
+          const result = await lookupV2WithStatus(reader, ids.slice(offset, offset + 12));
+          if (result.status === 'ok') for (const [id, evidence] of result.rows) rows.set(id, evidence);
+        }
+        candidates = orderByArousalDirection(attachCompleteMusicEvidence(composed, rows), opts.directionEnergy);
+      }
+    } catch { /* unavailable evidence never blocks the pool */ }
+  }
   // Observe precisely the final list, immediately before its existing model
   // boundary. The callback is best-effort and performs no candidate work.
   try { opts.onAuditCandidates?.(candidates.map((c) => c?.id)); } catch {}

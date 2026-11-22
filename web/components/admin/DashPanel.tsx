@@ -47,6 +47,7 @@ import StationHeader, { type HealthMetrics } from './StationHeader';
 import { cn } from '../../lib/cn';
 import { RequestsCard } from './dash/RequestsCard';
 import { TakeoverCard } from './dash/TakeoverCard';
+import { MusicalDirectionCard } from './dash/MusicalDirectionCard';
 import QueueHeldBadge from './dash/QueueHeldBadge';
 import { BoothTurnText, SegmentButton, SortableTh, ToggleRow, classTone } from './dash/bits';
 import type {
@@ -676,6 +677,7 @@ export default function DashPanel() {
           </Card>
 
           <TakeoverCard tz={tz} locale={locale} />
+          <MusicalDirectionCard />
 
           <Card title="Broadcast">
             <div className="grid gap-2.5">

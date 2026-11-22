@@ -7,7 +7,8 @@ import { requireAdmin } from '../middleware/auth.js';
 import * as blocklist from '../music/blocklist.js';
 import { zipUpload } from '../middleware/upload.js';
 import { queue } from '../broadcast/queue.js';
-import { musicDirection, musicalDirectionEnabled } from '../broadcast/dj-agent/music-direction.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from '../broadcast/dj-agent/music-direction.js';
+import { incomingShowPhase } from '../broadcast/dj-agent/show-phase.js';
 import * as dj from '../llm/dj.js';
 import * as subsonic from '../music/subsonic.js';
 import * as library from '../music/library.js';
@@ -1162,7 +1163,10 @@ router.post('/dj/skill-toggle', requireAdmin, async (req, res) => {
 // MI v2.3 station-local editorial steering, private under the existing admin
 // authorization. The route never changes show policy or queue eligibility.
 router.get('/dj/steer', requireAdmin, (_req, res) => {
-  res.json({ enabled: musicalDirectionEnabled(), direction: musicDirection.snapshot(settings.resolveActiveShow()?.id ?? null) });
+  res.json({ enabled: musicalDirectionEnabled(), directorV2: musicalDirectorV2Enabled(),
+    show: settings.resolveActiveShow()?.name ?? null,
+    showPhase: musicalDirectorV2Enabled() ? incomingShowPhase(null) : null,
+    direction: musicDirection.snapshot(settings.resolveActiveShow()?.id ?? null) });
 });
 router.post('/dj/steer', requireAdmin, validateBody(musicSteerSchema), (req, res) => {
   if (!musicalDirectionEnabled()) return res.status(409).json({ error: 'music direction v1 is disabled' });

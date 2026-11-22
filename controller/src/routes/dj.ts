@@ -7,8 +7,8 @@ import { requireAdmin } from '../middleware/auth.js';
 import * as blocklist from '../music/blocklist.js';
 import { zipUpload } from '../middleware/upload.js';
 import { queue } from '../broadcast/queue.js';
-import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from '../broadcast/dj-agent/music-direction.js';
-import { trajectoryEnabled, cachedTrajectory } from '../music/trajectory-runtime.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } from '../broadcast/dj-agent/music-direction.js';
+import { trajectoryEnabled, cachedTrajectory, trajectoryObservationV3 } from '../music/trajectory-runtime.js';
 import { incomingShowPhase } from '../broadcast/dj-agent/show-phase.js';
 import * as dj from '../llm/dj.js';
 import * as subsonic from '../music/subsonic.js';
@@ -1172,6 +1172,11 @@ router.get('/dj/steer', requireAdmin, (_req, res) => {
     ...(trajectoryEnabled() ? { trajectoryV1: true,
       measuredTrajectory: direction?.movement && !direction.steering
         ? cachedTrajectory(show?.id ?? null, direction.movement.startedAt) : null } : {}),
+    ...(directorV3Enabled() ? { directorV3: true,
+      acousticObservation: direction?.movement && !direction.steering
+        ? trajectoryObservationV3(show?.id ?? null, direction.movement.startedAt,
+          musicDirection.recentVerifiedStarts(show?.id ?? null, 8, direction.movement.startedAt)
+            .map(s => s.eventId)) : null } : {}),
     direction });
 });
 router.post('/dj/steer', requireAdmin, validateBody(musicSteerSchema), (req, res) => {

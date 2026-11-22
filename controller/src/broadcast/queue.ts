@@ -90,8 +90,9 @@ import {
 } from './queue/pure.js';
 import { pickTargetValid } from './queue/pick-target.js';
 import { choosePendingMusic, newReservation, verifiedHumanStart, type ListenerReservation } from './queue/human-priority.js';
-import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
-import { trajectoryEnabled } from '../music/trajectory-runtime.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } from './dj-agent/music-direction.js';
+import { observeDirectorV3 } from './dj-agent/director-v3.js';
+import { trajectoryEnabled, inspectVerifiedTrajectory } from '../music/trajectory-runtime.js';
 import { verifiedMixerStartFacts } from './dj-agent/verified-airplay-facts.js';
 import {
   PUSH_PROBE_INTERVAL_MS,
@@ -2469,6 +2470,23 @@ class Queue {
               : typeof this.current.track.genre === 'string' ? this.current.track.genre : null,
           } : {}),
         });
+        // Separate low-frequency editorial work never blocks the mixer watcher
+        // or the immediate next-track pick. Exact mixer ID + a durable start
+        // are mandatory; missing/mismatched identity is not an LLM seed.
+        if (directorV3Enabled() && exactMixerIdentity) {
+          const showId = onAirShow?.id ?? null;
+          // Refresh acoustics from verified history independently of LLM picks.
+          // This read never queues audio, commits a direction or blocks playback.
+          const snap = musicDirection.snapshot(showId);
+          if (snap?.movement && !snap.steering) {
+            void inspectVerifiedTrajectory(showId,
+              musicDirection.recentVerifiedStarts(showId, 8, snap.movement.startedAt),
+              snap.movement.energy, snap.movement.startedAt).catch(() => null);
+          }
+          void observeDirectorV3({ eventId: key, trackId: np.subsonic_id!, showId,
+            at: Date.parse(this.current.startedAt ?? '') || Date.now(),
+            source: verifiedEditorialSource });
+        }
       } catch (err) {
         this.log('error', `musical direction update failed: ${(err as Error).message}`);
       }

@@ -36,6 +36,7 @@ export interface ResolvedMovement {
   starts: number;
   followOn?: string;
   alternate?: string;
+  reason?: string;
 }
 export interface EditorialMemory {
   recent: AirplayFootprint[];

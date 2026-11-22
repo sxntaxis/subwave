@@ -1,6 +1,7 @@
 // MI v2.3: pure direction lifecycle. No queue, disk or LLM dependence.
 import { randomUUID } from 'node:crypto';
 import { rememberAirplay, resolveMemory, emptyMemory, progressAt, type EditorialMemory, type MovementProgress, type DirectionDevelopment } from './music-director-v2-core.js';
+import type { DirectorV3Decision } from './director-v3-core.js';
 
 export type DirectionScope = 'current-show' | 'fixed-duration' | 'station';
 export type AdminMotion = 'pivot' | 'hold' | 'lift' | 'release';
@@ -36,6 +37,8 @@ export interface MusicMovement {
   startedAt: string;
   expiresAt: string;
   progress?: MovementProgress;
+  plannedBy?: 'director-v3';
+  lastDecision?: DirectorV3Decision;
 }
 interface PendingProposal { trackId: string; token?: string; revision: number; showId: string | null; proposal?: MovementProposal; development?: DirectionDevelopment }
 export interface DirectionRecord {

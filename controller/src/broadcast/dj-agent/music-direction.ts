@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STATE_DIR } from '../../config.js';
 import { logEvent } from '../../observability/events.js';
-import { emptyMemory, musicalMemoryView, resolveMemory, type EditorialMemory, type DirectionDevelopment } from './music-director-v2-core.js';
+import { emptyMemory, musicalMemoryView, resolveMemory, progressAt, type EditorialMemory, type DirectionDevelopment } from './music-director-v2-core.js';
 import {
   advanceDirection, empty, date, bounded, clip, live,
   type DirectionRecord, type DirectionScope, type AdminMotion,
@@ -13,6 +13,11 @@ import {
 } from './music-direction-core.js';
 export { advanceDirection } from './music-direction-core.js';
 export type { DirectionScope, AdminMotion, MovementProposal, MusicSteer, MusicMovement } from './music-direction-core.js';
+
+import { boundedDirectorReason, validDirectorSeed, validDirectorReview } from './director-v3-core.js';
+
+export const directorV3Enabled = () => musicalDirectorV2Enabled() && process.env.SUBWAVE_MUSIC_TRAJECTORY_V1 === '1'
+  && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
 
 export const musicalDirectionEnabled = () => process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1';
 export const musicalDirectorV2Enabled = () => musicalDirectionEnabled() && process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1';
@@ -46,10 +51,14 @@ export class MusicDirectionStore {
         && typeof e.movement === 'string' && e.movement.length <= 100
         && typeof e.destination === 'string' && e.destination.length <= 120
         && ['resolved','rerouted','expired','show-change','human'].includes(e.outcome)
-        && Number.isFinite(Date.parse(e.endedAt))).map((e: any) => ({ ...e,
-          ...(e.followOn ? { followOn: clip(e.followOn, 120) } : {}),
-          ...(e.alternate ? { alternate: clip(e.alternate, 120) } : {}),
-        })),
+        && Number.isFinite(Date.parse(e.endedAt))).map((e: any) => {
+          const { reason: _rawReason, ...rest } = e;
+          return { ...rest,
+            ...(e.followOn ? { followOn: clip(e.followOn, 120) } : {}),
+            ...(e.alternate ? { alternate: clip(e.alternate, 120) } : {}),
+            ...(clip(e.reason, 180) ? { reason: clip(e.reason, 180) } : {}),
+          };
+        }),
     };
   }
   private validSteer(v: any): MusicSteer | null {
@@ -73,9 +82,18 @@ export class MusicDirectionStore {
           lastTrackId: clip(p.lastTrackId, 100) || null,
           distinctArtists: Number.isSafeInteger(p.distinctArtists) ? bounded(p.distinctArtists, 0, 1000) : 0,
           phase: p.phase, alternate: clip(p.alternate, 120) || null } : undefined;
-    return { ...v, energy: ['build','release','hold','contrast'].includes(v.energy) ? v.energy : null,
+    const { plannedBy: _rawPlannedBy, lastDecision: _rawLastDecision, ...rest } = v;
+    return { ...rest, energy: ['build','release','hold','contrast'].includes(v.energy) ? v.energy : null,
       movement: clip(v.movement, 100), destination: clip(v.destination, 120), next: clip(v.next, 120),
-      ...(progress ? { progress } : {}) };
+      ...(progress ? { progress } : {}),
+      ...(v.plannedBy === 'director-v3' ? { plannedBy: 'director-v3' as const } : {}),
+      ...(v.lastDecision && ['seed','continue','resolve','reroute'].includes(v.lastDecision.decision)
+        && typeof v.lastDecision.eventId === 'string' && v.lastDecision.eventId.length <= 300
+        && Number.isFinite(Date.parse(v.lastDecision.at)) && Number.isSafeInteger(v.lastDecision.starts)
+        && v.lastDecision.starts >= 1 && v.lastDecision.starts <= 1000
+        ? { lastDecision: { decision: v.lastDecision.decision, eventId: v.lastDecision.eventId,
+          at: v.lastDecision.at, starts: v.lastDecision.starts, reason: boundedDirectorReason(v.lastDecision.reason) } } : {}),
+    };
   }
   private save(next: DirectionRecord) {
     if (!this.enabled) return;
@@ -95,7 +113,13 @@ export class MusicDirectionStore {
     const s = this.state;
     const steering = s.steering && live(s.steering.expiresAt, now)
       && (s.steering.scope !== 'current-show' || s.steering.showId === showId) ? s.steering : null;
-    const movement = s.movement && s.movement.showId === showId && live(s.movement.expiresAt, now) ? s.movement : null;
+    const rawMovement = s.movement && s.movement.showId === showId && live(s.movement.expiresAt, now) ? s.movement : null;
+    // Private idempotency keys never enter the API or LLM prompt snapshot.
+    const movement = rawMovement?.lastDecision
+      ? { ...rawMovement, lastDecision: { decision: rawMovement.lastDecision.decision,
+        at: rawMovement.lastDecision.at, starts: rawMovement.lastDecision.starts,
+        reason: rawMovement.lastDecision.reason } }
+      : rawMovement;
     return { revision: s.revision, steering, movement, replanDue: !movement,
       ...(musicalDirectorV2Enabled() ? { directorVersion: 2,
         memory: musicalMemoryView(s.memory ?? emptyMemory(), showId) } : {}) };
@@ -197,6 +221,71 @@ export class MusicDirectionStore {
     this.state = { ...this.state, pending: { trackId, token, revision, showId,
       development: { decision: proposal.decision, next, alternate } } };
     logEvent('direction.proposal', { showId, revision, kind: 'development', decision: proposal.decision });
+    return true;
+  }
+  /** Autonomous v3 editorial commits are tied to an already persisted mixer
+   * start. No queue selection, future song, or stale LLM response can activate
+   * or revise a movement. The revision is reserved for human authority. */
+  commitDirectorV3(input: {
+    eventId: string; trackId: string; showId: string | null; at: number;
+    expectedRevision: number; expectedMovementId: string | null;
+    remainingMinutes: number | null;
+    action: 'seed' | 'review'; output: unknown;
+  }): boolean {
+    if (!this.enabled || !directorV3Enabled()) return false;
+    const s = this.state;
+    const observed = s.memory?.recent[0];
+    if (!input.eventId || s.lastStart !== input.eventId || !observed
+      || observed.eventId !== input.eventId.slice(0, 220)
+      || observed.trackId !== input.trackId || observed.showId !== input.showId
+      || s.revision !== input.expectedRevision || s.pending) return false;
+    const now = Date.now();
+    if (this.snapshot(input.showId, now)?.steering || !Number.isFinite(input.at)
+      || input.at > now + 10_000 || now - input.at > 120_000) return false;
+    const m = s.movement;
+    if ((m?.id ?? null) !== input.expectedMovementId) return false;
+    const out = input.output as Record<string, unknown>;
+    const reason = boundedDirectorReason(out?.reason);
+    if (!reason) return false;
+    if (input.action === 'seed') {
+      if (m) return false;
+      const proposal = validDirectorSeed(out, input.remainingMinutes);
+      if (!proposal) return false;
+      const startedAt = date(input.at);
+      const lastDecision = { decision: 'seed' as const, at: date(now), starts: 1,
+        eventId: input.eventId, reason };
+      const movement: MusicMovement = {
+        id: randomUUID(), movement: proposal.movement, destination: proposal.destination,
+        next: proposal.next, energy: proposal.energy, originRevision: s.revision,
+        showId: input.showId, startedAt,
+        expiresAt: date(input.at + proposal.horizonMinutes * 60_000),
+        plannedBy: 'director-v3', lastDecision,
+        progress: progressAt(startedAt, input.at, 1, 1, input.trackId, null, proposal.horizonMinutes),
+      };
+      this.save({ ...s, movement });
+      logEvent('direction.v3_commit', { kind: 'seed', showId: input.showId, eventId: input.eventId });
+      return true;
+    }
+    if (!m || m.plannedBy !== 'director-v3') return false;
+    if (m.lastDecision?.eventId === input.eventId) return false;
+    const review = validDirectorReview(out);
+    if (!review) return false;
+    const lastDecision = { decision: review.decision, at: date(now),
+      starts: m.progress?.starts ?? 1, eventId: input.eventId, reason };
+    if (review.decision === 'continue') {
+      this.save({ ...s, movement: { ...m, next: review.next, lastDecision,
+        progress: { ...(m.progress ?? progressAt(m.startedAt, input.at, 1, 1, input.trackId, null, 30)),
+          alternate: review.alternate } } });
+    } else {
+      const memory = resolveMemory(s.memory ?? emptyMemory(), {
+        showId: m.showId, movement: m.movement, destination: m.destination,
+        outcome: review.decision === 'resolve' ? 'resolved' : 'rerouted',
+        endedAt: date(now), starts: m.progress?.starts ?? 1,
+        followOn: review.next, alternate: review.alternate, reason,
+      });
+      this.save({ ...s, memory, movement: null });
+    }
+    logEvent('direction.v3_commit', { kind: review.decision, showId: input.showId, eventId: input.eventId });
     return true;
   }
   onTrackStarted(start: Parameters<typeof advanceDirection>[1]) {

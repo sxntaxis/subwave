@@ -7,7 +7,7 @@ import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
-import { musicalDirectionEnabled, musicalDirectorV2Enabled } from './music-direction.js';
+import { musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } from './music-direction.js';
 import { speakClockAllowed } from '../clock-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 import { instruction } from '../../llm/dj.js';
@@ -74,7 +74,9 @@ export function pickSchemaBase() {
       next: z.string().max(120).describe('one feasible next musical step, preserving surprise'),
       horizonMinutes: z.number().int().min(15).max(40),
       energy: z.enum(['build','release','hold','contrast']).nullable().describe('relative long-range energy progression; not a BPM command'),
-    }).nullable().describe(musicalDirectorV2Enabled()
+    }).nullable().describe(directorV3Enabled()
+      ? 'Always null. The independent Director, not the track picker, owns movement seeding.'
+      : musicalDirectorV2Enabled()
       ? 'Suggest only when there is no active movement and no human steering; otherwise null. The active show may end before the horizon.'
       : 'Suggest only when there is no active movement or a human reroute demands replanning; otherwise null. Never override admin steering.'),
   });
@@ -84,7 +86,9 @@ export function pickSchemaBase() {
       decision: z.enum(['continue','resolve','reroute']).describe('continue an established movement, resolve it deliberately, or reroute without overriding human authority'),
       next: z.string().max(120).describe('the newly useful next musical step after this specific candidate airs'),
       alternate: z.string().max(120).describe('a credible alternative future direction that remains available, not a predetermined track'),
-    }).nullable().describe('Only for an existing autonomous movement, and only after considering at least two plausible continuations. Null otherwise. Human steering always wins.'),
+    }).nullable().describe(directorV3Enabled()
+      ? 'Always null. Independent Director reviews, never track picks, own continue/resolve/reroute.'
+      : 'Only for an existing autonomous movement, and only after considering at least two plausible continuations. Null otherwise. Human steering always wins.'),
   });
 }
 

@@ -60,7 +60,7 @@ import type { PickTarget } from './queue/types.js';
 import { selectionContext } from './dj-agent/selection-context.js';
 import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } from './dj-agent/airtime-reasoning.js';
 import { recentMusicalArc } from './dj-agent/musical-arc.js';
-import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
+import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } from './dj-agent/music-direction.js';
 import { incomingShowPhase } from './dj-agent/show-phase.js';
 import { trajectoryEnabled, inspectVerifiedTrajectory } from '../music/trajectory-runtime.js';
 import { projectVerifiedAirplay, type VerifiedAirplayContext } from './dj-agent/verified-airplay-context.js';
@@ -577,7 +577,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     audit.finish({ outcome: 'fallback', chosenId: song.id ?? null, fallbackPath: 'pool', fallbackReason: 'enqueue_rejected', toolCalls: toolCalls.length, acousticSearchToolCalls });
     return false;
   }
-  if (directionRevision !== null && song.id) {
+  if (!directorV3Enabled() && directionRevision !== null && song.id) {
     // A proposal is only speculative. The mixer must report this exact queue
     // token on the *actual* start before state can change (v2.4).
     const token = (acceptedReceipt as QueueInsertionReceipt | null)?.token ?? null;
@@ -1007,7 +1007,11 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       ` Musical direction (authority order: admin > accepted listener anchor > soft model movement; no authority to bypass show locks): `
       + JSON.stringify(directionSnapshot)
       + '. A human anchor matters for the FOLLOWING songs, not just its immediate next transition. '
-      + (musicalDirectorV2Enabled()
+      + (directorV3Enabled()
+        ? 'An independent editorial Director owns new movements and continue/resolve/reroute. ' +
+          'Use the current plan as soft guidance but always return direction:null and development:null. ' +
+          'Do not invent progress or conclude that a poetic destination is acoustically measured.'
+        : musicalDirectorV2Enabled()
         ? directionSnapshot.steering
           ? 'Human steering is authoritative. Pick to honor it, set direction:null and development:null; do not reassert an old autonomous plan. '
           : directionSnapshot.movement

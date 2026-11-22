@@ -2400,7 +2400,10 @@ class Queue {
     // A mixer start confirms WHICH pair occurred, not that any particular
     // Liquidsoap FX branch was audible. Avoid an invented effect-success claim.
     if (settings.musicMixingEnabled() && outgoingPrev?.track) {
-      const idMatches = !!np.subsonic_id && np.subsonic_id === this.current.track.id;
+      // Capture the synchronously established current track so TypeScript keeps
+      // the same narrowing inside the filter callback below.
+      const currentTrack = this.current.track;
+      const idMatches = !!np.subsonic_id && np.subsonic_id === currentTrack.id;
       logEvent('mix.transition.mixer_start', {
         outgoingId: outgoingPrev.track.id || null,
         incomingId: np.subsonic_id || null,
@@ -2409,7 +2412,7 @@ class Queue {
         outgoingExitEffects: TRANSITION_EFFECTS.filter(kind =>
           (kind === 'washout' || kind === 'loop') && !!outgoingPrev.track[kind]),
         incomingEntryEffects: idMatches ? TRANSITION_EFFECTS.filter(kind =>
-          kind !== 'washout' && kind !== 'loop' && !!this.current.track[kind]) : [],
+          kind !== 'washout' && kind !== 'loop' && !!currentTrack[kind]) : [],
         // No audible duration/FX confirmation is available without mixer instrumentation.
         audibleEffectConfirmed: false,
       });

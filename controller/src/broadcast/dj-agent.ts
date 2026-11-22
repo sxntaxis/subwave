@@ -62,7 +62,7 @@ import { captureAirtimeSnapshot, airtimePickerTimeoutMs, airtimeSnapshotValid } 
 import { recentMusicalArc } from './dj-agent/musical-arc.js';
 import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled } from './dj-agent/music-direction.js';
 import { incomingShowPhase } from './dj-agent/show-phase.js';
-import { trajectoryEnabled, inspectVerifiedTrajectory, cachedTrajectory } from '../music/trajectory-runtime.js';
+import { trajectoryEnabled, inspectVerifiedTrajectory } from '../music/trajectory-runtime.js';
 import type { QueueInsertionReceipt } from './queue/types.js';
 
 function pickDecisionBase(ctx: any, current: any, showAt: Date | null, target: PickTarget, predecessor: any | null, prior: any | null = null) {

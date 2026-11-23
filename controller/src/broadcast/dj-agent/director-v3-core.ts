@@ -4,6 +4,13 @@ import type { MovementProposal } from './music-direction-core.js';
 import type { DirectionDevelopment } from './music-director-v2-core.js';
 
 export type DirectorV3Action = 'seed' | 'review' | null;
+
+/** djObject returns a transport envelope containing `value`; the schema-
+ * validated model answer is inside that field, never at the envelope root. */
+export function directorV3ModelResult(response: unknown): unknown {
+  return response && typeof response === 'object' && 'value' in response
+    ? (response as { value: unknown }).value : null;
+}
 export interface DirectorV3Decision {
   decision: 'seed' | 'continue' | 'resolve' | 'reroute';
   at: string;

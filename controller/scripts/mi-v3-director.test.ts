@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { directorV3Due, validDirectorSeed, validDirectorReview, movementClock } from '../src/broadcast/dj-agent/director-v3-core.js';
+import { directorV3Due, directorV3ModelResult, validDirectorSeed, validDirectorReview, movementClock } from '../src/broadcast/dj-agent/director-v3-core.js';
 import { MusicDirectionStore } from '../src/broadcast/dj-agent/music-direction.js';
 import { approvedCulturalFeed } from '../src/broadcast/dj-agent/director-v3-research.js';
 
@@ -61,6 +61,20 @@ test('proposal validation refuses ungrounded horizons, malformed intent, and abs
   assert.equal(validDirectorSeed({ ...seed, horizonMinutes: NaN }, 50), null);
   assert.equal(validDirectorReview({ decision: 'continue', next: 'Go', alternate: 'Or this' })?.decision, 'continue');
   assert.equal(validDirectorReview({ decision: 'improvise', next: 'Go', alternate: 'Or this' }), null);
+});
+
+test('Director consumes the SDK model value, not the structured-output transport envelope', () => {
+  const seed = { action: 'seed', movement: 'Acoustic turns', destination: 'Warm landing',
+    next: 'Ease the rhythm', energy: 'release', horizonMinutes: 30, reason: 'Fits current show' };
+  const transport = { value: seed, via: 'ai-sdk', usage: { totalTokens: 100 } };
+  assert.equal(validDirectorSeed(transport, 25), null);
+  assert.deepEqual(directorV3ModelResult(transport), seed);
+  assert.equal(validDirectorSeed(directorV3ModelResult(transport), 25)?.horizonMinutes, 25);
+  assert.equal(directorV3ModelResult({ via: 'ai-sdk' }), null);
+  assert.equal(directorV3ModelResult(null), null);
+  const review = { decision: 'continue', next: 'Keep warmth', alternate: 'Reduce tempo', reason: 'Stable mood' };
+  assert.equal(validDirectorReview(directorV3ModelResult({ value: review, via: 'ai-sdk' }))?.decision, 'continue');
+  assert.equal(directorV3ModelResult({ value: { action: 'defer' } }) !== null, true);
 });
 
 test('store permits only latest verified start to seed/review, and preserves human authority', () => {

@@ -15,7 +15,7 @@ import { logEvent } from '../../observability/events.js';
 import { incomingShowPhase } from './show-phase.js';
 import { projectVerifiedAirplay } from './verified-airplay-context.js';
 import { musicDirection, directorV3Enabled } from './music-direction.js';
-import { directorV3Due } from './director-v3-core.js';
+import { directorV3Due, directorV3ModelResult } from './director-v3-core.js';
 import { inspectVerifiedTrajectory } from '../../music/trajectory-runtime.js';
 
 export type DirectorV3Start = { eventId: string; trackId: string | null; showId: string | null;
@@ -109,12 +109,12 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
     const timeout = setTimeout(() => abort.abort(), MAX_MODEL_MS);
     let result: unknown;
     try {
-      result = await djObject({ kind: `mi.v3.${action}`, system: SYSTEM,
+      result = directorV3ModelResult(await djObject({ kind: `mi.v3.${action}`, system: SYSTEM,
         prompt: `Editorial context (read-only facts): ${JSON.stringify(input)}\n\n${action === 'seed'
           ? 'Seed one viable 15–40 minute movement within remaining show airtime. If the available evidence or time makes this unwise, choose action:defer and set the nullable fields to null.'
           : 'Review actual progress and choose continue, resolve or reroute. Do not claim a destination was measured.'}`,
         schema: action === 'seed' ? SEED : REVIEW, maxOutputTokens: 1400,
-        temperature: 0.45, maxRetries: 0, signal: abort.signal });
+        temperature: 0.45, maxRetries: 0, signal: abort.signal }));
     } finally { clearTimeout(timeout); }
     if (action === 'seed' && (result as { action?: string })?.action === 'defer') {
       retryAfter = Date.now() + 12 * 60_000;

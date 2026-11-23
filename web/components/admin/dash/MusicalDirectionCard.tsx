@@ -140,18 +140,18 @@ export function MusicalDirectionCard() {
 
         {steering && <section className="grid gap-2 border-l-2 border-vermilion pl-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-vermilion">
+            <span className="text-[10px] font-bold tracking-wider text-vermilion uppercase">
               {steering.source === 'listener' ? 'Listener cue' : `Operator · ${steering.kind}`}
             </span>
-            <span className="text-[10px] tabular-nums text-muted">
+            <span className="text-[10px] text-muted tabular-nums">
               {steering.remainingStarts != null ? `${steering.remainingStarts} starts left` : steering.scope}
               {expires != null ? ` · ${expires}m left` : ''}
             </span>
           </div>
-          <p className="wrap-break-word font-medium text-ink">{steering.listenerExpression || steering.intent}</p>
+          <p className="font-medium wrap-break-word text-ink">{steering.listenerExpression || steering.intent}</p>
           {steerReading ? <div className="grid gap-1.5 border-t border-separator-strong pt-2">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Director reading</span>
+              <span className="text-[10px] font-bold tracking-wider text-muted uppercase">Director reading</span>
               {steerReading.energy && <Pill>{steerReading.energy}</Pill>}
             </div>
             <p className="wrap-break-word text-ink">{steerReading.interpretation}</p>
@@ -163,7 +163,7 @@ export function MusicalDirectionCard() {
 
         {movement && !steering && <section className="grid gap-2 border border-separator-strong p-2.5">
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <strong className="wrap-break-word text-[13px] leading-snug text-ink">{movement.movement}</strong>
+            <strong className="text-[13px] leading-snug wrap-break-word text-ink">{movement.movement}</strong>
             {movement.lastDecision && <Pill tone="accent">{movement.lastDecision.decision}</Pill>}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
@@ -175,12 +175,8 @@ export function MusicalDirectionCard() {
               <span>Movement time</span>
               <span className="tabular-nums">{Math.floor(movementClock.elapsed)} / {movementClock.total}m</span>
             </div>
-            <div className="h-1.5 w-full overflow-hidden bg-separator-strong" role="progressbar"
-              aria-label="Elapsed movement time" aria-valuemin={0} aria-valuemax={100}
-              aria-valuenow={Math.round(movementClock.percent)}>
-              <div className="h-full bg-vermilion transition-[width] duration-500"
-                style={{ width: `${movementClock.percent}%` }} />
-            </div>
+            <progress className="h-1.5 w-full accent-vermilion" aria-label="Elapsed movement time"
+              max={100} value={Math.round(movementClock.percent)} />
           </div>}
           <div className="grid grid-cols-3 gap-1.5 border-y border-separator-strong py-2">
             <div><div className="text-[10px] text-muted">Remaining</div><strong className="tabular-nums">{movementClock ? `${Math.ceil(movementClock.remaining)}m` : '—'}</strong></div>
@@ -198,14 +194,14 @@ export function MusicalDirectionCard() {
         </section>}
 
         {!movement && !steering && latestArc && <section className="grid gap-1 border border-separator-strong p-2.5">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Last movement · {latestArc.outcome}</div>
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Last movement · {latestArc.outcome}</div>
           <div className="font-medium">{latestArc.movement}</div>
           {latestArc.followOn && <div><span className="text-muted">Handoff · </span>{latestArc.followOn}</div>}
         </section>}
 
         {movement && !steering && data.trajectoryV1 && <section className="grid gap-2 border border-separator-strong p-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider">Acoustic trajectory</span>
+            <span className="text-[10px] font-bold tracking-wider uppercase">Acoustic trajectory</span>
             <Pill tone={acousticState === 'measured' ? 'accent' : 'default'}>{acousticState.replace(/_/g, ' ')}</Pill>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted">
@@ -238,7 +234,7 @@ export function MusicalDirectionCard() {
         </div>}
 
         <div className="grid gap-2 border-t border-separator-strong pt-3">
-          <label className="text-[10px] font-bold uppercase tracking-wide" htmlFor="music-direction-intent">Operator guidance</label>
+          <label className="text-[10px] font-bold tracking-wide uppercase" htmlFor="music-direction-intent">Operator guidance</label>
           <textarea id="music-direction-intent" value={intent} maxLength={180} rows={2}
             onChange={e => setIntent(e.target.value)} placeholder="Steer the next musical movement…"
             className="w-full resize-y border border-separator-strong bg-transparent p-2 text-ink" />

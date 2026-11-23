@@ -252,12 +252,18 @@ test('the forecast counts a bed queued ahead, which is not an upcoming entry', a
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[1];
 
-  const bare = queue.airForecastSec(request)!;
-  // The bed is decided at the item's own drain, so mark it sent and bedded the
-  // way drainToLiquidsoap does.
-  queue.upcoming[0].sent = true;
-  queue.upcoming[0].bedDelaySec = 24;
-  assert.equal(queue.airForecastSec(request), bare + 24, 'the link\'s bed pushes the request back');
+  const realNow = Date.now;
+  Date.now = () => Date.parse(queue.current!.startedAt!);
+  try {
+    const bare = queue.airForecastSec(request)!;
+    // The bed is decided at the item's own drain, so mark it sent and bedded the
+    // way drainToLiquidsoap does.
+    queue.upcoming[0].sent = true;
+    queue.upcoming[0].bedDelaySec = 24;
+    assert.equal(queue.airForecastSec(request), bare + 24, 'the link\'s bed pushes the request back');
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 // The item's own bed plays immediately ahead of it, so it delays this item too.
@@ -269,9 +275,15 @@ test("the forecast counts the item's OWN bed", async () => {
   } as any;
   await queue.push({ track: { id: 'req', title: 'Req', duration: 200 }, requestedBy: 'alice' });
   const request = queue.upcoming[0];
-  const bare = queue.airForecastSec(request)!;
-  request.bedDelaySec = 18;
-  assert.equal(queue.airForecastSec(request), bare + 18);
+  const realNow = Date.now;
+  Date.now = () => Date.parse(queue.current!.startedAt!);
+  try {
+    const bare = queue.airForecastSec(request)!;
+    request.bedDelaySec = 18;
+    assert.equal(queue.airForecastSec(request), bare + 18);
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 // An UNSENT item ahead has had no bed pushed — the decision happens at ITS

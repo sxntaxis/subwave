@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -121,6 +121,26 @@ test('Director transport schemas reject whitespace-only reasons', () => {
   }));
 });
 
+test('store drops legacy v3 instructions that hit the old text caps', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mi-v3-legacy-text-'));
+  const file = join(dir, 'music-direction.json');
+  const oldMovement = {
+    id: 'legacy', movement: 'M'.repeat(100), destination: 'D'.repeat(119),
+    next: 'N'.repeat(120), energy: 'release', originRevision: 0, showId: 'A',
+    plannedBy: 'director-v3', startedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  writeFileSync(file, JSON.stringify({ version: 1, revision: 0, steering: null,
+    movement: oldMovement, pending: null, lastStart: null }));
+  try {
+    const store = new MusicDirectionStore(file, true);
+    assert.equal(store.snapshot('A')?.movement, null);
+    assert.equal(store.snapshot('A')?.replanDue, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('store permits only latest verified start to seed/review, and preserves human authority', () => {
   const old = { d: process.env.SUBWAVE_MUSIC_DIRECTION_V1, v2: process.env.SUBWAVE_MUSIC_DIRECTOR_V2,
     tr: process.env.SUBWAVE_MUSIC_TRAJECTORY_V1, v3: process.env.SUBWAVE_MI_DIRECTOR_V3 };
@@ -163,6 +183,7 @@ test('store permits only latest verified start to seed/review, and preserves hum
     assert.equal(reloaded?.movement, output.movement);
     assert.equal(reloaded?.destination, output.destination);
     assert.equal(reloaded?.next, output.next);
+    assert.equal(reloaded && 'textVersion' in reloaded, false);
     assert.equal(store.commitDirectorV3(args), false);
     start('ev2', 'song2');
     assert.equal(store.commitDirectorV3({ ...args, expectedMovementId: m?.id ?? null,

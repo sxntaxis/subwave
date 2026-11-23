@@ -47,6 +47,8 @@ export interface MusicMovement {
   expiresAt: string;
   progress?: MovementProgress;
   plannedBy?: 'director-v3';
+  /** Private migration marker for movements written with the expanded text caps. */
+  textVersion?: 2;
   lastDecision?: DirectorV3Decision;
 }
 interface PendingProposal { trackId: string; token?: string; revision: number; showId: string | null; proposal?: MovementProposal; development?: DirectionDevelopment }

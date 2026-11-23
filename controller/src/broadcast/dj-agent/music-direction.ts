@@ -75,6 +75,12 @@ export class MusicDirectionStore {
     if (!v || typeof v !== 'object' || !clip(v.movement, DIRECTION_TEXT_LIMITS.movement)
       || !clip(v.destination, DIRECTION_TEXT_LIMITS.destination)
       || !clip(v.next, DIRECTION_TEXT_LIMITS.next) || !Number.isFinite(Date.parse(v.expiresAt))) return null;
+    // The old Director caps sliced text at 100/120 characters. A v3 movement
+    // persisted at any of those exact limits may end mid-instruction. Discard
+    // that legacy movement at load; new movements carry textVersion: 2.
+    const legacyDirectorTextWasCapped = v.plannedBy === 'director-v3' && v.textVersion !== 2
+      && (v.movement.length === 100 || v.destination.length === 120 || v.next.length === 120);
+    if (legacyDirectorTextWasCapped) return null;
     const p = v.progress;
     const progress = p && Number.isSafeInteger(p.starts) && p.starts >= 1 && p.starts <= 1000
       && Number.isFinite(p.elapsedMinutes) && p.elapsedMinutes >= 0 && p.elapsedMinutes < 10_000
@@ -84,13 +90,14 @@ export class MusicDirectionStore {
           lastTrackId: clip(p.lastTrackId, 100) || null,
           distinctArtists: Number.isSafeInteger(p.distinctArtists) ? bounded(p.distinctArtists, 0, 1000) : 0,
           phase: p.phase, alternate: clip(p.alternate, DIRECTION_TEXT_LIMITS.alternate) || null } : undefined;
-    const { plannedBy: _rawPlannedBy, lastDecision: _rawLastDecision, ...rest } = v;
+    const { plannedBy: _rawPlannedBy, textVersion: _rawTextVersion, lastDecision: _rawLastDecision, ...rest } = v;
     return { ...rest, energy: ['build','release','hold','contrast'].includes(v.energy) ? v.energy : null,
        movement: clip(v.movement, DIRECTION_TEXT_LIMITS.movement),
        destination: clip(v.destination, DIRECTION_TEXT_LIMITS.destination),
        next: clip(v.next, DIRECTION_TEXT_LIMITS.next),
-      ...(progress ? { progress } : {}),
-      ...(v.plannedBy === 'director-v3' ? { plannedBy: 'director-v3' as const } : {}),
+       ...(progress ? { progress } : {}),
+       ...(v.plannedBy === 'director-v3' ? { plannedBy: 'director-v3' as const } : {}),
+       ...(v.textVersion === 2 ? { textVersion: 2 as const } : {}),
       ...(v.lastDecision && ['seed','continue','resolve','reroute'].includes(v.lastDecision.decision)
         && typeof v.lastDecision.eventId === 'string' && v.lastDecision.eventId.length <= 300
         && Number.isFinite(Date.parse(v.lastDecision.at)) && Number.isSafeInteger(v.lastDecision.starts)
@@ -118,12 +125,15 @@ export class MusicDirectionStore {
     const steering = s.steering && live(s.steering.expiresAt, now)
       && (s.steering.scope !== 'current-show' || s.steering.showId === showId) ? s.steering : null;
     const rawMovement = s.movement && s.movement.showId === showId && live(s.movement.expiresAt, now) ? s.movement : null;
+    const publicMovement = rawMovement
+      ? (({ textVersion: _privateTextVersion, ...movement }) => movement)(rawMovement)
+      : null;
     // Private idempotency keys never enter the API or LLM prompt snapshot.
-    const movement = rawMovement?.lastDecision
-      ? { ...rawMovement, lastDecision: { decision: rawMovement.lastDecision.decision,
-        at: rawMovement.lastDecision.at, starts: rawMovement.lastDecision.starts,
-        reason: rawMovement.lastDecision.reason } }
-      : rawMovement;
+    const movement = publicMovement?.lastDecision
+      ? { ...publicMovement, lastDecision: { decision: publicMovement.lastDecision.decision,
+        at: publicMovement.lastDecision.at, starts: publicMovement.lastDecision.starts,
+        reason: publicMovement.lastDecision.reason } }
+      : publicMovement;
     return { revision: s.revision, steering, movement, replanDue: !movement,
       ...(musicalDirectorV2Enabled() ? { directorVersion: 2,
         memory: musicalMemoryView(s.memory ?? emptyMemory(), showId) } : {}) };
@@ -272,7 +282,7 @@ export class MusicDirectionStore {
       const movement: MusicMovement = {
         id: randomUUID(), movement: proposal.movement, destination: proposal.destination,
         next: proposal.next, energy: proposal.energy, originRevision: s.revision,
-        showId: input.showId, startedAt,
+        showId: input.showId, startedAt, textVersion: 2,
         expiresAt: date(input.at + proposal.horizonMinutes * 60_000),
         plannedBy: 'director-v3', lastDecision,
         progress: progressAt(startedAt, input.at, 1, 1, input.trackId, null, proposal.horizonMinutes),

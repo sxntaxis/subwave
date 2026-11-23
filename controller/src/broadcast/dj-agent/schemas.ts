@@ -115,6 +115,15 @@ export function requestSchema() {
     // on-air track's `[id: …]` too.
     id: z.string().nullable().describe(`the exact song id returned by a discovery tool OR the preloaded lyrical evidence slate — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE} Null ONLY when kind is "chat"`),
     ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
+    // The request DJ performs semantic intent recognition IN its existing
+    // selection call. The controller automatically retrieves lyric evidence
+    // and requires a grounded second pass before queueing a thematic choice.
+    lyrical_mode: z.enum(['required', 'supporting', 'none'])
+      .describe('Classify lyrical SUBJECT MATTER, not sound. Required for words/story/theme requests (including indirect and figurative language); supporting for mixed sonic+lyrical requests; none for artist/title, genre, mood, ambience, sound-only and chat.'),
+    lyrical_subject: z.string().nullable()
+      .describe('Concise subject addressed by the lyrics, if requested; null when lyrical_mode is none. Do not guess song titles.'),
+    lyrical_concepts: z.array(z.string())
+      .describe('Up to six concrete lexical or figurative search concepts; these expand retrieval, never prove lyrical meaning.'),
     lyrical_basis: z.enum(['central', 'contextual', 'incidental', 'unsupported', 'not_applicable'])
       .describe('For a lyric-evidence slate, independently judge whether the actual quoted lyrical passages make the topic central, meaningfully contextual, incidental, or unsupported. Metadata, genre and vector similarity are NOT lyrical proof. For other requests use not_applicable.'),
     lyrical_reading: z.string().describe('A specific short PRIVATE interpretation of what the candidate lyrics express and how they address the request; no lyric quotations. For non-lyrical requests use empty string.'),
@@ -122,7 +131,7 @@ export function requestSchema() {
   // `kind` is required and non-nullable, so coerceModelPayload leaves an
   // omission alone and a plain enum would throw the run away. 'track' is the
   // pre-existing safe behaviour.
-  const tolerant = { objectFallbacks: { kind: 'track', lyrical_basis: 'not_applicable', lyrical_reading: '' } };
+  const tolerant = { objectFallbacks: { kind: 'track', lyrical_mode: 'none', lyrical_subject: null, lyrical_concepts: [], lyrical_basis: 'not_applicable', lyrical_reading: '' } };
   // Station voice off: no spoken intro can air, so the field leaves the
   // contract rather than being written and dropped. runRequestViaAgent still
   // guards its own read, covering a switch flipped mid-run.

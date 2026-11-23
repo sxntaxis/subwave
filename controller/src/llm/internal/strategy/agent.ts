@@ -31,7 +31,7 @@ import { agentPlan } from './plan.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
 import { recordAgentRetry } from '../telemetry/log.js';
 import type { PickerAgentDiagnosticsObserver } from '../../../observability/picker-audit.js';
-import { redactPrivateLyricSlate } from '../../../music/lyrics-privacy.js';
+import { redactPrivateLyricSlate, redactLyricToolResult } from '../../../music/lyrics-privacy.js';
 
 // Loose views of an AI SDK ToolLoopAgent generate result — only the fields the
 // cascade reads. `AgentLike` is the minimal surface runDeadlined needs.
@@ -271,7 +271,20 @@ export async function djAgent({
     ? messages.map((m: any) => typeof m.content === 'string'
       ? { ...m, content: redactPrivateLyricSlate(m.content) } : m)
     : messages;
-  const recordingText = (s: string) => kind === 'djAgentRequest' ? redactPrivateLyricSlate(s) : s;
+  const recordingText = (s: string) => {
+    if (kind !== 'djAgentRequest') return s;
+    const masked = redactPrivateLyricSlate(s);
+    try {
+      const result = JSON.parse(masked);
+      if (result && typeof result === 'object' && !Array.isArray(result) && 'lyrical_reading' in result) {
+        result.lyrical_reading = '[PRIVATE LYRICAL INTERPRETATION REDACTED]';
+        return JSON.stringify(result, null, 2);
+      }
+    } catch { /* Non-JSON telemetry is still private-slate redacted. */ }
+    return masked;
+  };
+  const recordingCalls = (calls: ToolCallSummary[]): ToolCallSummary[] => kind === 'djAgentRequest'
+    ? calls.map(c => ({ ...c, result: redactLyricToolResult(c.result) })) : calls;
   return withFailover(
     kind,
     (err) => ({
@@ -372,13 +385,13 @@ export async function djAgent({
             if (nObj && explored && accepted) {
               const toolCalls = flattenToolCalls(nr);
               return {
-                value: { object: nObj, steps: nSteps, toolCalls },
+                value: { object: nObj, steps: nSteps, toolCalls: recordingCalls(toolCalls) },
                 via: lastVia,
                 sampling: samplingWithLocalKnobs(leg.cfg, { temperature }),
                 usage: usageOf(nr),
                 perf: perfOf(nr),
                 warnings: warningsOf(nr),
-                extra: { system, messages: recordingMessages, toolCalls, steps: nSteps, response: recordingText(JSON.stringify(nObj, null, 2)) },
+                extra: { system, messages: recordingMessages, toolCalls: recordingCalls(toolCalls), steps: nSteps, response: recordingText(JSON.stringify(nObj, null, 2)) },
               };
             }
             console.log(`[${kind}] native output produced no usable pick (explored=${explored}, accepted=${accepted}) — falling back to done-tool`);
@@ -557,7 +570,7 @@ export async function djAgent({
         // Carried from the main run rather than re-read off `result`.
         const toolCalls = discoveryTrail;
         return {
-          value: { object, steps, toolCalls },
+          value: { object, steps, toolCalls: recordingCalls(toolCalls) },
           via: lastVia,
           sampling: samplingWithLocalKnobs(leg.cfg, { temperature }),
           usage: spentUsage,
@@ -566,8 +579,9 @@ export async function djAgent({
           // Full and untruncated. When the collapse answered, the flattened
           // prompt it saw rides along beside the original messages.
           extra: {
-            system, messages: recordingMessages, toolCalls, steps,
-            ...(terminalPrompt ? { terminalPrompt: recordingText(terminalPrompt) } : {}),
+            system, messages: recordingMessages, toolCalls: recordingCalls(toolCalls), steps,
+            ...(terminalPrompt ? { terminalPrompt: kind === 'djAgentRequest'
+              ? '[PRIVATE REQUEST EVIDENCE OMITTED]' : terminalPrompt } : {}),
             response: recordingText(schema ? JSON.stringify(object, null, 2) : String(object ?? '')),
           },
         };

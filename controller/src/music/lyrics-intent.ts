@@ -38,3 +38,35 @@ export function resolveLyricIntent(text: string, meaning?: RequestMeaning | null
     .filter(s => s.length >= 3 && !/[\n{}<>]/.test(s)))].slice(0, 6);
   return { topic, mode, concepts };
 }
+
+/** Cheap *suspicion* only, not a semantic verdict. If the request agent says
+ * "no lyrical meaning" despite these cues, ask the existing librarian to
+ * resolve the disagreement before a candidate is admitted to the queue.
+ * No extra call for ordinary genre, artist, or mood requests. */
+export function needsLyricalMeaningReview(text: string): boolean {
+  const s = text.slice(0, 360).toLocaleLowerCase('und');
+  return /\b(?:lyrics?|lyrical|words (?:say|mean)|song\s*stories|storytelling|narratives?|stories (?:of|about)|sings? about|talks? about|speaks? (?:of|about)|messages? about|themes? (?:of|about)|canciones? que (?:hablen|cuenten)|letras? (?:sobre|de|que)|historias? (?:de|sobre))\b/u.test(s);
+}
+
+
+/** Admission is an ID + actual-lyric-evidence-bound model verdict, never a
+ * free-floating natural-language claim. This deliberately cannot evaluate the
+ * truth of metaphors; it only ensures interpretation follows retrieval. */
+export function groundedLyricChoice(pick: unknown, ids: { has(id: string): boolean }): boolean {
+  const p = pick as { id?: unknown; lyrical_basis?: unknown; lyrical_reading?: unknown } | null;
+  return !!(p && typeof p.id === 'string' && ids.has(p.id)
+    && (p.lyrical_basis === 'central' || p.lyrical_basis === 'contextual')
+    && typeof p.lyrical_reading === 'string' && p.lyrical_reading.trim().length >= 12);
+}
+
+/** A grounded pass is guaranteed for newly inferred meaning; a second search
+ * on the existing slate needs genuinely new LLM-suggested concepts. */
+export function lyricHydrationNeeded(
+  preloaded: LyricIntent | null, inferred: LyricIntent | null, initialGrounded: boolean,
+): boolean {
+  const resolved = preloaded ?? inferred;
+  if (!resolved) return false;
+  if (!preloaded) return true;
+  return resolved.mode === 'required' && !initialGrounded
+    && !!inferred?.concepts.some(c => !preloaded.concepts.includes(c));
+}

@@ -357,22 +357,21 @@ async function resolveRequest(entry) {
     });
   }
 
-  // Interpret intent before the agent chooses: lyrical meaning must not depend
-  // on an optional discovery tool. An explicit lyrical cue survives provider
-  // failure; mood-only and named-song requests keep their normal selection.
-  const currentTrack = queue.current?.track || null;
-  let understood: Awaited<ReturnType<typeof dj.matchRequest>> | null = null;
-  try {
-    understood = await dj.matchRequest(text, { listenerName: requester, nowPlaying: currentTrack });
-  } catch (err) {
-    queue.log('request', `intent interpretation unavailable (${(err as Error).name || 'error'})`);
-  }
-  const lyricIntent = resolveLyricIntent(text, understood);
+  // Cheap, deterministic preloading for obvious lyric subjects. Indirect
+  // meanings are inferred by the EXISTING request DJ within its selection
+  // call, then grounded before queue admission (never an optional tool call).
+  const lyricIntent = resolveLyricIntent(text);
+  let observedLyricIntent = lyricIntent;
 
   // Conversational DJ agent. On any failure fall through to the stateless
   // cascade below, so a request is never dropped.
   try {
-    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, humanRequestId: entry.id, lyricIntent });
+    const agentRes = await djAgent.runRequest(queue, ctx, {
+      requester, text, humanRequestId: entry.id, lyricIntent,
+      // Preserve a discovered mandatory subject even if later retrieval or
+      // generation fails. The fallback cannot reinterpret it as genre-only.
+      onLyricIntent: intent => { observedLyricIntent = intent; },
+    });
     if (agentRes) {
       if (agentRes.refused === 'no-lyric-evidence') {
         entry.path = 'lyric-theme';
@@ -415,19 +414,18 @@ async function resolveRequest(entry) {
     queue.log('error', `DJ agent request failed: ${err.message} — falling back`);
   }
 
-  // Required lyrical subject cannot degrade to unverified genre/mood picks.
-  // Combined sonic + lyrical preferences may use the pre-existing cascade.
-  if (lyricIntent?.mode === 'required') {
+  // The librarian remains the established agent-failure cascade, NOT an
+  // unconditional extra model call. It can still recognize indirect lyrical
+  // requests that the unavailable/failed request agent did not process.
+  const matched = await dj.matchRequest(text, {
+    listenerName: requester, nowPlaying: queue.current?.track || null,
+  });
+  const fallbackLyricIntent = resolveLyricIntent(text, matched);
+  if (observedLyricIntent?.mode === 'required' || fallbackLyricIntent?.mode === 'required') {
     entry.path = 'lyric-theme';
     entry.pickSource = 'lyrics-unverified';
     return failed('Could not verify a lyrical-theme match right now. Please try a more specific topic.');
   }
-
-  // 1. Reuse the preflight librarian interpretation. No duplicated LLM call
-  // on an Agent failure; retry here only if preflight actually failed.
-  const matched = understood ?? await dj.matchRequest(text, {
-    listenerName: requester, nowPlaying: currentTrack,
-  });
   queue.log('intent', `"${text}" → ${matched.intent || '(no intent)'}`, {
     mood: matched.mood,
     scope: matched.scope,

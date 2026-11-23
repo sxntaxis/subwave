@@ -26,11 +26,15 @@ export const directorV3ReviewSchema = z.object({
   reason: z.string().trim().min(1),
 });
 
-/** djObject returns a transport envelope containing `value`; the schema-
- * validated model answer is inside that field, never at the envelope root. */
+/** djObject normally returns the validated value directly: withFailover
+ * unwraps its internal attempt envelope. Accept that value, while retaining
+ * compatibility with callers that pass the transport envelope itself. */
 export function directorV3ModelResult(response: unknown): unknown {
-  return response && typeof response === 'object' && 'value' in response
-    ? (response as { value: unknown }).value : null;
+  if (!response || typeof response !== 'object') return null;
+  if ('value' in response && 'via' in response) {
+    return (response as { value: unknown }).value;
+  }
+  return response;
 }
 export interface DirectorV3Decision {
   decision: 'seed' | 'continue' | 'resolve' | 'reroute';

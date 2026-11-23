@@ -73,10 +73,12 @@ test('Director consumes the SDK model value, not the structured-output transport
   assert.equal(validDirectorSeed(transport, 25), null);
   assert.deepEqual(directorV3ModelResult(transport), seed);
   assert.equal(validDirectorSeed(directorV3ModelResult(transport), 25)?.horizonMinutes, 25);
-  assert.equal(directorV3ModelResult({ via: 'ai-sdk' }), null);
+  assert.deepEqual(directorV3ModelResult(seed), seed);
+  assert.deepEqual(directorV3ModelResult({ via: 'ai-sdk' }), { via: 'ai-sdk' });
   assert.equal(directorV3ModelResult(null), null);
   const review = { decision: 'continue', next: 'Keep warmth', alternate: 'Reduce tempo', reason: 'Stable mood' };
   assert.equal(validDirectorReview(directorV3ModelResult({ value: review, via: 'ai-sdk' }))?.decision, 'continue');
+  assert.equal(validDirectorReview(directorV3ModelResult(review))?.decision, 'continue');
   assert.equal(directorV3ModelResult({ value: { action: 'defer' } }) !== null, true);
 });
 

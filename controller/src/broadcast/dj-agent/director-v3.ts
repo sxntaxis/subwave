@@ -15,7 +15,7 @@ import { incomingShowPhase } from './show-phase.js';
 import { projectVerifiedAirplay } from './verified-airplay-context.js';
 import { musicDirection, directorV3Enabled } from './music-direction.js';
 import {
-  boundedDirectorReason, directorV3Due, directorV3ModelResult, directorV3SeedSchema, directorV3ReviewSchema,
+  directorV3Due, directorV3ModelResult, directorV3SeedSchema, directorV3ReviewSchema,
 } from './director-v3-core.js';
 import { inspectVerifiedTrajectory } from '../../music/trajectory-runtime.js';
 
@@ -118,14 +118,8 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
       expectedRevision: captured.revision, expectedMovementId: captured.movementId,
       remainingMinutes: incomingShowPhase(null).minutesRemaining,
       action, output: result }, reason => { rejection = reason; });
-    const resultObject = result && typeof result === 'object' ? result as Record<string, unknown> : null;
-    const resultReason = resultObject?.reason;
     logEvent('direction.v3_result', { action, accepted, showId: start.showId,
-      ...(rejection ? { rejection } : {}),
-      resultKeys: resultObject ? Object.keys(resultObject).sort() : [],
-      reasonType: typeof resultReason,
-      reasonLength: typeof resultReason === 'string' ? resultReason.length : null,
-      normalizedReasonLength: boundedDirectorReason(resultReason).length });
+      ...(rejection ? { rejection } : {}) });
     if (accepted) retryAfter = Date.now() + 90_000;
   } catch (err) {
     retryAfter = Date.now() + 180_000;

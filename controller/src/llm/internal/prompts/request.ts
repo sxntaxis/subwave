@@ -149,7 +149,8 @@ export function requestMatcherSystem(persona: unknown): string {
 
 export async function matchRequest(
   userQuery: string,
-  { listenerName = null, nowPlaying = null }: { listenerName?: string | null; nowPlaying?: any } = {},
+  { listenerName = null, nowPlaying = null, signal = undefined }:
+  { listenerName?: string | null; nowPlaying?: any; signal?: AbortSignal } = {},
 ) {
   const ctxLines: string[] = [];
   if (nowPlaying?.title) {
@@ -169,6 +170,7 @@ export async function matchRequest(
     schema: REQUEST_SCHEMA_TOLERANT,
     temperature: 0.4,
     kind: 'matchRequest',
+    ...(signal ? { signal } : {}),
   });
 }
 

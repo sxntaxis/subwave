@@ -31,6 +31,11 @@ import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
+import { withDeadline } from '../llm/internal/core/retry.js';
+import {
+  requestBudgetMs, requireRequestPhaseMs, REQUEST_AGENT_RUN_MAX_MS,
+  REQUEST_FIRST_PASS_RESERVE_MS, REQUEST_AUXILIARY_MAX_MS, REQUEST_RETRIEVAL_MAX_MS,
+} from './dj-agent/request-budget.js';
 import {
   beginPickerAudit, bindPickerSelectionAudit, classifyPickerFailure, finishAgentPickerAudit, pickerAuditEnabled,
 } from '../observability/picker-audit.js';
@@ -143,8 +148,8 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
 // discarding it to the caller's stateless matcher cascade, which still runs
 // when this misses. Reuses requestSystem()'s wording and the same
 // autoVoiceAllowed() gate for `intro`. Never throws.
-async function repickRequestFromSeen({ seen, badId, requester, text, lyricIntent }:
-  { seen: Map<string, any>; badId: string | null; requester: string; text: string; lyricIntent?: LyricIntent | null }) {
+async function repickRequestFromSeen({ seen, badId, requester, text, lyricIntent, signal }:
+  { seen: Map<string, any>; badId: string | null; requester: string; text: string; lyricIntent?: LyricIntent | null; signal?: AbortSignal }) {
   const ids = [...seen.keys()];
   if (ids.length === 0) return null;
   const wantIntro = autoVoiceAllowed();
@@ -168,6 +173,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text, lyricIntent
       schema,
       temperature: 0.3,
       kind: 'djAgentRequestRepick',
+      ...(signal ? { signal } : {}),
     });
   } catch {
     return null;
@@ -1153,6 +1159,51 @@ export async function runRequest(queue: any, ctx: any, { requester, text, humanR
 
 async function runRequestViaAgent(queue: any, { requester, text, humanRequestId, lyricIntent, onLyricIntent }: { requester: string; text: string; humanRequestId?: string; lyricIntent: LyricIntent | null; onLyricIntent?: (intent: LyricIntent) => void }) {
   return withTrace({ kind: 'request', requester }, async () => {
+    // Listener requests are pending work, not imminent drain picks. The HTTP
+    // handler has already acknowledged receipt and normal queue playback keeps
+    // running. A bounded, queue-aware TOTAL budget replaces the generic 100s
+    // agent timeout. All semantic passes consume this same clock.
+    const workStartedAt = Date.now();
+    const queuedDepth = Array.isArray(queue.upcoming) ? queue.upcoming.length : 0;
+    const totalBudgetMs = requestBudgetMs(queuedDepth);
+    const deadlineAt = workStartedAt + totalBudgetMs;
+    logEvent('request.work_budget', { totalBudgetMs, queuedDepth,
+      agentCapMs: REQUEST_AGENT_RUN_MAX_MS });
+
+    const phaseRemaining = () => Math.max(0, deadlineAt - Date.now());
+    const runAgentPhase = async (phase: string, args: Parameters<typeof requestAgent.run>[0], reserveMs = 0) => {
+      const allowanceMs = requireRequestPhaseMs(deadlineAt, REQUEST_AGENT_RUN_MAX_MS, reserveMs);
+      const startedAt = Date.now();
+      logEvent('request.phase', { phase, state: 'start', allowanceMs, remainingMs: phaseRemaining() });
+      try {
+        const result = await requestAgent.run({ ...args, requestTimeoutMs: allowanceMs });
+        logEvent('request.phase', { phase, state: 'done', ms: Date.now() - startedAt,
+          remainingMs: phaseRemaining(), toolCalls: result.toolCalls?.length ?? 0 });
+        return result;
+      } catch (error) {
+        logEvent('request.phase', { phase, state: 'failed', ms: Date.now() - startedAt,
+          remainingMs: phaseRemaining(), errorName: (error as Error)?.name ?? 'Error' });
+        throw error;
+      }
+    };
+    const runAuxPhase = async <T>(phase: string, capMs: number,
+      work: (signal?: AbortSignal) => Promise<T>, reserveMs = 0): Promise<T> => {
+      const allowanceMs = requireRequestPhaseMs(deadlineAt, capMs, reserveMs);
+      const startedAt = Date.now();
+      logEvent('request.phase', { phase, state: 'start', allowanceMs, remainingMs: phaseRemaining() });
+      try {
+        // Discovery/structured calls get a real abort signal where supported;
+        // an uncancellable SQLite operation cannot commit a track by itself.
+        const value = await withDeadline(allowanceMs, `request ${phase}`, work);
+        logEvent('request.phase', { phase, state: 'done', ms: Date.now() - startedAt,
+          remainingMs: phaseRemaining() });
+        return value;
+      } catch (error) {
+        logEvent('request.phase', { phase, state: 'failed', ms: Date.now() - startedAt,
+          remainingMs: phaseRemaining(), errorName: (error as Error)?.name ?? 'Error' });
+        throw error;
+      }
+    };
     // Requests stay near-unfiltered: listeners must be able to re-request a
     // song from earlier in the day, so the window is only 2h.
     const recentIds = queue.recentlyPlayedIds(2);
@@ -1192,10 +1243,10 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
 
     // Recency only, no show locks: an explicit listener ask wins over the
     // show's strict filters.
-    const run = await requestAgent.run({
+    const run = await runAgentPhase('semantic-plan', {
       messages,
       scope: pickerScope({ recentIds }),
-    });
+    }, REQUEST_FIRST_PASS_RESERVE_MS);
     let { toolCalls, extras } = run;
     // Reassigned when the unknown-id salvage below (repickRequestFromSeen)
     // lands a corrective re-pick — same let-after-destructure shape
@@ -1212,9 +1263,10 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
       // Only a conditional disagreement review, not a mandatory extra model.
       try {
         librarianUsed = true;
-        const reviewed = await dj.matchRequest(text, {
-          listenerName: requester, nowPlaying: cur,
-        });
+        const reviewed = await runAuxPhase('librarian', REQUEST_AUXILIARY_MAX_MS,
+          signal => dj.matchRequest(text, {
+            listenerName: requester, nowPlaying: cur, signal,
+          }), 60_000);
         resolvedLyricIntent = resolveLyricIntent(text, reviewed);
       } catch { /* An unavailable librarian never fabricates evidence. */ }
     }
@@ -1226,9 +1278,10 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
     if (resolvedLyricIntent && !resolvedLyricIntent.concepts.length && !librarianUsed) {
       try {
         librarianUsed = true;
-        const reviewed = await dj.matchRequest(text, {
-          listenerName: requester, nowPlaying: cur,
-        });
+        const reviewed = await runAuxPhase('librarian', REQUEST_AUXILIARY_MAX_MS,
+          signal => dj.matchRequest(text, {
+            listenerName: requester, nowPlaying: cur, signal,
+          }), 60_000);
         resolvedLyricIntent = mergeLyricConcepts(resolvedLyricIntent,
           resolveLyricIntent(text, reviewed));
       } catch { /* The raw subject remains as bounded fallback, not a match. */ }
@@ -1237,21 +1290,24 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
     if (lyricHydrationNeeded(resolvedLyricIntent) && resolvedLyricIntent) {
       const topic = resolvedLyricIntent.topic;
       let activePlan = resolvedLyricIntent;
-      let hits = await searchLyricsTheme(topic, 32, activePlan.concepts);
+      let hits = await runAuxPhase('lyrics-search', REQUEST_RETRIEVAL_MAX_MS,
+        () => searchLyricsTheme(topic, 32, activePlan.concepts), 30_000);
       let hydrated = prepareLyricRequestSlate(hits, recentIds);
       if (!hydrated.slate.length && !librarianUsed) {
         // One model-led recall expansion when the first plan found nothing.
         // The result is still only a search hint; actual lyrics are required.
         try {
           librarianUsed = true;
-          const expanded = await dj.matchRequest(text, {
-            listenerName: requester, nowPlaying: cur,
-          });
+          const expanded = await runAuxPhase('librarian-expansion', REQUEST_AUXILIARY_MAX_MS,
+            signal => dj.matchRequest(text, {
+              listenerName: requester, nowPlaying: cur, signal,
+            }), 60_000);
           const candidatePlan = mergeLyricConcepts(activePlan,
             resolveLyricIntent(text, expanded));
           if (candidatePlan.concepts.some(c => !activePlan.concepts.includes(c))) {
             activePlan = candidatePlan;
-            hits = await searchLyricsTheme(topic, 32, activePlan.concepts);
+            hits = await runAuxPhase('lyrics-expansion', REQUEST_RETRIEVAL_MAX_MS,
+              () => searchLyricsTheme(topic, 32, activePlan.concepts), 30_000);
             hydrated = prepareLyricRequestSlate(hits, recentIds);
           }
         } catch { /* No semantic provider cannot become a positive match. */ }
@@ -1278,7 +1334,7 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
           if (finalTurn?.role === 'user') finalTurn.content =
             redactPrivateLyricSlate(String(finalTurn.content)) + evidenceTail;
           else groundedMessages.push({ role: 'user', content: evidenceTail });
-          return requestAgent.run({ messages: groundedMessages,
+          return runAgentPhase('lyric-evaluation', { messages: groundedMessages,
             scope: pickerScope({ recentIds, seen: candidateSlate.seen,
               lyricTheme: { topic, mode: candidatePlan.mode, candidates: candidateHits } }) });
         };
@@ -1292,7 +1348,8 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
           const refinedPlan = mergeLyricConcepts(activePlan, proposal);
           const hasNewTerms = refinedPlan.concepts.some(c => !activePlan.concepts.includes(c));
           if (hasNewTerms && !groundedLyricChoice(object, hydrated.seen)) {
-            const revisedHits = await searchLyricsTheme(topic, 32, refinedPlan.concepts);
+            const revisedHits = await runAuxPhase('lyrics-revision', REQUEST_RETRIEVAL_MAX_MS,
+              () => searchLyricsTheme(topic, 32, refinedPlan.concepts));
             const revisedSlate = prepareLyricRequestSlate(revisedHits, recentIds);
             if (revisedSlate.slate.length) {
               grounded = await evaluate(revisedHits, revisedSlate, refinedPlan);
@@ -1372,7 +1429,9 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId,
     // caller's stateless matcher cascade is still the fallback when this
     // misses too (empty seen, or the re-pick call itself fails).
     if (!song && extras.seen.size && resolvedLyricIntent?.mode !== 'required') {
-      const repicked = await repickRequestFromSeen({ seen: extras.seen, badId: object?.id ?? null, requester, text, lyricIntent: resolvedLyricIntent });
+      const repicked = await runAuxPhase('id-repick', REQUEST_AUXILIARY_MAX_MS,
+        signal => repickRequestFromSeen({ seen: extras.seen, badId: object?.id ?? null,
+          requester, text, lyricIntent: resolvedLyricIntent, signal })).catch(() => null);
       if (repicked) {
         logEvent('pick.repicked', { agent: 'request', from: object?.id ?? null, to: repicked.id, candidates: extras.seen.size });
         queue.log('request', `agent returned unknown id "${object?.id}" — re-picked "${repicked.id}" from its own candidates`);

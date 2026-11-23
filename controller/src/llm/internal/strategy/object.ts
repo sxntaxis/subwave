@@ -89,6 +89,13 @@ export async function djObject({
     kind,
     (err) => ({ user: prompt, ...failureDiagnostics(err) }),
     async (l) => {
+      // A request-scoped budget can expire while the provider is unwinding.
+      // Do not start a backup-leg generation after its abort signal fired.
+      if (signal?.aborted) {
+        const error = new Error('structured request call aborted after its deadline');
+        error.name = 'AgentDeadlineError';
+        throw error;
+      }
       let lastErr;
       // Track the strategy actually attempted so a failure record attributes to
       // the right sub-path — bucketing every failure as 'ai-sdk' hides which

@@ -26,6 +26,9 @@ export interface PickerRunArgs {
 
 export interface RequestRunArgs {
   scope: PickerScope;
+  // Absolute request-level budget is calculated by the caller and diminished
+  // before EVERY agent pass. Never reset to settings.llm.agentTimeoutMs.
+  requestTimeoutMs?: number;
 }
 
 // What buildTools hands back for the caller to resolve the chosen id against.
@@ -67,6 +70,7 @@ export const requestAgent = defineAgent<RequestRunArgs, PickerExtras>({
   maxSteps: 2,
   providerDiscoveryBudget: true,
   timeoutMs: agentDeadline,
+  resolveRunTimeout: ({ requestTimeoutMs }) => requestTimeoutMs,
   buildSystem: ({ scope }) => requestSystem()
     + '\n\nFor EVERY listener request, report lyrical_mode, lyrical_subject and lyrical_concepts independently of your chosen tool. When lyrical subject matter is requested, YOU formulate the retrieval topic and up to six varied expressions (literal synonyms, cultural terms, metaphorical concepts, and other languages if relevant) for ANY subject; do not assume a hard-coded dictionary exists. Your first selection is provisional until the controller retrieves lyrics and you have judged the passages. Semantics belong to you; the controller does retrieval and admission. If the user seeks what a song SAYS, tells, or means, including indirect language, mark required; if they also want a specific sound/feeling, mark supporting. For artist/title, genre and sound-only requests mark none. If no lyric evidence is currently provided, do NOT claim words you have not seen: the controller will retrieve evidence and request a grounded continuation before queueing. You may use discovery tools to explore, but your decision must not treat a genre or mood as lyrical evidence.'
     + (scope.lyricTheme

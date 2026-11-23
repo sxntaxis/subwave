@@ -305,7 +305,8 @@ export async function djAgent({
       // attributes to the path actually attempted.
       let lastVia = 'ai-sdk:agent';
       // One shared wall-clock ceiling for every attempt below.
-      if (timeoutMs && capabilitiesFor(leg.cfg.provider).sharedFailoverDeadline && sharedDeadlineAt == null) {
+      if (timeoutMs && (kind === 'djAgentRequest' || capabilitiesFor(leg.cfg.provider).sharedFailoverDeadline)
+        && sharedDeadlineAt == null) {
         sharedDeadlineAt = Date.now() + timeoutMs;
       }
       const deadlineAt = sharedDeadlineAt ?? (timeoutMs ? Date.now() + timeoutMs : undefined);
@@ -314,15 +315,15 @@ export async function djAgent({
         // and ToolLoopAgent + Output.object would throw NoObjectGeneratedError.
         if (plan === 'object-via-tool') {
           lastVia = 'ai-sdk:tool';
-          const { object, usage, perf, warnings } = await withTransientRetry(kind,
-            () => objectViaToolCall(leg, { system, prompt: undefined, messages, schema, temperature, maxOutputTokens }),
-            undefined,
-            diagnostics ? {
-              retryNotAttempted: () => notifyDiagnostic(() => diagnostics.retryNotAttempted()),
-              retryAttempted: () => notifyDiagnostic(() => diagnostics.retryAttempted()),
-              retrySucceeded: () => notifyDiagnostic(() => diagnostics.retrySucceeded()),
-              retryExhausted: () => notifyDiagnostic(() => diagnostics.retryExhausted()),
-            } : undefined);
+          // This leg previously escaped the agent's deadline entirely. It is
+          // particularly relevant to grounded request runs with no discovery
+          // tools: propagate abort and share the SAME absolute deadline.
+          const { object, usage, perf, warnings } = await runDeadlinedCall(
+            deadlineAt, kind, 'agent object-via-tool',
+            signal => objectViaToolCall(leg, {
+              system, prompt: undefined, messages, schema, temperature,
+              maxOutputTokens, ...(signal ? { signal } : {}),
+            }), diagnostics);
           return {
             value: { object, steps: 0, toolCalls: [] },
             via: lastVia,

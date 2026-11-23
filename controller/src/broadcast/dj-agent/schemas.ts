@@ -11,6 +11,7 @@ import { musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } 
 import { speakClockAllowed } from '../clock-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 import { instruction } from '../../llm/dj.js';
+import { DIRECTION_TEXT_LIMITS } from './music-direction-core.js';
 
 
 // Plain .nullable() fields, deliberately: malformed spellings of "nothing" are
@@ -70,9 +71,9 @@ export function pickSchemaBase() {
   // a stable required-key list. No direction is a valid cheap/obvious pick.
   const directionModel = model.extend({
     direction: z.object({
-      movement: z.string().max(100).describe('compact musical chapter or movement, not a song list'),
-      destination: z.string().max(120).describe('sonic territory to approach over the next 15–40 minutes'),
-      next: z.string().max(120).describe('one feasible next musical step, preserving surprise'),
+      movement: z.string().max(DIRECTION_TEXT_LIMITS.movement).describe('compact musical chapter or movement, not a song list'),
+      destination: z.string().max(DIRECTION_TEXT_LIMITS.destination).describe('sonic territory to approach over the next 15–40 minutes'),
+      next: z.string().max(DIRECTION_TEXT_LIMITS.next).describe('one feasible next musical step, preserving surprise'),
       horizonMinutes: z.number().int().min(15).max(40),
       energy: z.enum(['build','release','hold','contrast']).nullable().describe('relative long-range energy progression; not a BPM command'),
     }).nullable().describe(directorV3Enabled()
@@ -85,8 +86,8 @@ export function pickSchemaBase() {
   return directionModel.extend({
     development: z.object({
       decision: z.enum(['continue','resolve','reroute']).describe('continue an established movement, resolve it deliberately, or reroute without overriding human authority'),
-      next: z.string().max(120).describe('the newly useful next musical step after this specific candidate airs'),
-      alternate: z.string().max(120).describe('a credible alternative future direction that remains available, not a predetermined track'),
+      next: z.string().max(DIRECTION_TEXT_LIMITS.next).describe('the newly useful next musical step after this specific candidate airs'),
+      alternate: z.string().max(DIRECTION_TEXT_LIMITS.alternate).describe('a credible alternative future direction that remains available, not a predetermined track'),
     }).nullable().describe(directorV3Enabled()
       ? 'Always null. Independent Director reviews, never track picks, own continue/resolve/reroute.'
       : 'Only for an existing autonomous movement, and only after considering at least two plausible continuations. Null otherwise. Human steering always wins.'),

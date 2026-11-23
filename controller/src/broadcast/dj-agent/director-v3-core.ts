@@ -1,7 +1,7 @@
 // MI v3: pure editorial cadence and output validation. No LLM, queue, DB, or IO.
 // A musical movement is an intention, not an itinerary or an acoustic score.
 import { z } from 'zod';
-import type { MovementProposal } from './music-direction-core.js';
+import { DIRECTION_TEXT_LIMITS, type MovementProposal } from './music-direction-core.js';
 import type { DirectionDevelopment } from './music-director-v2-core.js';
 
 export type DirectorV3Action = 'seed' | 'review' | null;
@@ -78,9 +78,9 @@ export function validDirectorSeed(v: unknown, remaining: number | null): Movemen
   if (x.action !== 'seed') return null;
   const clean = (s: unknown, limit: number) => typeof s === 'string'
     ? s.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, limit) : '';
-  const movement = clean(x.movement, 100);
-  const destination = clean(x.destination, 120);
-  const next = clean(x.next, 120);
+  const movement = clean(x.movement, DIRECTION_TEXT_LIMITS.movement);
+  const destination = clean(x.destination, DIRECTION_TEXT_LIMITS.destination);
+  const next = clean(x.next, DIRECTION_TEXT_LIMITS.next);
   const horizon = x.horizonMinutes;
   if (!movement || !destination || !next || typeof horizon !== 'number'
       || !Number.isInteger(horizon) || horizon < 15 || horizon > 40) return null;
@@ -95,14 +95,16 @@ export function validDirectorReview(v: unknown): DirectionDevelopment | null {
   if (!v || typeof v !== 'object') return null;
   const x = v as Record<string, unknown>;
   if (x.decision !== 'continue' && x.decision !== 'resolve' && x.decision !== 'reroute') return null;
-  const clean = (s: unknown) => typeof s === 'string'
-    ? s.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 120) : '';
-  const next = clean(x.next), alternate = clean(x.alternate);
+  const clean = (s: unknown, limit: number) => typeof s === 'string'
+    ? s.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, limit) : '';
+  const next = clean(x.next, DIRECTION_TEXT_LIMITS.next);
+  const alternate = clean(x.alternate, DIRECTION_TEXT_LIMITS.alternate);
   return next && alternate ? { decision: x.decision, next, alternate } : null;
 }
 
 export function boundedDirectorReason(v: unknown): string {
-  return typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 180) : '';
+  return typeof v === 'string'
+    ? v.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, DIRECTION_TEXT_LIMITS.reason) : '';
 }
 
 /** Displayed elapsed time is always measured from real time, never from the

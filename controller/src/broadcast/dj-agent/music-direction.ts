@@ -8,6 +8,7 @@ import { logEvent } from '../../observability/events.js';
 import { emptyMemory, musicalMemoryView, resolveMemory, progressAt, type EditorialMemory, type DirectionDevelopment } from './music-director-v2-core.js';
 import {
   advanceDirection, empty, date, bounded, clip, live,
+  DIRECTION_TEXT_LIMITS,
   type DirectionRecord, type DirectionScope, type AdminMotion,
   type MovementProposal, type MusicSteer, type MusicMovement,
 } from './music-direction-core.js';
@@ -48,15 +49,15 @@ export class MusicDirectionStore {
         && (typeof e.energy === 'string' || e.energy === null)
         && (typeof e.genre === 'string' || e.genre === null) && Array.isArray(e.moods)),
       resolved: value.resolved.slice(0, 12).filter((e: any) => e
-        && typeof e.movement === 'string' && e.movement.length <= 100
-        && typeof e.destination === 'string' && e.destination.length <= 120
+        && typeof e.movement === 'string' && e.movement.length <= DIRECTION_TEXT_LIMITS.movement
+        && typeof e.destination === 'string' && e.destination.length <= DIRECTION_TEXT_LIMITS.destination
         && ['resolved','rerouted','expired','show-change','human'].includes(e.outcome)
         && Number.isFinite(Date.parse(e.endedAt))).map((e: any) => {
           const { reason: _rawReason, ...rest } = e;
           return { ...rest,
-            ...(e.followOn ? { followOn: clip(e.followOn, 120) } : {}),
-            ...(e.alternate ? { alternate: clip(e.alternate, 120) } : {}),
-            ...(clip(e.reason, 180) ? { reason: clip(e.reason, 180) } : {}),
+            ...(e.followOn ? { followOn: clip(e.followOn, DIRECTION_TEXT_LIMITS.next) } : {}),
+            ...(e.alternate ? { alternate: clip(e.alternate, DIRECTION_TEXT_LIMITS.alternate) } : {}),
+            ...(clip(e.reason, DIRECTION_TEXT_LIMITS.reason) ? { reason: clip(e.reason, DIRECTION_TEXT_LIMITS.reason) } : {}),
           };
         }),
     };
@@ -71,8 +72,9 @@ export class MusicDirectionStore {
       : bounded(v.remainingStarts, 1, 24) };
   }
   private validMovement(v: any): MusicMovement | null {
-    if (!v || typeof v !== 'object' || !clip(v.movement, 100) || !clip(v.destination, 120)
-      || !clip(v.next, 120) || !Number.isFinite(Date.parse(v.expiresAt))) return null;
+    if (!v || typeof v !== 'object' || !clip(v.movement, DIRECTION_TEXT_LIMITS.movement)
+      || !clip(v.destination, DIRECTION_TEXT_LIMITS.destination)
+      || !clip(v.next, DIRECTION_TEXT_LIMITS.next) || !Number.isFinite(Date.parse(v.expiresAt))) return null;
     const p = v.progress;
     const progress = p && Number.isSafeInteger(p.starts) && p.starts >= 1 && p.starts <= 1000
       && Number.isFinite(p.elapsedMinutes) && p.elapsedMinutes >= 0 && p.elapsedMinutes < 10_000
@@ -81,10 +83,12 @@ export class MusicDirectionStore {
       ? { starts: p.starts, elapsedMinutes: p.elapsedMinutes, lastAt: p.lastAt,
           lastTrackId: clip(p.lastTrackId, 100) || null,
           distinctArtists: Number.isSafeInteger(p.distinctArtists) ? bounded(p.distinctArtists, 0, 1000) : 0,
-          phase: p.phase, alternate: clip(p.alternate, 120) || null } : undefined;
+          phase: p.phase, alternate: clip(p.alternate, DIRECTION_TEXT_LIMITS.alternate) || null } : undefined;
     const { plannedBy: _rawPlannedBy, lastDecision: _rawLastDecision, ...rest } = v;
     return { ...rest, energy: ['build','release','hold','contrast'].includes(v.energy) ? v.energy : null,
-      movement: clip(v.movement, 100), destination: clip(v.destination, 120), next: clip(v.next, 120),
+       movement: clip(v.movement, DIRECTION_TEXT_LIMITS.movement),
+       destination: clip(v.destination, DIRECTION_TEXT_LIMITS.destination),
+       next: clip(v.next, DIRECTION_TEXT_LIMITS.next),
       ...(progress ? { progress } : {}),
       ...(v.plannedBy === 'director-v3' ? { plannedBy: 'director-v3' as const } : {}),
       ...(v.lastDecision && ['seed','continue','resolve','reroute'].includes(v.lastDecision.decision)
@@ -196,8 +200,9 @@ export class MusicDirectionStore {
     if (musicalDirectorV2Enabled() && maxHorizonMinutes !== undefined && maxHorizonMinutes !== null
       && maxHorizonMinutes < 15) return false;
     const parsed = {
-      movement: clip(proposal.movement, 100), destination: clip(proposal.destination, 120),
-      next: clip(proposal.next, 120), horizonMinutes: bounded(Math.floor(proposal.horizonMinutes), 15,
+      movement: clip(proposal.movement, DIRECTION_TEXT_LIMITS.movement),
+      destination: clip(proposal.destination, DIRECTION_TEXT_LIMITS.destination),
+      next: clip(proposal.next, DIRECTION_TEXT_LIMITS.next), horizonMinutes: bounded(Math.floor(proposal.horizonMinutes), 15,
         musicalDirectorV2Enabled() && maxHorizonMinutes != null
           ? Math.min(40, Math.max(15, Math.floor(maxHorizonMinutes))) : 40),
       energy: ['build','release','hold','contrast'].includes(proposal.energy ?? '') ? proposal.energy : null,
@@ -216,7 +221,8 @@ export class MusicDirectionStore {
     const snapshot = this.snapshot(showId);
     if (!snapshot?.movement || snapshot.steering) return false;
     if (!['continue','resolve','reroute'].includes(proposal.decision)) return false;
-    const next = clip(proposal.next, 120), alternate = clip(proposal.alternate, 120);
+    const next = clip(proposal.next, DIRECTION_TEXT_LIMITS.next);
+    const alternate = clip(proposal.alternate, DIRECTION_TEXT_LIMITS.alternate);
     if (!next || !alternate) return false;
     this.state = { ...this.state, pending: { trackId, token, revision, showId,
       development: { decision: proposal.decision, next, alternate } } };

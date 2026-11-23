@@ -5,6 +5,15 @@ import type { DirectorV3Decision } from './director-v3-core.js';
 
 export type DirectionScope = 'current-show' | 'fixed-duration' | 'station';
 export type AdminMotion = 'pivot' | 'hold' | 'lift' | 'release';
+// Shared caps for model-facing direction text and its durable/API projection.
+// These are intentionally long enough for complete editorial instructions.
+export const DIRECTION_TEXT_LIMITS = {
+  movement: 300,
+  destination: 400,
+  next: 400,
+  alternate: 400,
+  reason: 400,
+} as const;
 export interface MovementProposal {
   movement: string;
   destination: string;

@@ -8,6 +8,7 @@ import {
   validDirectorSeed, validDirectorReview, movementClock,
 } from '../src/broadcast/dj-agent/director-v3-core.js';
 import { MusicDirectionStore } from '../src/broadcast/dj-agent/music-direction.js';
+import { DIRECTION_TEXT_LIMITS } from '../src/broadcast/dj-agent/music-direction-core.js';
 import { approvedCulturalFeed } from '../src/broadcast/dj-agent/director-v3-research.js';
 
 function movementFixture(now = Date.now()) {
@@ -85,28 +86,28 @@ test('Director consumes the SDK model value, not the structured-output transport
 test('Director transport schemas accept verbose prose that bounded validators clip', () => {
   const verboseSeed = directorV3SeedSchema.parse({
     action: 'seed',
-    movement: 'M'.repeat(140),
-    destination: 'D'.repeat(160),
-    next: 'N'.repeat(180),
+    movement: 'M'.repeat(350),
+    destination: 'D'.repeat(450),
+    next: 'N'.repeat(450),
     horizonMinutes: 30,
     energy: 'release',
-    reason: 'R'.repeat(220),
+    reason: 'R'.repeat(450),
   });
   const seed = validDirectorSeed(verboseSeed, 35);
-  assert.equal(seed?.movement.length, 100);
-  assert.equal(seed?.destination.length, 120);
-  assert.equal(seed?.next.length, 120);
+  assert.equal(seed?.movement.length, DIRECTION_TEXT_LIMITS.movement);
+  assert.equal(seed?.destination.length, DIRECTION_TEXT_LIMITS.destination);
+  assert.equal(seed?.next.length, DIRECTION_TEXT_LIMITS.next);
   assert.equal(seed?.horizonMinutes, 30);
 
   const verboseReview = directorV3ReviewSchema.parse({
     decision: 'continue',
-    next: 'N'.repeat(180),
-    alternate: 'A'.repeat(180),
-    reason: 'R'.repeat(220),
+    next: 'N'.repeat(450),
+    alternate: 'A'.repeat(450),
+    reason: 'R'.repeat(450),
   });
   const review = validDirectorReview(verboseReview);
-  assert.equal(review?.next.length, 120);
-  assert.equal(review?.alternate.length, 120);
+  assert.equal(review?.next.length, DIRECTION_TEXT_LIMITS.next);
+  assert.equal(review?.alternate.length, DIRECTION_TEXT_LIMITS.alternate);
 });
 
 test('Director transport schemas reject whitespace-only reasons', () => {
@@ -135,9 +136,15 @@ test('store permits only latest verified start to seed/review, and preserves hum
   try {
     start('ev1', 'song1');
     const revision = store.revision();
-    const output = { action: 'seed', movement: 'Acoustic turns', destination: 'A warmer pulse',
-      next: 'Ease the rhythm', energy: 'hold', horizonMinutes: 30,
-      reason: 'The current show and the verified starts support a steady opening' };
+    const output = {
+      action: 'seed',
+      movement: 'M'.repeat(260),
+      destination: 'D'.repeat(360),
+      next: 'N'.repeat(370),
+      energy: 'hold',
+      horizonMinutes: 30,
+      reason: 'R'.repeat(390),
+    };
     const args = { eventId: 'ev1', trackId: 'song1', showId: 'A', at: now,
       expectedRevision: revision, expectedMovementId: null, remainingMinutes: 34,
       action: 'seed' as const, output };
@@ -148,6 +155,14 @@ test('store permits only latest verified start to seed/review, and preserves hum
     const m = store.snapshot('A')?.movement;
     assert.equal(m?.plannedBy, 'director-v3');
     assert.equal(m?.lastDecision?.decision, 'seed');
+    assert.equal(m?.movement, output.movement);
+    assert.equal(m?.destination, output.destination);
+    assert.equal(m?.next, output.next);
+    assert.equal(m?.lastDecision?.reason, output.reason);
+    const reloaded = new MusicDirectionStore(join(dir, 'music-direction.json'), true).snapshot('A')?.movement;
+    assert.equal(reloaded?.movement, output.movement);
+    assert.equal(reloaded?.destination, output.destination);
+    assert.equal(reloaded?.next, output.next);
     assert.equal(store.commitDirectorV3(args), false);
     start('ev2', 'song2');
     assert.equal(store.commitDirectorV3({ ...args, expectedMovementId: m?.id ?? null,

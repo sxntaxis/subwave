@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import * as library from '../music/library.js';
+import { explicitLyricTheme } from '../music/lyrics-theme-core.js';
 import { getFullContext } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as djAgent from '../broadcast/dj-agent.js';
@@ -361,6 +362,11 @@ async function resolveRequest(entry) {
   try {
     const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, humanRequestId: entry.id });
     if (agentRes) {
+      if (agentRes.refused === 'no-lyric-evidence') {
+        entry.path = 'lyric-theme';
+        entry.pickSource = 'lyrics-unverified';
+        return failed('Could not verify a song about that subject from the lyrics available in the library.');
+      }
       // Thread the agent's own echo-guard verdict into the durable log; the
       // other paths set it inline.
       if (agentRes.guard) flagGuard(entry, agentRes.guard);
@@ -395,6 +401,15 @@ async function resolveRequest(entry) {
     }
   } catch (err) {
     queue.log('error', `DJ agent request failed: ${err.message} — falling back`);
+  }
+
+  // Fail closed for an explicit lyrical topic if the request Agent is off or
+  // failed. The legacy genre/mood matcher has no lyric evidence and must not
+  // fabricate a match. Ordinary requests keep their existing cascade.
+  if (explicitLyricTheme(text)) {
+    entry.path = 'lyric-theme';
+    entry.pickSource = 'lyrics-unverified';
+    return failed('Could not verify a lyrical-theme match right now. Please try a more specific topic.');
   }
 
   // 1. LLM matches intent; the current track lets vibe queries be read against

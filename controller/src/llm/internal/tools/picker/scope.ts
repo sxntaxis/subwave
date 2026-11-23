@@ -36,6 +36,7 @@ import { trajectoryEnabled, cachedPredecessor } from '../../../../music/trajecto
 import { trajectoryRankCandidates } from '../../../../music/trajectory-rank.js';
 import { searchEligibleCohort } from '../../../../music/music-evidence-cohort.js';
 import { logEvent } from '../../../../observability/events.js';
+import type { LyricThemeCandidate } from '../../../../music/lyrics-theme-search.js';
 import type { VerifiedAirplayContext } from '../../../../broadcast/dj-agent/verified-airplay-context.js';
 
 type SeedFixture = { lookup: (id: string, kind: 'audio' | 'text') => any[]; audio: boolean; text: boolean };
@@ -54,6 +55,9 @@ export function withPickerAcousticReaderForTest<T>(
 }
 
 export interface PickerScope {
+  // Explicit listener lyrical-topic request. Supplied only on the request path;
+  // restrict the visible discovery tools to lyrics evidence, not genre proxies.
+  lyricTheme?: { topic: string; candidates: LyricThemeCandidate[] } | null;
   // Set only by the autonomous track picker; requests remain isolated.
   essentiaDiscovery?: boolean;
   // Bounded soft musical trajectory on already eligible discovery candidates.
@@ -133,6 +137,7 @@ export interface PickerScope {
 // Every field defaults to "no constraint". Spread over a partial so there is
 // exactly one place a new field's default lives.
 const NO_SCOPE: PickerScope = {
+  lyricTheme: null,
   recentIds: new Set(),
   recentKeys: new Set(),
   hardRecentIds: new Set(),
@@ -163,7 +168,7 @@ export interface PickerContext {
   // id → slim song across all tool calls; the picker resolves the agent's final
   // id choice against this.
   seen: Map<string, any>;
-  collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
+  collect(list: any, cap?: number, opts?: { maxPerArtist?: number; preserveRank?: boolean }): any[];
   collectAsync(list: any, cap?: number, opts?: { maxPerArtist?: number; directionRanking?: boolean; trajectoryExpansion?: boolean }): Promise<any[]>;
   eligibleEvidenceIds(deadlineMs: number): Promise<{ status: 'complete'; ids: string[] } | { status: 'incomplete' }>;
   reserveMusicEvidence(maxBytes: number): { bytes: number; release(usedBytes: number): void } | null;
@@ -270,7 +275,7 @@ export function buildPickerContext(
   // tools (topSongsByArtist, recentByArtist) opt out. A strict PLAYLIST show opts
   // out wholesale — playlistLock has already intersected the pool with the
   // operator's pinned set, and a single-artist playlist is the point of pinning.
-  const collect = (list: any, cap = uncappedDiscovery ? 12 : 8, opts: { maxPerArtist?: number } = {}) => {
+  const collect = (list: any, cap = uncappedDiscovery ? 12 : 8, opts: { maxPerArtist?: number; preserveRank?: boolean } = {}) => {
     // Strict show: filter BEFORE recency + cap, so the 8 the agent sees are
     // genre-/era-/mood-/energy-pure. Each lock is HARD (starve:true) — a tool
     // with no match contributes nothing and emptyResult steers the model
@@ -283,7 +288,9 @@ export function buildPickerContext(
     // top-60 must not reach the model in similarity order, or the cap of 8 pins
     // the same neighbours every pick. Randomness stays dominant; with no play
     // history this is a plain shuffle.
-    const pool = restrict(freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()));
+    const pool = restrict(opts.preserveRank
+      ? (list || []) as any[]
+      : freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()));
     // Minimum track length (#1573): hard, and BEFORE the playlist lock, so a
     // pinned playlist's own 40-second interlude drops too — the floor is about
     // what the station will AIR, not which source a track came from.

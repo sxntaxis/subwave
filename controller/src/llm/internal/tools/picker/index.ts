@@ -89,6 +89,9 @@ export function buildPickerTools(scope: Partial<PickerScope> = {}): { tools: Too
   const ctx = buildPickerContext(pickerScope(scope));
   const tools: ToolSet = {};
   for (const mod of PICKER_TOOLS) {
+    // Lyrical subject is a hard request-specific evidence boundary. Don't
+    // offer unrelated genre/mood tools as replacement candidates.
+    if (ctx.scope.lyricTheme && mod.name !== 'searchByLyrics') continue;
     if (mod.available && !mod.available(ctx)) continue;
     tools[mod.name] = mod.build(ctx);
   }

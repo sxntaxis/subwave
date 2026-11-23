@@ -19,6 +19,8 @@ import * as session from './session.js';
 import * as picker from '../music/picker.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import * as library from '../music/library.js';
+import { explicitLyricTheme } from '../music/lyrics-theme-core.js';
+import { searchLyricsTheme } from '../music/lyrics-theme-search.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
@@ -1114,6 +1116,17 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId 
     const recentIds = queue.recentlyPlayedIds(2);
     for (const id of queue.queuedIds()) recentIds.add(id);
 
+    // Explicit lyrical-topic requests take a constrained evidence path, not
+    // best-effort discovery. No model/genre fallback can assert an unverified
+    // lyric theme. This happens only on requests, never an autonomous pick.
+    const topic = explicitLyricTheme(text);
+    const lyricHits = topic ? (await searchLyricsTheme(topic, 32))
+      .filter(hit => !recentIds.has(hit.id)) : null;
+    if (topic && (!lyricHits || lyricHits.length === 0)) {
+      return { ack: 'I could not verify a song about that subject in the available lyrics.',
+        track: null, introScript: null, refused: 'no-lyric-evidence' };
+    }
+
     // Pin THIS run to THIS request with an explicit tail message rather than
     // trusting the session's last event turn: request events go into the SHARED
     // session, so with two in flight another listener's event can be the more
@@ -1138,7 +1151,9 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId 
     // show's strict filters.
     const run = await requestAgent.run({
       messages,
-      scope: pickerScope({ recentIds }),
+      scope: pickerScope({ recentIds,
+        lyricTheme: topic && lyricHits ? { topic, candidates: lyricHits } : null,
+      }),
     });
     const { toolCalls, extras } = run;
     // Reassigned when the unknown-id salvage below (repickRequestFromSeen)
@@ -1159,6 +1174,10 @@ async function runRequestViaAgent(queue: any, { requester, text, humanRequestId 
     // cascade's chat branch. Not just display — this text becomes a `dj`-role
     // session turn later `windowMessages()` calls condition on, so an unguarded
     // echo poisons future generations even though it never reaches tts.speak.
+    if (topic && object?.kind === 'chat' && !object?.id) {
+      return { ack: 'I could not verify a lyrical match for that subject.',
+        track: null, introScript: null, refused: 'no-lyric-evidence' };
+    }
     if (object?.kind === 'chat' && !object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
       const screened = screenAck(object.ack, text, 'Heard you loud and clear.');
       if (screened.guard) queue.log('request-guard', `agent chat ack echoed request text — replaced`);

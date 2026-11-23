@@ -31,6 +31,7 @@ export * from './library-db/legacy.js';
 export * from './library-db/lifecycle.js';
 export * from './library-db/meta.js';
 export * from './library-db/tracks.js';
+export * from './library-db/lyrics.js';
 export * from './library-db/vectors.js';
 export * from './library-db/audio-moods.js';
 export * from './library-db/queries.js';

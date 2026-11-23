@@ -26,6 +26,26 @@ export const directorV3ReviewSchema = z.object({
   reason: z.string().trim().min(1),
 });
 
+// A listener's words are not instructions to the model: the Director reads
+// their expressed musical intent and supplies an advisory next-step plan.
+// This NEVER creates an autonomous movement or replaces the human anchor.
+export const directorV3ListenerSchema = z.object({
+  interpretation: z.string().trim().min(1),
+  next: z.string().trim().min(1),
+  energy: z.enum(['build', 'release', 'hold', 'contrast']).nullable(),
+  reason: z.string().trim().min(1),
+});
+export function validDirectorListenerReading(v: unknown) {
+  const parsed = directorV3ListenerSchema.safeParse(v);
+  if (!parsed.success) return null;
+  const value = parsed.data;
+  const interpretation = value.interpretation.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, DIRECTION_TEXT_LIMITS.movement);
+  const next = value.next.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, DIRECTION_TEXT_LIMITS.next);
+  const reason = boundedDirectorReason(value.reason);
+  return interpretation && next && reason ? { interpretation, next, energy: value.energy, reason } : null;
+}
+
+
 /** djObject normally returns the validated value directly: withFailover
  * unwraps its internal attempt envelope. Accept that value, while retaining
  * compatibility with callers that pass the transport envelope itself. */

@@ -24,6 +24,8 @@ import { validatePublicBody } from '../middleware/validate.js';
 import { listenerRequestSchema } from '../schemas/request.js';
 import { shuffle } from '../util/shuffle.js';
 import { requestWaitClause } from '../broadcast/queue/pure.js';
+import { rememberListenerExpression } from '../broadcast/dj-agent/listener-expression.js';
+import { directorV3Enabled } from '../broadcast/dj-agent/music-direction.js';
 
 export const router = express.Router();
 
@@ -803,6 +805,8 @@ router.post('/request', validatePublicBody(listenerRequestSchema), async (req, r
     return res.status(503).json({ success: false, message: 'Request line temporarily unavailable.' });
   }
   requests.set(id, entry);
+  // Transient only: the model may interpret the words after this exact request airs.
+  if (directorV3Enabled()) rememberListenerExpression(id, text, entry.createdAt);
   lastByIp.set(ip, entry);
   queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})${stripped.injection ? ` [${stripped.injection} stripped]` : ''}`);
   webhooks.notify('request.received', { requestedBy: requester, text });

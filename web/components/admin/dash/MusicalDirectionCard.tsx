@@ -18,7 +18,11 @@ type Movement = {
     distinctArtists: number; alternate: string | null };
 };
 type Steering = { kind: string; intent: string; scope: string;
-  expiresAt: string | null; remainingStarts: number | null; source: string };
+  expiresAt: string | null; remainingStarts: number | null; source: string;
+  listenerExpression?: string;
+  listenerReading?: { interpretation: string; next: string; energy: string | null;
+    reason: string; at: string };
+};
 type DirectionEnvelope = {
   enabled: boolean; directorV2?: boolean; directorV3?: boolean; show: string | null;
   showPhase: { phase: string; minutesRemaining: number | null } | null;
@@ -26,9 +30,12 @@ type DirectionEnvelope = {
   acousticObservation?: { status: 'measured' | 'insufficient' | 'unavailable' | 'not_measured' | 'stale';
     verifiedStarts: number; observedAt: string | null; note: string;
     measured: { status: 'measured' | 'insufficient'; observed: number; missing: number;
-      arousal: { change: number; alignment: string } | null } | null } | null;
+      arousal: { change: number; alignment: string } | null;
+      valenceChange: number | null; danceabilityChange: number | null } | null } | null;
   measuredTrajectory?: { status: 'measured' | 'insufficient'; observed: number; missing: number;
-    arousal: { change: number; alignment: string } | null; note: string; observedAt?: string } | null;
+    arousal: { change: number; alignment: string } | null;
+    valenceChange: number | null; danceabilityChange: number | null;
+    note: string; observedAt?: string } | null;
   direction: { revision: number; steering: Steering | null; movement: Movement | null;
     replanDue: boolean; memory?: { showStarts: number; distinctArtists: number; taggedEnergyTrend: string | null; artistConcentration: string | null;
       recentMovements: { movement: string; outcome: string; followOn?: string; reason?: string }[] } } | null;
@@ -102,104 +109,138 @@ export function MusicalDirectionCard() {
     finally { setBusy(false); }
   };
 
-  return <Card title="Musical direction" sub={data?.directorV3 ? 'independent editorial director · live state'
-    : data?.directorV2 ? 'adaptive director · live state' : 'current arc · owner steering'}>
+  const acoustic = data?.directorV3 ? data.acousticObservation?.measured : data?.measuredTrajectory;
+  const acousticState = data?.directorV3
+    ? data.acousticObservation?.status ?? 'not_measured'
+    : acoustic?.status ?? 'not_measured';
+  const checked = data?.acousticObservation?.observedAt
+    || data?.measuredTrajectory?.observedAt;
+  const checkedTime = checked && Number.isFinite(Date.parse(checked))
+    ? new Date(checked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const signed = (value: number | null | undefined) => value == null || !Number.isFinite(value)
+    ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(3)}`;
+  const latestArc = data?.direction?.memory?.recentMovements?.[0];
+  const steerReading = steering?.source === 'listener' ? steering.listenerReading : null;
+  const expires = now !== null && steering?.expiresAt && Number.isFinite(Date.parse(steering.expiresAt))
+    ? Math.max(0, Math.ceil((Date.parse(steering.expiresAt) - now) / 60_000)) : null;
+
+  return <Card title="Musical direction" sub={data?.directorV3 ? 'director / live' : 'live'}>
     {query.isError ? <p className="text-[12px] text-muted">Unable to read direction: {errorMessage(query.error)}</p>
-      : !data ? <p className="text-[12px] text-muted">Reading station direction…</p>
-      : !enabled ? <p className="text-[12px] text-muted">Direction is disabled in the controller.</p>
+      : !data ? <p className="text-[12px] text-muted">Loading direction…</p>
+      : !enabled ? <p className="text-[12px] text-muted">Direction disabled</p>
       : <div className="grid gap-3 text-[12px]">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Pill tone={movement ? 'accent' : 'default'}>{movement ? 'movement active' : 'awaiting movement'}</Pill>
+          <Pill tone={steering ? 'accent' : movement ? 'accent' : 'default'}>
+            {steering ? `${steering.source} steer` : movement ? 'movement active' : 'no active movement'}
+          </Pill>
           <Pill>{data.show || 'default programming'}</Pill>
           {data.showPhase?.phase && <Pill>{data.showPhase.phase}</Pill>}
-          {data.showPhase?.minutesRemaining != null && <Pill>{data.showPhase.minutesRemaining}m until show change</Pill>}
+          {data.showPhase?.minutesRemaining != null && <Pill>{data.showPhase.minutesRemaining}m to handoff</Pill>}
         </div>
-        {steering && <div className="border-l-2 border-vermilion pl-2.5">
-          <div className="mb-1 text-[10px] font-bold tracking-wide text-vermilion uppercase">
-            {steering.source} · {steering.kind} · {steering.scope}
+
+        {steering && <section className="grid gap-2 border-l-2 border-vermilion pl-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-vermilion">
+              {steering.source === 'listener' ? 'Listener cue' : `Operator · ${steering.kind}`}
+            </span>
+            <span className="text-[10px] tabular-nums text-muted">
+              {steering.remainingStarts != null ? `${steering.remainingStarts} starts left` : steering.scope}
+              {expires != null ? ` · ${expires}m left` : ''}
+            </span>
           </div>
-          <p className="wrap-break-word">{steering.intent}</p>
-          <div className="text-[10px] text-muted">
-            {steering.remainingStarts != null ? `${steering.remainingStarts} subsequent starts left` : 'until cleared'}
+          <p className="wrap-break-word font-medium text-ink">{steering.listenerExpression || steering.intent}</p>
+          {steerReading ? <div className="grid gap-1.5 border-t border-separator-strong pt-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Director reading</span>
+              {steerReading.energy && <Pill>{steerReading.energy}</Pill>}
+            </div>
+            <p className="wrap-break-word text-ink">{steerReading.interpretation}</p>
+            <p><span className="text-muted">Next · </span>{steerReading.next}</p>
+            <p className="text-[11px] text-muted">{steerReading.reason}</p>
+          </div> : steering.source === 'listener' && data.directorV3
+            ? <span className="text-[10px] text-muted">Director reading · pending</span> : null}
+        </section>}
+
+        {movement && !steering && <section className="grid gap-2 border border-separator-strong p-2.5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <strong className="wrap-break-word text-[13px] leading-snug text-ink">{movement.movement}</strong>
+            {movement.lastDecision && <Pill tone="accent">{movement.lastDecision.decision}</Pill>}
           </div>
-        </div>}
-        {movement ? <div className="grid gap-1 border border-separator-strong p-2.5">
-          <strong className="text-[13px]">{movement.movement}</strong>
-          <div className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wide">
-            <Pill>Energy intention · {movement.energy || 'open'}</Pill>
-            {movement.lastDecision && <Pill>Last decision · {movement.lastDecision.decision === 'seed' ? 'seeded'
-              : movement.lastDecision.decision}</Pill>}
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+            <Pill>Energy · {movement.energy || 'open'}</Pill>
+            {movement.progress?.phase && <Pill>{movement.progress.phase}</Pill>}
           </div>
-          {movementClock && <div className="grid gap-1 pt-2">
+          {movementClock && <div className="grid gap-1">
             <div className="flex items-center justify-between text-[10px] text-muted">
-              <span>Movement elapsed time</span>
-              <span className="tabular-nums">{Math.floor(movementClock.elapsed)} / {movementClock.total} min</span>
+              <span>Movement time</span>
+              <span className="tabular-nums">{Math.floor(movementClock.elapsed)} / {movementClock.total}m</span>
             </div>
             <div className="h-1.5 w-full overflow-hidden bg-separator-strong" role="progressbar"
-              aria-label="Movement elapsed time" aria-valuemin={0} aria-valuemax={100}
+              aria-label="Elapsed movement time" aria-valuemin={0} aria-valuemax={100}
               aria-valuenow={Math.round(movementClock.percent)}>
               <div className="h-full bg-vermilion transition-[width] duration-500"
                 style={{ width: `${movementClock.percent}%` }} />
             </div>
-            <div className="flex justify-between text-[10px] text-muted">
-              <span>Started {Math.floor(movementClock.elapsed)}m ago</span>
-              <span>{Math.ceil(movementClock.remaining)}m remaining</span>
+          </div>}
+          <div className="grid grid-cols-3 gap-1.5 border-y border-separator-strong py-2">
+            <div><div className="text-[10px] text-muted">Remaining</div><strong className="tabular-nums">{movementClock ? `${Math.ceil(movementClock.remaining)}m` : '—'}</strong></div>
+            <div><div className="text-[10px] text-muted">Starts</div><strong className="tabular-nums">{movement.progress?.starts ?? '—'}</strong></div>
+            <div><div className="text-[10px] text-muted">Artists</div><strong className="tabular-nums">{movement.progress?.distinctArtists ?? '—'}</strong></div>
+          </div>
+          <div className="grid gap-1">
+            <div><span className="text-muted">Toward · </span><span className="text-ink">{movement.destination}</span></div>
+            <div><span className="text-muted">Next · </span><span className="text-ink">{movement.next}</span></div>
+            {movement.progress?.alternate && <div><span className="text-muted">Alternate · </span>{movement.progress.alternate}</div>}
+            {movement.lastDecision?.reason && <div className="pt-1 text-[11px] text-muted">
+              <span className="font-semibold">Decision evidence · </span>{movement.lastDecision.reason}
+            </div>}
+          </div>
+        </section>}
+
+        {!movement && !steering && latestArc && <section className="grid gap-1 border border-separator-strong p-2.5">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Last movement · {latestArc.outcome}</div>
+          <div className="font-medium">{latestArc.movement}</div>
+          {latestArc.followOn && <div><span className="text-muted">Handoff · </span>{latestArc.followOn}</div>}
+        </section>}
+
+        {movement && !steering && data.trajectoryV1 && <section className="grid gap-2 border border-separator-strong p-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider">Acoustic trajectory</span>
+            <Pill tone={acousticState === 'measured' ? 'accent' : 'default'}>{acousticState.replace(/_/g, ' ')}</Pill>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted">
+            <span>{data.acousticObservation?.verifiedStarts ?? movement.progress?.starts ?? '—'} verified starts</span>
+            {acoustic && <span>{acoustic.observed} measured · {acoustic.missing} missing</span>}
+            {checkedTime && <span>Checked {checkedTime}</span>}
+          </div>
+          {acoustic?.status === 'measured' && <div className="grid grid-cols-3 gap-1.5">
+            <div className="border-r border-separator-strong pr-1">
+              <div className="text-[10px] text-muted">Arousal Δ</div>
+              <div className="font-semibold tabular-nums">{signed(acoustic.arousal?.change)}</div>
+              <div className="text-[10px] text-muted">{acoustic.arousal?.alignment || '—'}</div>
             </div>
-            <p className="text-[10px] text-muted">Elapsed time only · not musical destination completion</p>
+            <div className="border-r border-separator-strong pr-1">
+              <div className="text-[10px] text-muted">Valence Δ</div>
+              <div className="font-semibold tabular-nums">{signed(acoustic.valenceChange)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted">Danceability Δ</div>
+              <div className="font-semibold tabular-nums">{signed(acoustic.danceabilityChange)}</div>
+            </div>
           </div>}
-          {movement.lastDecision?.reason && <p className="text-[11px] text-muted">
-            Director decision: {movement.lastDecision.reason}
-          </p>}
-          <div className="text-muted">Toward: <span className="text-ink">{movement.destination}</span></div>
-          <div className="text-muted">Next: <span className="text-ink">{movement.next}</span></div>
-          {movement.progress && <div className="text-[10px] text-muted">
-            {movement.progress.phase} · {movement.progress.starts} verified starts · {movement.progress.elapsedMinutes}m elapsed
-            · {movement.progress.distinctArtists} artists
-          </div>}
-          {movement.progress?.alternate && <div className="text-[10px] text-muted">
-            Alternative path: {movement.progress.alternate}
-          </div>}
-        </div> : <p className="text-muted italic">
-          {steering ? 'Human steering is active; no autonomous movement supersedes it.'
-            : data.directorV3 ? 'The independent Director will seed a movement after verified playback; nothing is forced.'
-              : 'Next successful Agent pick may propose an arc. Nothing is forced.'}
-        </p>}
-        {data.directorV3 && data.trajectoryV1 && <div className="border border-separator-strong p-2.5 text-[10px] text-muted">
-          <strong className="text-ink">Verified acoustic trajectory</strong>
-          {data.acousticObservation?.status === 'measured' && data.acousticObservation.measured?.arousal
-            ? <p>{data.acousticObservation.measured.observed} complete-window observations · arousal
-              {' '}{data.acousticObservation.measured.arousal.alignment}
-              {' ('}{data.acousticObservation.measured.arousal.change > 0 ? '+' : ''}
-              {data.acousticObservation.measured.arousal.change.toFixed(3)}{')'}</p>
-            : <p>{data.acousticObservation?.status === 'stale' ? 'Previous measurement is stale; new airplay awaits analysis.'
-              : data.acousticObservation?.status === 'unavailable' ? 'Acoustic analysis unavailable.'
-                : data.acousticObservation?.status === 'insufficient' ? 'Fewer than three complete acoustic observations.'
-                  : 'Acoustic measurement has not yet been attempted for this movement.'}</p>}
-          {data.acousticObservation && <p>{data.acousticObservation.verifiedStarts} verified starts in measurement scope
-            {data.acousticObservation.observedAt ? ` · last checked ${new Date(data.acousticObservation.observedAt).toLocaleTimeString()}` : ''}</p>}
-          <p>{data.acousticObservation?.note}</p>
-          <p>Model estimates only · not a quality rating or a completed movement.</p>
+        </section>}
+
+        {data.direction?.memory && <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+          <span>{data.direction.memory.showStarts} recent show starts</span>
+          <span>{data.direction.memory.distinctArtists} artists</span>
+          {data.direction.memory.taggedEnergyTrend && <span>Energy tags · {data.direction.memory.taggedEnergyTrend}</span>}
+          {data.direction.memory.artistConcentration && <span>Artist mix · {data.direction.memory.artistConcentration}</span>}
         </div>}
-        {!data.directorV3 && data.trajectoryV1 && <div className="border border-separator-strong p-2.5 text-[10px] text-muted">
-          <strong className="text-ink">Verified acoustic trajectory</strong>
-          {data.measuredTrajectory?.status === 'measured' && data.measuredTrajectory.arousal
-            ? <p>{data.measuredTrajectory.observed} complete-window observations · arousal {data.measuredTrajectory.arousal.alignment}
-              {' ('}{data.measuredTrajectory.arousal.change > 0 ? '+' : ''}{data.measuredTrajectory.arousal.change.toFixed(3)}{')'}</p>
-            : <p>Insufficient complete acoustic history; no destination score is inferred.</p>}
-          <p>Model estimates only · not a quality rating or a completed movement.</p>
-        </div>}
-        {data.direction?.memory && <div className="text-[10px] text-muted">
-          {data.direction.memory.showStarts} verified recent starts in this show · {data.direction.memory.distinctArtists} distinct artists
-          {data.direction.memory.taggedEnergyTrend && <span> · catalogued energy: {data.direction.memory.taggedEnergyTrend}</span>}
-          {data.direction.memory.artistConcentration && <span> · artists: {data.direction.memory.artistConcentration}</span>}
-          {data.direction.memory.recentMovements[0] && <span> · last arc: {data.direction.memory.recentMovements[0].outcome}</span>}
-          {data.direction.memory.recentMovements[0]?.followOn && <div>Last arc handoff: {data.direction.memory.recentMovements[0].followOn}</div>}
-          {data.direction.memory.recentMovements[0]?.reason && <div>Last decision: {data.direction.memory.recentMovements[0].reason}</div>}
-        </div>}
+
         <div className="grid gap-2 border-t border-separator-strong pt-3">
-          <label className="text-[10px] font-bold tracking-wide uppercase" htmlFor="music-direction-intent">Operator guidance</label>
+          <label className="text-[10px] font-bold uppercase tracking-wide" htmlFor="music-direction-intent">Operator guidance</label>
           <textarea id="music-direction-intent" value={intent} maxLength={180} rows={2}
-            onChange={e => setIntent(e.target.value)} placeholder="e.g. Explore rhythmic textures, then gradually open into brighter material"
+            onChange={e => setIntent(e.target.value)} placeholder="Steer the next musical movement…"
             className="w-full resize-y border border-separator-strong bg-transparent p-2 text-ink" />
           <div className="grid grid-cols-2 gap-2">
             <label className="grid gap-1 text-[10px] text-muted">Action
@@ -230,7 +271,6 @@ export function MusicalDirectionCard() {
               <Btn sm disabled={busy} onClick={() => setClearArmed(false)}>Cancel</Btn>
             </> : <Btn sm disabled={busy || (!steering && !movement)} onClick={() => setClearArmed(true)}>Clear</Btn>}
           </div>
-          <p className="text-[10px] text-muted">Guidance changes future selections; it never cuts the on-air track or bypasses show restrictions.</p>
         </div>
       </div>}
   </Card>;

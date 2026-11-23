@@ -92,6 +92,7 @@ import { pickTargetValid } from './queue/pick-target.js';
 import { choosePendingMusic, newReservation, verifiedHumanStart, type ListenerReservation } from './queue/human-priority.js';
 import { musicDirection, musicalDirectionEnabled, musicalDirectorV2Enabled, directorV3Enabled } from './dj-agent/music-direction.js';
 import { observeDirectorV3 } from './dj-agent/director-v3.js';
+import { takeListenerExpression } from './dj-agent/listener-expression.js';
 import { trajectoryEnabled, inspectVerifiedTrajectory } from '../music/trajectory-runtime.js';
 import { verifiedMixerStartFacts } from './dj-agent/verified-airplay-facts.js';
 import {
@@ -2511,6 +2512,9 @@ class Queue {
         const exactMixerIdentity = !!np.subsonic_id && this.current.track?.id === np.subsonic_id;
         const verifiedFacts = trajectoryEnabled() && exactMixerIdentity
           ? verifiedMixerStartFacts(np.subsonic_id, this.current.track) : null;
+        const listenerExpression = directorV3Enabled() && exactMixerIdentity
+          && verifiedEditorialSource === 'listener'
+          ? takeListenerExpression(this.current.humanRequestId) : null;
         musicDirection.onTrackStarted({
           eventId: key,
           trackId: trajectoryEnabled() && !exactMixerIdentity ? null : this.current.track?.id ?? null,
@@ -2519,6 +2523,7 @@ class Queue {
           source: trajectoryEnabled() && !exactMixerIdentity ? 'auto' : verifiedEditorialSource,
           showId: onAirShow?.id ?? null,
           at: Date.parse(this.current.startedAt ?? '') || Date.now(),
+          ...(listenerExpression ? { listenerExpression } : {}),
           ...(musicalDirectorV2Enabled() ? {
             queueToken: queueToken ?? null,
             energy: trajectoryEnabled() ? verifiedFacts?.energy ?? null
@@ -2544,7 +2549,8 @@ class Queue {
           }
           void observeDirectorV3({ eventId: key, trackId: np.subsonic_id!, showId,
             at: Date.parse(this.current.startedAt ?? '') || Date.now(),
-            source: verifiedEditorialSource });
+            source: verifiedEditorialSource,
+            ...(listenerExpression ? { listenerExpression } : {}) });
         }
       } catch (err) {
         this.log('error', `musical direction update failed: ${(err as Error).message}`);

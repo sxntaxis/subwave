@@ -21,7 +21,9 @@ export const pickerCriteria = () => trajectoryPromptEnabled()
   ? instruction('pick-criteria', 'criteria-trajectory') : PICKER_CRITERIA;
 
 export type PoolEditorialDirection =
-  | { source: 'human'; kind: string; intent: string }
+  | { source: 'human'; kind: string; intent: string;
+    listenerExpression?: string; listenerReading?: { interpretation: string; next: string;
+      energy: string | null; reason: string; at: string } }
   | { source: 'autonomous'; movement: string; destination: string; next: string; energy: string | null };
 
 // Coaching for the DJ transition effects (the "transition" output field),
@@ -167,6 +169,8 @@ export async function pickNextTrack({ candidates, recentPlays, context, show = n
   // few hundred tokens on whitespace per pick, and models read dense JSON
   // fine (the agent path's tool results arrive compact already). undefined
   // fields drop out entirely — the projection upstream leans on that.
+  // Editorial listener words, when present, are untrusted request DATA;
+  // neither this object nor an AI interpretation supersedes show rules.
   const user = JSON.stringify({
     now: {
       time: context.time?.period,

@@ -15,7 +15,7 @@ import {
 export { advanceDirection } from './music-direction-core.js';
 export type { DirectionScope, AdminMotion, MovementProposal, MusicSteer, MusicMovement } from './music-direction-core.js';
 
-import { boundedDirectorReason, validDirectorSeed, validDirectorReview } from './director-v3-core.js';
+import { boundedDirectorReason, validDirectorSeed, validDirectorReview, validDirectorListenerReading } from './director-v3-core.js';
 
 export const directorV3Enabled = () => musicalDirectorV2Enabled() && process.env.SUBWAVE_MUSIC_TRAJECTORY_V1 === '1'
   && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
@@ -68,8 +68,14 @@ export class MusicDirectionStore {
       || typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt))) return null;
     if (v.remainingStarts !== null && (!Number.isSafeInteger(v.remainingStarts) || v.remainingStarts <= 0)) return null;
     if (v.expiresAt !== null && !Number.isFinite(Date.parse(v.expiresAt))) return null;
-    return { ...v, intent: clip(v.intent), remainingStarts: v.remainingStarts === null ? null
-      : bounded(v.remainingStarts, 1, 24) };
+    const reading = v.source === 'listener' && v.listenerReading
+      && Number.isFinite(Date.parse(v.listenerReading.at))
+      ? validDirectorListenerReading(v.listenerReading) : null;
+    // Only validated and capped model output may survive restart.
+    const { listenerReading: _rawReading, listenerExpression: _rawExpression, ...base } = v;
+    return { ...base, intent: clip(v.intent), remainingStarts: v.remainingStarts === null ? null
+      : bounded(v.remainingStarts, 1, 24),
+      ...(reading ? { listenerReading: { ...reading, at: v.listenerReading.at } } : {}) };
   }
   private validMovement(v: any): MusicMovement | null {
     if (!v || typeof v !== 'object' || !clip(v.movement, DIRECTION_TEXT_LIMITS.movement)
@@ -113,7 +119,11 @@ export class MusicDirectionStore {
     const tmp = join(dirname(this.file), `.direction-${process.pid}-${randomUUID()}.tmp`);
     try {
       const fd = openSync(tmp, 'wx', 0o600);
-      try { writeFileSync(fd, JSON.stringify({ ...next, pending: null })); fsyncSync(fd); }
+      // Listener expression is kept only in process memory, for an immediate
+      // picker and the independent Director. Never persist the listener's words.
+      const steer = next.steering;
+      const persistedSteering = steer ? (({ listenerExpression: _privateExpression, ...durable }) => durable)(steer) : null;
+      try { writeFileSync(fd, JSON.stringify({ ...next, steering: persistedSteering, pending: null })); fsyncSync(fd); }
       finally { closeSync(fd); }
       renameSync(tmp, this.file);
       this.state = next;
@@ -313,9 +323,38 @@ export class MusicDirectionStore {
     logEvent('direction.v3_commit', { kind: review.decision, showId: input.showId, eventId: input.eventId });
     return true;
   }
+  /** Attach a listener-aware editorial reading only to the exact verified
+   * human anchor. No auto movement is created; a newer start, operator steer,
+   * show change or expired human window rejects stale model output. */
+  commitListenerReading(input: { eventId: string; trackId: string; showId: string | null;
+    at: number; expectedRevision: number; steeringId: string; output: unknown },
+  onRejected?: (reason: string) => void): boolean {
+    const reject = (reason: string) => { onRejected?.(reason); return false; };
+    if (!this.enabled || !directorV3Enabled()) return reject('disabled');
+    const state = this.state;
+    const latest = state.memory?.recent[0];
+    if (!input.eventId || state.lastStart !== input.eventId || !latest
+      || latest.eventId !== input.eventId.slice(0, 220)
+      || latest.trackId !== input.trackId || latest.showId !== input.showId) return reject('stale-start');
+    if (state.revision !== input.expectedRevision) return reject('stale-revision');
+    const steer = this.snapshot(input.showId)?.steering;
+    if (!steer || steer.source !== 'listener' || steer.id !== input.steeringId
+      || steer.anchorTrackId !== input.trackId || steer.anchorAt !== date(input.at)
+      || steer.listenerReading || state.pending) return reject('listener-anchor-changed');
+    const now = Date.now();
+    if (!Number.isFinite(input.at) || input.at > now + 10_000 || now - input.at > 120_000)
+      return reject('stale-airtime');
+    const reading = validDirectorListenerReading(input.output);
+    if (!reading) return reject('invalid-listener-reading');
+    this.save({ ...state, revision: state.revision + 1,
+      steering: { ...steer, listenerReading: { ...reading, at: date(now) } } });
+    logEvent('direction.v3_listener_reading', { showId: input.showId, accepted: true });
+    return true;
+  }
   onTrackStarted(start: Parameters<typeof advanceDirection>[1]) {
     if (!this.enabled) return;
-    const next = advanceDirection(this.state, { ...start, directorV2: musicalDirectorV2Enabled() });
+    const next = advanceDirection(this.state, { ...start, directorV2: musicalDirectorV2Enabled(),
+      directorV3: directorV3Enabled() });
     if (next === this.state) return;
     const previous = this.state;
     this.save(next);

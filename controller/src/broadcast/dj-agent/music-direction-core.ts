@@ -34,6 +34,12 @@ export interface MusicSteer {
   expiresAt: string | null;
   remainingStarts: number | null;
   followedStarts: number;
+  /** Verified listener request words in memory only; never serialized to disk. */
+  listenerExpression?: string;
+  // AI interpretation of a verified listener request, subordinate to the actual
+  // human anchor and the show's hard limits. No raw request text is persisted.
+  listenerReading?: { interpretation: string; next: string;
+    energy: MovementProposal['energy']; reason: string; at: string };
 }
 export interface MusicMovement {
   id: string;
@@ -73,6 +79,8 @@ export function advanceDirection(old: DirectionRecord, start: {
   source: 'listener' | 'admin' | 'auto'; showId: string | null; at: number;
   queueToken?: string | null; energy?: string | null; moods?: string[] | null; genre?: string | null;
   directorV2?: boolean;
+  directorV3?: boolean;
+  listenerExpression?: string | null;
 }): DirectionRecord {
   if (!start.eventId || start.eventId === old.lastStart) return old;
   const s: DirectionRecord = { ...old, lastStart: start.eventId };
@@ -91,11 +99,13 @@ export function advanceDirection(old: DirectionRecord, start: {
       const humanIsAdmin = start.source === 'admin';
       steer = {
         id: randomUUID(), source: humanIsAdmin ? 'admin' : 'listener', kind: 'song-anchor',
-        intent: clip(`Continue naturally from ${start.title}${start.artist ? ' — ' + start.artist : ''}`, 180),
+        intent: clip(`${start.directorV3 ? `${humanIsAdmin ? 'Operator' : 'Listener'}-selected track:` : 'Continue naturally from'} ${start.title}${start.artist ? ' — ' + start.artist : ''}`, 180),
         showId: start.showId, scope: 'current-show', anchorTrackId: start.trackId,
         anchorAt: date(start.at), createdAt: date(start.at),
         expiresAt: date(start.at + (humanIsAdmin ? 45 : 20) * 60_000),
         remainingStarts: humanIsAdmin ? 6 : 4, followedStarts: 0,
+        ...(start.directorV2 && !humanIsAdmin && start.listenerExpression
+          ? { listenerExpression: clip(start.listenerExpression, 280) } : {}),
       };
       s.movement = null;
       s.pending = null;

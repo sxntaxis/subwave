@@ -55,9 +55,10 @@ export function withPickerAcousticReaderForTest<T>(
 }
 
 export interface PickerScope {
-  // Explicit listener lyrical-topic request. Supplied only on the request path;
-  // restrict the visible discovery tools to lyrics evidence, not genre proxies.
-  lyricTheme?: { topic: string; candidates: LyricThemeCandidate[] } | null;
+  // Listener requests with classified lyrical meaning. This is never set on
+  // autonomous picks. Required meaning must not degrade into genre proxies;
+  // supporting meaning may coexist with acoustic or mood selection.
+  lyricTheme?: { topic: string; mode: 'required' | 'supporting'; candidates: LyricThemeCandidate[] } | null;
   // Set only by the autonomous track picker; requests remain isolated.
   essentiaDiscovery?: boolean;
   // Bounded soft musical trajectory on already eligible discovery candidates.

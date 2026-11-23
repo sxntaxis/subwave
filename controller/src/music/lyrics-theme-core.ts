@@ -5,7 +5,7 @@
 
 export type LyricThemeTerm = { text: string; weight: number };
 export type LyricThemeEvidence = {
-  strength: 'repeated_context' | 'specific_mention' | 'incidental_mention';
+  strength: 'repeated_context' | 'specific_mention' | 'incidental_mention' | 'semantic_hypothesis';
   matchedTerms: string[];
   distinctLines: number;
   occurrences: number;
@@ -18,7 +18,8 @@ function fold(s: string): string {
   return s.normalize('NFKC').toLocaleLowerCase('und').replace(/[\u0300-\u036f]/g, '');
 }
 
-/** Conservative opt-in: do not reclassify mood, style or artist requests. */
+/** Deterministic fallback for obvious lyrical cues when classification fails.
+ * General lyrical intent is resolved by the existing LLM request librarian. */
 export function explicitLyricTheme(text: string): string | null {
   const s = text.trim().slice(0, 320);
   const patterns = [
@@ -47,7 +48,7 @@ const KNOWN: Array<{ match: RegExp; terms: string[] }> = [
     terms: ['cannabis','marijuana','marihuana','weed','ganja','kush','sensimilla','sinsemilla','spliff','blunt','mota','420'] },
 ];
 
-export function lyricThemeTerms(theme: string): LyricThemeTerm[] {
+export function lyricThemeTerms(theme: string, concepts: readonly string[] = []): LyricThemeTerm[] {
   const normalized = fold(theme);
   const terms = new Map<string, number>();
   const add = (term: string, weight: number) => {
@@ -56,6 +57,14 @@ export function lyricThemeTerms(theme: string): LyricThemeTerm[] {
   const tokens = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
   for (const token of tokens) add(token, token.length >= 5 ? 1 : 0.8);
   if (tokens.length > 1 && tokens.length <= 5) add(tokens.join(' '), 1.8);
+  // LLM-derived concepts only broaden recall. A suggestion can be wrong; its
+  // presence does not make a track eligible without real lyrics to interpret.
+  for (const concept of concepts.slice(0, 6)) {
+    if (typeof concept !== 'string') continue;
+    const words = fold(concept).match(/[\p{L}\p{N}]+/gu) ?? [];
+    for (const word of words) add(word, 0.75);
+    if (words.length > 1 && words.length <= 4) add(words.join(' '), 0.95);
+  }
   for (const group of KNOWN) {
     if (group.match.test(normalized)) {
       for (const term of group.terms) add(term, term === '420' || term === 'blunt' ? 0.6 : 1.4);
@@ -101,13 +110,41 @@ export function lyricThemeEvidence(lyrics: string, terms: readonly LyricThemeTer
     ? 'repeated_context' : specific ? 'specific_mention' : 'incidental_mention';
   const windows: string[] = [];
   for (const hit of [...hits].sort((a,b) => b.score - a.score || a.index - b.index)) {
-    // One line per window, at most three distinct lines. Never include full
-    // stored lyrics in tool results or logs.
-    const window = hit.line.trim().replace(/\s+/g, ' ').slice(0, 170);
+    // Keep the neighbouring lyric context for negation, speaker perspective,
+    // and metaphor; a single matching line often means the opposite of what
+    // the keyword suggests. At most three short excerpts, never full lyrics.
+    const current = hit.line.trim().replace(/\s+/g, ' ');
+    const firstTerm = terms.map(t => fold(current).indexOf(t.text)).filter(i => i >= 0).sort((a, b) => a - b)[0] ?? 0;
+    const focus = current.length > 190
+      ? current.slice(Math.max(0, firstTerm - 65), firstTerm + 155)
+      : current;
+    const context = [lines[hit.index - 1], focus, lines[hit.index + 1]]
+      .filter(Boolean).map(line => line.trim().replace(/\s+/g, ' '));
+    const window = context.join(' / ').slice(0, 240);
     if (window && !windows.some(s => fold(s) === fold(window))) windows.push(window);
     if (windows.length === 3) break;
   }
   const lexicalScore = Math.min(15, hits.reduce((acc, h) => acc + Math.min(3, h.score), 0))
     + Math.min(6, distinctLines) + Math.min(3, matched.size) * 1.5;
   return { strength, matchedTerms: [...matched.keys()], distinctLines, occurrences, windows, lexicalScore };
+}
+
+/** A semantic hit is an unverified hypothesis: expose short passages from
+ * separate parts of stored lyrics so the existing LLM can reason about the
+ * words themselves. Never pass metadata or a vector score as lyrical proof.
+ * No new persisted representation; no full lyrics in the tool transcript. */
+export function semanticLyricHypothesis(lyrics: string): LyricThemeEvidence | null {
+  if (typeof lyrics !== 'string' || lyrics.trim().length < 50) return null;
+  const lines = lyrics.split(/\r?\n|(?<=[.!?])\s+/).map(s => s.trim().replace(/\s+/g, ' '))
+    .filter(s => s.length >= 12);
+  const unique = [...new Set(lines.map(s => s.slice(0, 200)))];
+  if (!unique.length) return null;
+  // Sample across the complete lyrics, not just their opening. Hypothesis only:
+  // a few windows may miss metaphors; don't pretend coverage is complete.
+  const points = [0, Math.floor((unique.length - 1) / 3), Math.floor(2 * (unique.length - 1) / 3), unique.length - 1];
+  const windows = [...new Set(points.map(i => unique[i]))].slice(0, 4);
+  return {
+    strength: 'semantic_hypothesis', matchedTerms: [], distinctLines: 0,
+    occurrences: 0, windows, lexicalScore: 0,
+  };
 }

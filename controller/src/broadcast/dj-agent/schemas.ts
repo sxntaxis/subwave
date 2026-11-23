@@ -22,7 +22,7 @@ import { DIRECTION_TEXT_LIMITS } from './music-direction-core.js';
 export const PICK_SCHEMA = z.object({
   // The seed clause is load-bearing (#1247): a cornered model otherwise answers
   // with the on-air track's own id. One shared wording in util/pick-seed.ts.
-  id: z.string().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE}`),
+  id: z.string().describe(`the exact song id returned by a discovery tool OR the preloaded lyrical evidence slate — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE}`),
   reason: z.string().describe('internal scratchpad only — max 12 words, never shown to the listener; do not justify, just note what makes THIS pick a fresh step (a shift in energy/era/texture, or an artist genuinely new to the rotation), not a vibe label you would recycle pick after pick (e.g. "warmer, driving energy", never a repeated "mellow reflective step"). Only call a pick a "new artist" when it has no "artist_play_count"/"artist_last_played_days_ago"; "unaired" means this song is new to the station, not that its artist is. If the artist shows recent or frequent plays, describe the real reason instead (energy shift, texture, flow)'),
   say: z.string().nullable().describe('when the latest event message says to write a spoken link, set this to one or two natural sentences in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). Never state a clock time unless the event message tells you when the link airs — then use exactly that time. When the event says stay silent, set this to null'),
   // Only honoured when the system prompt offers them (settings.effectsActive,
@@ -113,13 +113,16 @@ export function requestSchema() {
     kind: z.enum(['track', 'chat']).describe('"track" when the listener wants music played — the normal case, and the right answer whenever you are unsure. "chat" ONLY when the message is not a music request at all (a question, a greeting, banter, a demand to change how the station behaves) — then "ack" answers them, "id" is null, and nothing is queued.'),
     // Same seed clause as PICK_SCHEMA.id: the request event line carries the
     // on-air track's `[id: …]` too.
-    id: z.string().nullable().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE} Null ONLY when kind is "chat"`),
+    id: z.string().nullable().describe(`the exact song id returned by a discovery tool OR the preloaded lyrical evidence slate — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE} Null ONLY when kind is "chat"`),
     ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
+    lyrical_basis: z.enum(['central', 'contextual', 'incidental', 'unsupported', 'not_applicable'])
+      .describe('For a lyric-evidence slate, independently judge whether the actual quoted lyrical passages make the topic central, meaningfully contextual, incidental, or unsupported. Metadata, genre and vector similarity are NOT lyrical proof. For other requests use not_applicable.'),
+    lyrical_reading: z.string().describe('A specific short PRIVATE interpretation of what the candidate lyrics express and how they address the request; no lyric quotations. For non-lyrical requests use empty string.'),
   });
   // `kind` is required and non-nullable, so coerceModelPayload leaves an
   // omission alone and a plain enum would throw the run away. 'track' is the
   // pre-existing safe behaviour.
-  const tolerant = { objectFallbacks: { kind: 'track' } };
+  const tolerant = { objectFallbacks: { kind: 'track', lyrical_basis: 'not_applicable', lyrical_reading: '' } };
   // Station voice off: no spoken intro can air, so the field leaves the
   // contract rather than being written and dropped. runRequestViaAgent still
   // guards its own read, covering a switch flipped mid-run.

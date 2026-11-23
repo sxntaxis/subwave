@@ -91,7 +91,10 @@ export function buildPickerTools(scope: Partial<PickerScope> = {}): { tools: Too
   for (const mod of PICKER_TOOLS) {
     // Lyrical subject is a hard request-specific evidence boundary. Don't
     // offer unrelated genre/mood tools as replacement candidates.
-    if (ctx.scope.lyricTheme && mod.name !== 'searchByLyrics') continue;
+    if (ctx.scope.lyricTheme?.mode === 'required' && mod.name !== 'searchByLyrics') continue;
+    // Preloaded candidate slate is already in the prompt. A second lyrical
+    // discovery call would return empty because those IDs are in seen.
+    if (ctx.scope.lyricTheme && ctx.seen.size > 0 && mod.name === 'searchByLyrics') continue;
     if (mod.available && !mod.available(ctx)) continue;
     tools[mod.name] = mod.build(ctx);
   }

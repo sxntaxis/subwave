@@ -11,7 +11,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'searchByLyrics',
   build: ({ scope, collect, emptyResult }) => tool({
-    description: 'LYRICAL SUBJECT search. Finds tracks with words actually present in stored lyrics, not tracks whose genre or acoustic mood sounds associated with the topic. Evidence distinguishes repeated context from a single mention; assess whether the snippets genuinely support the listener\'s topic. On an explicit listener subject request this is the only discovery tool. No lyrics means unknown, not a positive thematic match.',
+    description: 'LYRICAL SUBJECT search. Finds tracks with words actually present in stored lyrics, not tracks whose genre or acoustic mood sounds associated with the topic. Evidence distinguishes repeated context from a single mention; assess whether the snippets genuinely support the listener\'s topic. Listener requests that depend on lyrical meaning normally prefetch a candidate slate before the model runs; this tool remains available for ordinary optional exploration. No lyrics means unknown, not a positive thematic match.',
     inputSchema: z.object({ query: z.string().min(3).describe('Subject of the lyrics, e.g. cannabis, leaving home, loneliness') }),
     execute: async ({ query }) => {
       try {

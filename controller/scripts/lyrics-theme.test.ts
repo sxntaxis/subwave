@@ -35,6 +35,16 @@ test('bounded evidence does not reveal complete stored lyric texts', () => {
   const evidence = lyricThemeEvidence(lyric, terms);
   assert.ok(evidence);
   assert.ok(evidence.windows.length <= 3);
-  assert.ok(evidence.windows.every(w => w.length <= 170));
+  assert.ok(evidence.windows.every(w => w.length <= 240));
   assert.ok(evidence.windows.join(' ').length < lyric.length);
+});
+
+test('a lyric embedded late in an unsplit long line is visible to the model', () => {
+  const terms = lyricThemeTerms('cannabis');
+  const longLine = 'Ordinary instrumental description ' .repeat(20)
+    + 'The gardener planted sensimilla behind the old barn, a vivid central image of the song.';
+  const evidence = lyricThemeEvidence(longLine, terms);
+  assert.ok(evidence);
+  assert.ok(evidence.windows.some(w => w.includes('sensimilla')));
+  assert.ok(evidence.windows.every(w => w.length <= 240));
 });

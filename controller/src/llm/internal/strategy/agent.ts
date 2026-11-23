@@ -31,6 +31,7 @@ import { agentPlan } from './plan.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
 import { recordAgentRetry } from '../telemetry/log.js';
 import type { PickerAgentDiagnosticsObserver } from '../../../observability/picker-audit.js';
+import { redactPrivateLyricSlate } from '../../../music/lyrics-privacy.js';
 
 // Loose views of an AI SDK ToolLoopAgent generate result — only the fields the
 // cascade reads. `AgentLike` is the minimal surface runDeadlined needs.
@@ -264,10 +265,17 @@ export async function djAgent({
   validate,
 }: DjAgentOptions): Promise<{ object: unknown; steps: number; toolCalls: ToolCallSummary[] }> {
   let sharedDeadlineAt: number | undefined;
+  // The exact unredacted messages are still handed to the model. Only the
+  // persisted diagnostic copies are sanitized; autonomous paths are unchanged.
+  const recordingMessages = kind === 'djAgentRequest'
+    ? messages.map((m: any) => typeof m.content === 'string'
+      ? { ...m, content: redactPrivateLyricSlate(m.content) } : m)
+    : messages;
+  const recordingText = (s: string) => kind === 'djAgentRequest' ? redactPrivateLyricSlate(s) : s;
   return withFailover(
     kind,
     (err) => ({
-      system, messages,
+      system, messages: recordingMessages,
       ...failureDiagnostics(err, err?.__via ? err.__via !== 'ai-sdk:agent' : undefined),
     }),
     async (leg: Leg) => {
@@ -309,7 +317,7 @@ export async function djAgent({
             usage,
             perf,
             warnings,
-            extra: { system, messages, toolCalls: [], steps: 0, response: JSON.stringify(object, null, 2) },
+            extra: { system, messages: recordingMessages, toolCalls: [], steps: 0, response: recordingText(JSON.stringify(object, null, 2)) },
           };
         }
 
@@ -370,7 +378,7 @@ export async function djAgent({
                 usage: usageOf(nr),
                 perf: perfOf(nr),
                 warnings: warningsOf(nr),
-                extra: { system, messages, toolCalls, steps: nSteps, response: JSON.stringify(nObj, null, 2) },
+                extra: { system, messages: recordingMessages, toolCalls, steps: nSteps, response: recordingText(JSON.stringify(nObj, null, 2)) },
               };
             }
             console.log(`[${kind}] native output produced no usable pick (explored=${explored}, accepted=${accepted}) — falling back to done-tool`);
@@ -558,9 +566,9 @@ export async function djAgent({
           // Full and untruncated. When the collapse answered, the flattened
           // prompt it saw rides along beside the original messages.
           extra: {
-            system, messages, toolCalls, steps,
-            ...(terminalPrompt ? { terminalPrompt } : {}),
-            response: schema ? JSON.stringify(object, null, 2) : String(object ?? ''),
+            system, messages: recordingMessages, toolCalls, steps,
+            ...(terminalPrompt ? { terminalPrompt: recordingText(terminalPrompt) } : {}),
+            response: recordingText(schema ? JSON.stringify(object, null, 2) : String(object ?? '')),
           },
         };
       } catch (err) {

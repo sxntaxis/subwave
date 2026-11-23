@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import * as library from '../music/library.js';
-import { explicitLyricTheme } from '../music/lyrics-theme-core.js';
+import { resolveLyricIntent } from '../music/lyrics-intent.js';
 import { getFullContext } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as djAgent from '../broadcast/dj-agent.js';
@@ -357,10 +357,22 @@ async function resolveRequest(entry) {
     });
   }
 
+  // Interpret intent before the agent chooses: lyrical meaning must not depend
+  // on an optional discovery tool. An explicit lyrical cue survives provider
+  // failure; mood-only and named-song requests keep their normal selection.
+  const currentTrack = queue.current?.track || null;
+  let understood: Awaited<ReturnType<typeof dj.matchRequest>> | null = null;
+  try {
+    understood = await dj.matchRequest(text, { listenerName: requester, nowPlaying: currentTrack });
+  } catch (err) {
+    queue.log('request', `intent interpretation unavailable (${(err as Error).name || 'error'})`);
+  }
+  const lyricIntent = resolveLyricIntent(text, understood);
+
   // Conversational DJ agent. On any failure fall through to the stateless
   // cascade below, so a request is never dropped.
   try {
-    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, humanRequestId: entry.id });
+    const agentRes = await djAgent.runRequest(queue, ctx, { requester, text, humanRequestId: entry.id, lyricIntent });
     if (agentRes) {
       if (agentRes.refused === 'no-lyric-evidence') {
         entry.path = 'lyric-theme';
@@ -403,21 +415,18 @@ async function resolveRequest(entry) {
     queue.log('error', `DJ agent request failed: ${err.message} — falling back`);
   }
 
-  // Fail closed for an explicit lyrical topic if the request Agent is off or
-  // failed. The legacy genre/mood matcher has no lyric evidence and must not
-  // fabricate a match. Ordinary requests keep their existing cascade.
-  if (explicitLyricTheme(text)) {
+  // Required lyrical subject cannot degrade to unverified genre/mood picks.
+  // Combined sonic + lyrical preferences may use the pre-existing cascade.
+  if (lyricIntent?.mode === 'required') {
     entry.path = 'lyric-theme';
     entry.pickSource = 'lyrics-unverified';
     return failed('Could not verify a lyrical-theme match right now. Please try a more specific topic.');
   }
 
-  // 1. LLM matches intent; the current track lets vibe queries be read against
-  // what is on air.
-  const currentTrack = queue.current?.track || null;
-  const matched = await dj.matchRequest(text, {
-    listenerName: requester,
-    nowPlaying: currentTrack,
+  // 1. Reuse the preflight librarian interpretation. No duplicated LLM call
+  // on an Agent failure; retry here only if preflight actually failed.
+  const matched = understood ?? await dj.matchRequest(text, {
+    listenerName: requester, nowPlaying: currentTrack,
   });
   queue.log('intent', `"${text}" → ${matched.intent || '(no intent)'}`, {
     mood: matched.mood,

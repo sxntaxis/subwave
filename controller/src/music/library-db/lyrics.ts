@@ -1,6 +1,7 @@
 // Read-only lyric discovery against the existing tracks.lyric_excerpt column.
-// No migration, FTS index or new store. Scans happen only on explicit thematic
-// requests / tool calls, not on the autonomous per-song queue hot path.
+// No migration, FTS index or new store. Scans run for listener requests
+// classified as needing lyrical meaning (or manual lyric tool calls), not
+// on the autonomous per-song queue hot path.
 import { requireDb } from './handle.js';
 
 export interface LyricSearchRow { id: string; title: string | null; artist: string | null; lyric_excerpt: string; }

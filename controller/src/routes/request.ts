@@ -576,6 +576,7 @@ async function resolveRequest(entry) {
 
   // 2e. Similar songs to the current track: Subsonic can surface adjacency the
   // local mood tags missed.
+  const currentTrack = queue.current?.track ?? null;
   if (!pick && currentTrack?.id && (matched.mood || /similar|like|match/i.test(text))) {
     try {
       const similar = await subsonic.getSimilarSongs(currentTrack.id, { count: 20 });

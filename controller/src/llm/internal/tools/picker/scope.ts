@@ -28,7 +28,9 @@ import type {
 } from '../../../../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { enrichEssentia, getEssentiaReader, lookupV2WithStatus, type EssentiaReader } from '../../../../music/essentia-evidence.js';
-import { attachCompactMusicEvidence, attachCompleteMusicEvidence } from '../../../../music/music-evidence-profile.js';
+import { attachCompactMusicEvidence, attachCompleteMusicEvidence, attachMaximalMusicEvidence } from '../../../../music/music-evidence-profile.js';
+import { readVerifiedModelProfiles } from '../../../../music/music-evidence-reader.js';
+import { compareMusicalEvidence } from '../../../../music/musical-evidence-v2.js';
 import { orderByArousalDirection, type EnergyDirection } from '../../../../music/direction-rank.js';
 import { trajectoryEnabled, cachedPredecessor } from '../../../../music/trajectory-runtime.js';
 import { trajectoryRankCandidates } from '../../../../music/trajectory-rank.js';
@@ -197,9 +199,10 @@ export function buildPickerContext(
   const essentia = scope.essentiaDiscovery ? getEssentiaReader() : null;
   // The legacy evidence ledger is deliberately preserved for flag-off parity.
   // v2.2 bypasses it at callers; no economic token budget is enforced there.
+  const maximalV3 = trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
   const uncappedDiscovery = scope.essentiaDiscovery === true
-    && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
-    && process.env.SUBWAVE_MUSIC_CONTEXT_UNCAPPED === '1';
+    && (maximalV3 || (process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+      && process.env.SUBWAVE_MUSIC_CONTEXT_UNCAPPED === '1'));
   let remainingEvidenceBytes = 32 * 1024;
   const reserveMusicEvidence: PickerContext['reserveMusicEvidence'] = maxBytes => {
     if (!Number.isInteger(maxBytes) || maxBytes <= 0 || remainingEvidenceBytes <= 0) return null;
@@ -484,10 +487,22 @@ export function buildPickerContext(
       });
     });
   };
+  // One predecessor evidence read per pick, never one per song/tool call.
+  // selectionContext proves the intended next pair, but a held-tail track has
+  // NOT aired: the model-facing comparison must remain explicitly provisional.
+  let predecessorEvidence: Promise<any | null> | null = null;
+  const getPredecessorEvidence = () => {
+    if (!predecessorEvidence) predecessorEvidence = (async () => {
+      if (!scope.selection?.predecessorId || !essentia) return null;
+      const found = await readVerifiedModelProfiles([scope.selection.predecessorId], essentia);
+      return found.profiles.get(scope.selection.predecessorId) ?? null;
+    })();
+    return predecessorEvidence;
+  };
   const attachV2 = async (tracks: any[]): Promise<any[]> => {
     let enriched = tracks;
     const uncapped = uncappedDiscovery;
-    if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+    if (scope.essentiaDiscovery && (maximalV3 || process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1')
         && essentia?.lookupV2 && enriched.length > 0 && enriched.length <= 12
         && (uncapped || remainingEvidenceBytes > 0)) {
       if (uncapped) {
@@ -496,10 +511,29 @@ export function buildPickerContext(
         try {
           const ids = enriched.map(track => track?.id);
           if (ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length) {
-            const lookup = await lookupV2WithStatus(essentia, ids);
-            if (lookup.status === 'ok') enriched = attachCompleteMusicEvidence(enriched, lookup.rows);
-            else enriched = enriched.map(track => ({ ...track,
-              musical_evidence_status: lookup.status === 'transport_limit'
+            const found = maximalV3
+              ? await readVerifiedModelProfiles(ids, essentia)
+              : null;
+            const lookup = found ? null : await lookupV2WithStatus(essentia, ids);
+            const rows = found?.profiles ?? (lookup?.status === 'ok' ? lookup.rows : null);
+            if (rows?.size) {
+              enriched = maximalV3 ? attachMaximalMusicEvidence(enriched, rows)
+                : attachCompleteMusicEvidence(enriched, rows);
+              if (maximalV3 && scope.selection?.predecessorId && rows.size >= 2) {
+                const predecessor = await getPredecessorEvidence();
+                enriched = enriched.map(track => {
+                  const candidate = rows.get(track?.id);
+                  return predecessor && candidate ? { ...track, predecessor_comparison: {
+                    ...compareMusicalEvidence(predecessor, candidate,
+                      { sameShow: true, predecessorReliable: true, request: false }),
+                    provenance: 'intended_next_pair_not_verified_airplay',
+                  } } : track;
+                });
+              }
+              if (found?.status === 'partial') enriched = enriched.map(track =>
+                rows.has(track?.id) ? track : { ...track, musical_evidence_status: 'unavailable' });
+            } else enriched = enriched.map(track => ({ ...track,
+              musical_evidence_status: lookup?.status === 'transport_limit'
                 ? 'transport_limit_use_compare' : 'lookup_unavailable',
             }));
           }
@@ -540,7 +574,7 @@ export function buildPickerContext(
       : process.env.SUBWAVE_MUSIC_DIRECTION_V1 === '1' && scope.essentiaDiscovery
         && opts.directionRanking !== false
         ? orderByArousalDirection(enriched, scope.directionEnergy ?? null) : enriched;
-    if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
+    if (scope.essentiaDiscovery && (maximalV3 || process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1')) {
       scope.essentiaAudit?.captureV2Profiles?.(enriched.filter(track => track?.musical_evidence).map(track => track?.id));
     }
     scope.essentiaAudit?.captureProfileExposure(
@@ -626,7 +660,7 @@ export function buildPickerContext(
     if (!attempt) {
       const result = seedSimilarity(songId, primary);
       const tracks = await attachV2(await enrichEssentia(essentia, result.tracks));
-      if (scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1') {
+      if (scope.essentiaDiscovery && (maximalV3 || process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1')) {
         scope.essentiaAudit?.captureV2Profiles?.(tracks.filter(track => track?.musical_evidence).map(track => track?.id));
       }
       scope.essentiaAudit?.captureProfileExposure(

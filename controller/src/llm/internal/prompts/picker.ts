@@ -134,7 +134,10 @@ function pickerSystem(show?: ShowMusic | null, withDirection = false) {
     ? `\n\n${instruction('pool-picker', 'show-brief', { topic: show.topic })}`
     : '';
   const directed = trajectoryPromptEnabled();
-  return `${instruction('pool-picker', 'frame', { station: stationName })}${showLine}${showMusicLean(show)}
+  const evidenceRule = directed && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1'
+    ? `\n\nMUSICAL EVIDENCE: Each candidate carries its available native Essentia estimates and factual audio metadata. For two or more viable candidates, explicitly weigh at least TWO distinct measured alternatives before deciding. Use all available axes relevant to this choice: tempo/key/pace, verified arousal/valence/danceability, voice, timbre, instruments and mood/theme, including sparse opening/ending windows and coverage. A single measured axis is not proof of a poetic destination; native model scores are not calibrated probabilities. Missing/partial data is unknown. Never substitute titles/artist stereotypes or weather for missing audio evidence. Deliberate contrast and surprise remain legitimate.`
+    : '';
+  return `${instruction('pool-picker', 'frame', { station: stationName })}${evidenceRule}${showLine}${showMusicLean(show)}
 
 ${pickerCriteria()}
 

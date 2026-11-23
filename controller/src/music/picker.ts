@@ -23,7 +23,9 @@ import { composePoolSelection } from './pool-selection.js';
 import type { PickerSelectionObservation } from '../observability/picker-audit.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getEssentiaReader, lookupV2WithStatus } from './essentia-evidence.js';
-import { attachCompleteMusicEvidence } from './music-evidence-profile.js';
+import { attachCompleteMusicEvidence, attachMaximalMusicEvidence } from './music-evidence-profile.js';
+import { readVerifiedModelProfiles } from './music-evidence-reader.js';
+import { compareMusicalEvidence } from './musical-evidence-v2.js';
 import { orderByArousalDirection, type EnergyDirection } from './direction-rank.js';
 import { trajectoryEnabled, cachedPredecessor } from './trajectory-runtime.js';
 import { trajectoryRankCandidates } from './trajectory-rank.js';
@@ -56,6 +58,9 @@ interface Candidate {
   structure?: unknown[] | null;
   _source?: string | null;
   _similarity?: number | null;
+  musical_evidence?: unknown;
+  predecessor_comparison?: unknown;
+  musical_evidence_status?: string;
 }
 
 export interface PickTelemetry {
@@ -734,31 +739,60 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     ? await composePoolSelection(eligibleCandidates, opts.selection, opts.selectionAudit,
         trajectoryEnabled() ? { coverageAware: true, movementIntent: opts.movementIntent ?? null } : undefined)
     : eligibleCandidates;
-  // Shared, bounded acoustic evidence after the usual hard eligibility and
-  // transition-aware MMR. This is a soft *reorder*, never discovery expansion,
-  // and never invents evidence for unanalysed material. Two 12-id batches max.
-  let candidates = composed;
-  if (process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1' &&
-      (opts.directionEnergy || (trajectoryEnabled() && opts.trajectoryActive)) && composed.length > 1) {
+  // MI v3 maximizes verified evidence for EVERY eligible Pool shortlist,
+  // even before the Director has seeded a movement. Never admits a new ID.
+  const maximalV3 = trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
+  const directionRanking = process.env.SUBWAVE_MUSIC_DIRECTOR_V2 === '1'
+    && (opts.directionEnergy || (trajectoryEnabled() && opts.trajectoryActive));
+  let candidates: Candidate[] = composed;
+  if ((directionRanking && composed.length > 1) || (maximalV3 && composed.length > 0)) {
     try {
       const reader = getEssentiaReader();
       if (reader?.lookupV2) {
+        const ids = [...new Set<string>(composed.map(c => c.id)
+          .filter((id): id is string => typeof id === 'string' && !!id))].slice(0, 24);
         const rows = new Map<string, any>();
-        const ids: string[] = [...new Set<string>(composed.map(c => c.id).filter((id): id is string => typeof id === 'string' && !!id))].slice(0, 24);
-        for (let offset = 0; offset < ids.length; offset += 12) {
-          const result = await lookupV2WithStatus(reader, ids.slice(offset, offset + 12));
-          if (result.status === 'ok') for (const [id, evidence] of result.rows) rows.set(id, evidence);
+        if (maximalV3) {
+          const found = await readVerifiedModelProfiles(ids, reader);
+          for (const [id, row] of found.profiles) rows.set(id, row);
+        } else {
+          for (let offset = 0; offset < ids.length; offset += 12) {
+            const result = await lookupV2WithStatus(reader, ids.slice(offset, offset + 12));
+            if (result.status === 'ok') for (const [id, evidence] of result.rows) rows.set(id, evidence);
+          }
         }
-        const enriched = attachCompleteMusicEvidence(composed, rows);
-        const predecessorPoint = trajectoryEnabled() && opts.trajectoryActive
-          ? cachedPredecessor(opts.selection?.predecessorId,
-            opts.trajectoryShowId ?? null, opts.trajectoryMovementStartedAt) : null;
-        candidates = predecessorPoint
-          ? trajectoryRankCandidates(enriched, predecessorPoint, opts.directionEnergy ?? null, false,
-              opts.movementIntent === 'contrast' ? 'contrast' : null)
-          : orderByArousalDirection(enriched, opts.directionEnergy ?? null);
+        let enriched = maximalV3 ? attachMaximalMusicEvidence(composed, rows)
+          : attachCompleteMusicEvidence(composed, rows);
+        if (maximalV3) {
+          // The predecessor can be a held-tail, NOT-YET-AIRED track; compare
+          // the intended pair but never claim it was verified on air.
+          const predecessorId = currentTrack?.id;
+          const predecessor = predecessorId
+            ? (await readVerifiedModelProfiles([predecessorId], reader)).profiles.get(predecessorId) : null;
+          enriched = enriched.map(track => {
+            const evidence = rows.get(track?.id);
+            return {
+              ...track,
+              ...(!evidence ? { musical_evidence_status: 'missing_or_unavailable' } : {}),
+              ...(predecessor && evidence ? { predecessor_comparison: {
+                ...compareMusicalEvidence(predecessor, evidence,
+                  { sameShow: true, predecessorReliable: true, request: false }),
+                provenance: 'intended_next_pair_not_verified_airplay',
+              } } : {}),
+            };
+          });
+        }
+        if (directionRanking && composed.length > 1) {
+          const predecessorPoint = trajectoryEnabled() && opts.trajectoryActive
+            ? cachedPredecessor(opts.selection?.predecessorId,
+              opts.trajectoryShowId ?? null, opts.trajectoryMovementStartedAt) : null;
+          candidates = predecessorPoint
+            ? trajectoryRankCandidates(enriched, predecessorPoint, opts.directionEnergy ?? null, false,
+                opts.movementIntent === 'contrast' ? 'contrast' : null)
+            : orderByArousalDirection(enriched, opts.directionEnergy ?? null);
+        } else candidates = enriched;
       }
-    } catch { /* unavailable evidence never blocks the pool */ }
+    } catch { /* optional acoustic reader never interrupts music */ }
   }
   // Observe precisely the final list, immediately before its existing model
   // boundary. The callback is best-effort and performs no candidate work.
@@ -878,6 +912,13 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           key: a.key ?? undefined,
           // Perceptual energy 0..1 (mean pace), decoupled from BPM.
           pace: c.paceMean ?? rec?.paceMean ?? undefined,
+          ...(maximalV3 ? {
+            audio_moods: Array.isArray(rec?.audioMoods) ? rec.audioMoods.slice(0, 12) : undefined,
+            lastfm_tags: Array.isArray(rec?.lastfmTags) ? rec.lastfmTags.slice(0, 24) : undefined,
+            loudness_lufs: rec?.loudnessLufs ?? undefined,
+            peak_db: rec?.peakDb ?? undefined,
+            key_ranges: Array.isArray(rec?.keyRanges) ? rec.keyRanges : undefined,
+          } : {}),
           // Mirrors the agent picker's `sections`.
           sections: library.sectionCount(c) ?? library.sectionCount(rec) ?? undefined,
           // Instrumental flag from measured vocal ranges ([] = no vocals).
@@ -888,6 +929,11 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           source: c._source || null,
           // Cosine similarity to the current track, KNN sources only.
           similarity: c._similarity != null ? Math.round(c._similarity * 100) / 100 : undefined,
+          // Evidence was used to order the shortlist; do not discard it before
+          // the final LLM sees the candidates and the intended-pair comparisons.
+          ...(maximalV3 && c.musical_evidence ? { musical_evidence: c.musical_evidence } : {}),
+          ...(maximalV3 && c.predecessor_comparison ? { predecessor_comparison: c.predecessor_comparison } : {}),
+          ...(maximalV3 && c.musical_evidence_status ? { musical_evidence_status: c.musical_evidence_status } : {}),
         };
       }),
       recentPlays,

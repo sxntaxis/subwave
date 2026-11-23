@@ -124,6 +124,47 @@ export function completeDiscoveryMusicEvidence(evidence: MusicEvidenceV2) {
 }
 
 /**
+ * MI v3: the widest safe, model-facing interpretation of the verified V2 index.
+ * Preserve ALL valid labels in each of the five classifier heads and the sparse
+ * temporal readings for every scalar head. These are native, uncalibrated model
+ * outputs; no audio vector, raw media, file identity or inferred prose is sent.
+ */
+export function maximalMusicEvidence(evidence: MusicEvidenceV2) {
+  return {
+    ...completeDiscoveryMusicEvidence(evidence),
+    remainingModelHeads: {
+      danceability: summarizeHeadWithCoverage(evidence, 'danceability-discogs-effnet-1'),
+      voice: summarizeHeadWithCoverage(evidence, 'voice_instrumental-discogs-effnet-1'),
+      timbre: summarizeHeadWithCoverage(evidence, 'timbre-discogs-effnet-1'),
+    },
+    sampledWindows: sampledWindowEvidence(evidence,
+      ['arousal', 'valence', 'danceability', 'voice', 'timbre']),
+  };
+}
+
+/** Model-side evidence is bounded only by the existing physical message envelope.
+ * An oversized batch downgrades explicitly, never turns verified measurements
+ * into fabricated absence or silently truncates an individual score array. */
+export function attachMaximalMusicEvidence(
+  tracks: readonly any[], evidence: ReadonlyMap<string, MusicEvidenceV2>,
+) {
+  const full = tracks.map(track => {
+    const data = evidence.get(track?.id);
+    return data ? { ...track, musical_evidence: maximalMusicEvidence(data) } : track;
+  });
+  if (Buffer.byteLength(JSON.stringify(full)) <= 2 * 1024 * 1024) return full;
+  const summaries = tracks.map(track => {
+    const data = evidence.get(track?.id);
+    return data ? { ...track, musical_evidence: completeDiscoveryMusicEvidence(data),
+      musical_evidence_detail: 'windows_transport_limit' as const } : track;
+  });
+  if (Buffer.byteLength(JSON.stringify(summaries)) <= 2 * 1024 * 1024) return summaries;
+  return tracks.map(track => evidence.has(track?.id)
+    ? { ...track, musical_evidence_status: 'physical_transport_limit_use_compare' as const }
+    : track);
+}
+
+/**
  * Returns every verified profile for a bounded socket batch. Transport-size
  * failures are explicit, not misreported as missing Essentia evidence.
  */

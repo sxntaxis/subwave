@@ -9,6 +9,7 @@ import * as library from '../../../../music/library.js';
 import { durationSeconds } from '../../../../music/recency.js';
 import { unairedFlag } from '../../../../music/airing.js';
 import { resolveEraYear } from '../../../../music/show-filter.js';
+import { trajectoryEnabled } from '../../../../music/trajectory-runtime.js';
 
 export function slim(s: any) {
   // Surface the editorial tags + measured acoustic facts when known — merged
@@ -94,6 +95,17 @@ export function slim(s: any) {
     ...(introMs != null ? { intro_ms: introMs } : {}),
     ...(pace != null ? { pace } : {}),
     ...(sections != null ? { sections } : {}),
+    ...(trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1' ? {
+      // Artist/genre aliases and tagging outputs are metadata, not measured
+      // acoustics. Keep them distinct from the verified Essentia profile.
+      ...(Array.isArray(rec?.audioMoods) && rec.audioMoods.length
+        ? { audio_moods: rec.audioMoods.slice(0, 12) } : {}),
+      ...(Array.isArray(rec?.lastfmTags) && rec.lastfmTags.length
+        ? { lastfm_tags: rec.lastfmTags.slice(0, 24) } : {}),
+      ...(rec?.loudnessLufs != null ? { loudness_lufs: rec.loudnessLufs } : {}),
+      ...(rec?.peakDb != null ? { peak_db: rec.peakDb } : {}),
+      ...(rec?.keyRanges?.length ? { key_ranges: rec.keyRanges } : {}),
+    } : {}),
     ...(unaired ? { unaired: true } : {}),
     ...(songStats ? { play_count: songStats.count, last_played_days_ago: daysAgo(songStats.lastPlayedAtMs) } : {}),
     ...(artistStats ? { artist_play_count: artistStats.count, artist_last_played_days_ago: daysAgo(artistStats.lastPlayedAtMs) } : {}),

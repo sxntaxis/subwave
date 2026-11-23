@@ -102,6 +102,21 @@ export function validDirectorReview(v: unknown): DirectionDevelopment | null {
   return next && alternate ? { decision: x.decision, next, alternate } : null;
 }
 
+/** The Director must demonstrate it used the available verified evidence,
+ * not just repeat an atmospheric label. An absent/unavailable index never
+ * blocks an otherwise valid artistic judgment. No ID/metadata leaves the
+ * model response through this check. */
+export function directorV3GroundingCheck(response: unknown, availableRefs: readonly string[]): boolean {
+  if (!response || typeof response !== 'object') return false;
+  const output = response as { action?: unknown; reason?: unknown };
+  if (output.action === 'defer') return true;
+  const required = Math.min(2, new Set(availableRefs).size);
+  if (!required) return true;
+  if (typeof output.reason !== 'string') return false;
+  const cited = new Set((output.reason.match(/\b(?:H|C)[1-9]\d*\b/g) ?? []).filter(ref => availableRefs.includes(ref)));
+  return cited.size >= required;
+}
+
 export function boundedDirectorReason(v: unknown): string {
   return typeof v === 'string'
     ? v.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, DIRECTION_TEXT_LIMITS.reason) : '';

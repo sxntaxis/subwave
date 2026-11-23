@@ -1028,6 +1028,8 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         : directionSnapshot.replanDue
           ? 'If this pick can establish a useful 15–40 minute movement, propose a compact direction with a realistic destination. Otherwise return direction:null. '
           : 'Continue the established movement; normally return direction:null. ')
+      + (directorV3Enabled()
+        ? ' EVIDENCE FIRST: discovery returns full verified Essentia classifier families and sparse windows when available; candidate-to-predecessor comparisons are provisional unless actual mixer airplay confirms the identity. When at least two measured candidates are exposed, weigh both before committing; account for arousal, valence, danceability, instrument, timbre, voice, mood/theme, tempo, key, pace and coverage when relevant. Do not invent acoustic properties from titles or vague mood language. No extra model call is required for an already evidence-rich shortlist. ' : '')
       + (settings.musicMixingEnabled()
         ? 'When two or more eligible tracks are available, compare at least two genuinely different musical continuations (energy, texture, era, or rhythmic fit) before choosing; a first plausible song is not itself a reason to commit. A strict show playlist may be the only legitimate discovery source: compare distinct tracks within it instead of making redundant off-show tool calls. Respect the real airtime deadline and do not invent unavailable candidates.'
         : 'For a difficult pivot, inspect at least two distinct eligible alternatives when there is enough airtime; for an obvious match, commit promptly without artificial delay.');

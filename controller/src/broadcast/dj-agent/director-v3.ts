@@ -16,8 +16,10 @@ import { projectVerifiedAirplay } from './verified-airplay-context.js';
 import { musicDirection, directorV3Enabled } from './music-direction.js';
 import {
   directorV3Due, directorV3ModelResult, directorV3SeedSchema, directorV3ReviewSchema,
+  directorV3GroundingCheck,
 } from './director-v3-core.js';
 import { inspectVerifiedTrajectory } from '../../music/trajectory-runtime.js';
+import { buildDirectorEvidence } from './director-v3-evidence.js';
 
 export type DirectorV3Start = { eventId: string; trackId: string | null; showId: string | null;
   at: number; source: 'auto' | 'listener' | 'admin' };
@@ -27,12 +29,23 @@ You plan musical movements, not songs or schedules. You never control the queue,
 song was played unless its mixer start was verified, or rewrite show restrictions.
 Prioritize, in order: human steering; active show's identity and hard constraints;
 actual verified musical history; feasible catalogue material; temporal/weather/cultural mood.
+USE the supplied full acoustic evidence: validated Essentia classifier labels, model coverage,
+sparse temporal changes, tempo/key/pace, and catalogue diversity. Compare distinct
+measured dimensions before describing texture, energy, rhythm, instruments, vocals or mood.
+Do not infer an adjective from a title, genre, weather or unmeasured feature when the
+actual acoustic evidence is absent or contradicts it. Distinguish catalogue tags, model
+estimates and verified on-air starts. Missing scores mean unknown, not zero.
 A poetic destination is an artistic intention, NOT a numerically measurable outcome.
 Measured acoustic trajectory is fallible evidence, not a musical quality score.
 A future playlist is only a catalogue sample; it is NOT a guarantee of eligibility.
 Do not treat web headlines as facts without independent confirmation, or use them to
 violate a show. Do not mention or promise a particular song ID or future queued track.
 Favor variety and coherent changes, not perpetual building or artificial crescendos.
+When any validated acoustic examples exist, cite at least two distinct available
+references (H1/H2 for verified airplay; C1/C2 for the candidate palette) in
+your reason, explaining which real measurement or coverage state supports
+your decision. Cite one if only one exists. A citation alone does not prove
+quality or song eligibility. Do not cite examples without valid acoustic evidence.
 Your answer must be concise and realistic within the remaining show time.`;
 
 const MAX_MODEL_MS = 25_000;
@@ -65,10 +78,23 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
     const nextShow = phase.minutesRemaining !== null && phase.minutesRemaining <= 60
       ? settings.resolveActiveShow(new Date(start.at + (phase.minutesRemaining + 1) * 60_000)) : null;
     const briefing = await transitionBrief(show, nextShow, phase.minutesRemaining);
-    const acoustic = snapshot.movement && !snapshot.steering
-      ? await inspectVerifiedTrajectory(start.showId,
-        musicDirection.recentVerifiedStarts(start.showId, 8, snapshot.movement.startedAt),
-        snapshot.movement.energy, snapshot.movement.startedAt) : null;
+    // ALWAYS read the current show's real catalogue, even during seeding and
+    // even hours before the next show. A handoff preview is not this evidence.
+    const [evidence, acoustic] = await Promise.all([
+      buildDirectorEvidence(show, verified, start.at),
+      snapshot.movement && !snapshot.steering
+        ? inspectVerifiedTrajectory(start.showId,
+          musicDirection.recentVerifiedStarts(start.showId, 8, snapshot.movement.startedAt),
+          snapshot.movement.energy, snapshot.movement.startedAt) : Promise.resolve(null),
+    ]);
+    logEvent('direction.v3_evidence', { action, showId: start.showId,
+      historyStarts: evidence.coverage.historyStarts,
+      catalogueSampled: evidence.coverage.catalogueSampled,
+      catalogueOrigin: evidence.coverage.catalogueOrigin,
+      lookup: evidence.coverage.lookup,
+      verifiedHistoryProfiles: evidence.verifiedHistory.filter(h => h.acoustic.status === 'verified').length,
+      verifiedCatalogueProfiles: evidence.candidatePalette.filter(c => c.acoustic.status === 'verified').length,
+    });
     const culture = action === 'seed' ? await fetchDirectorCulture() : [];
     const input = {
       action,
@@ -80,7 +106,10 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
         unit: context.weather?.tempUnit, daylight: context.weather?.isDay },
         festival: context.festival ? { name: context.festival.name,
           description: context.festival.description, mood: context.festival.mood } : null },
-      verifiedRecent: verified.entries,
+      verifiedRecent: evidence.verifiedHistory,
+      cataloguePalette: evidence.candidatePalette,
+      evidenceCoverage: evidence.coverage,
+      evidenceMeaning: evidence.meaning,
       editorialMemory: snapshot.memory,
       movement: snapshot.movement ? { movement: snapshot.movement.movement,
         destination: snapshot.movement.destination, next: snapshot.movement.next,
@@ -97,11 +126,30 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
     try {
       result = directorV3ModelResult(await djObject({ kind: `mi.v3.${action}`, system: SYSTEM,
         prompt: `Editorial context (read-only facts): ${JSON.stringify(input)}\n\n${action === 'seed'
-          ? 'Seed one viable 15–40 minute movement within remaining show airtime. If the available evidence or time makes this unwise, choose action:defer and set the nullable fields to null.'
-          : 'Review actual progress and choose continue, resolve or reroute. Do not claim a destination was measured.'}`,
+          ? 'Seed one viable 15–40 minute movement within remaining show airtime. Ground its direction and next step in the supplied actual acoustic and catalogue evidence; distinguish observation from intention. If evidence or airtime makes this unwise, choose action:defer and set nullable fields to null.'
+          : 'Review actual progress using the verified full acoustic history and measured trend. Choose continue, resolve or reroute; explain what the data supports and what remains artistic. Do not claim a poetic destination was measured.'}`,
         schema: action === 'seed' ? directorV3SeedSchema : directorV3ReviewSchema, maxOutputTokens: 1400,
         temperature: 0.45, maxRetries: 0, signal: abort.signal }));
     } finally { clearTimeout(timeout); }
+    const groundedRefs = [
+      ...evidence.verifiedHistory.map(h => ({ ref: h.historyRef, acoustic: h.acoustic })),
+      ...evidence.candidatePalette.map(c => ({ ref: c.catalogueRef, acoustic: c.acoustic })),
+    ].filter(({ acoustic }) => acoustic.status === 'verified' && acoustic.data && (
+      acoustic.data.arousal.coverage !== 'unavailable'
+      || acoustic.data.valence.coverage !== 'unavailable'
+      || acoustic.data.instruments.status !== 'unavailable'
+      || acoustic.data.moodThemes.status !== 'unavailable'
+      || acoustic.data.remainingModelHeads.voice.status !== 'unavailable'
+      || acoustic.data.remainingModelHeads.timbre.status !== 'unavailable'
+      || acoustic.data.remainingModelHeads.danceability.status !== 'unavailable'
+    )).map(x => x.ref);
+    // Only an independent Director commit is refused, NEVER a queue pick.
+    // Evidence unavailable => ordinary editorial inference remains possible.
+    if (!directorV3GroundingCheck(result, groundedRefs)) {
+      retryAfter = Date.now() + 180_000;
+      logEvent('direction.v3_ungrounded', { action, availableReferences: groundedRefs.length });
+      return;
+    }
     if (action === 'seed' && (result as { action?: string })?.action === 'defer') {
       retryAfter = Date.now() + 12 * 60_000;
       logEvent('direction.v3_deferred', { showId: start.showId });

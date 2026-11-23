@@ -6,13 +6,16 @@ import * as blocklist from '../../../../../music/blocklist.js';
 import { searchEligibleCohort, searchEligibleCohortPage } from '../../../../../music/music-evidence-cohort.js';
 import type { JointEvidencePreference } from '../../../../../music/essentia-evidence.js';
 import { definePickerTool } from '../defs.js';
+import { trajectoryEnabled } from '../../../../../music/trajectory-runtime.js';
 
 export default definePickerTool({
   name: 'findByAudioTraits',
   available: ({ essentia }) => essentia !== null,
   build: ctx => {
-    const expanded = process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
-      && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1' && ctx.scope.essentiaDiscovery === true;
+    const maximalV3 = trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
+    const expanded = ctx.scope.essentiaDiscovery === true
+      && (maximalV3 || (process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+        && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'));
     const cursorKey = (preferences: JointEvidencePreference[], cohort?: readonly string[]) => createHash('sha256')
       .update(JSON.stringify({ preferences, cohort: cohort ?? null })).digest('hex');
     return tool({
@@ -51,7 +54,7 @@ export default definePickerTool({
       }
       try {
         let ids: string[] | null | undefined;
-        if (ctx.scope.essentiaDiscovery && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+        if (ctx.scope.essentiaDiscovery && (maximalV3 || process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1')
             && ctx.essentia?.searchJoint) {
           v2Attempted = true;
           const requested: JointEvidencePreference[] = [];

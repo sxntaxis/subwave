@@ -10,8 +10,9 @@ import { trajectoryEnabled } from '../../../../../music/trajectory-runtime.js';
 // to `seen`, so the Agent cannot choose an old song by calling this tool.
 export default definePickerTool({
   name: 'inspectRecentMusicalArc',
-  available: ({ scope, essentia }) => process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
-    && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+  available: ({ scope, essentia }) => (process.env.SUBWAVE_MI_EXPANDED_PICKER === '1'
+      && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+      || (trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1'))
     && scope.essentiaDiscovery === true
     && (trajectoryEnabled()
       ? !!scope.verifiedHistory?.details.some(e => e.entry.showScope === 'current' && !!e.trackId)

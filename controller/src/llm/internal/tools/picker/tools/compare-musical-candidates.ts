@@ -1,19 +1,23 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import {
-  compactMusicEvidence, completeDiscoveryMusicEvidence, sampledWindowEvidence, type WindowDetailFamily,
+  compactMusicEvidence, completeDiscoveryMusicEvidence, maximalMusicEvidence, sampledWindowEvidence, type WindowDetailFamily,
 } from '../../../../../music/music-evidence-profile.js';
 import { compareMusicalEvidence } from '../../../../../music/musical-evidence-v2.js';
 import { lookupV2WithStatus } from '../../../../../music/essentia-evidence.js';
 import { definePickerTool } from '../defs.js';
+import { trajectoryEnabled } from '../../../../../music/trajectory-runtime.js';
 
 export default definePickerTool({
   name: 'compareMusicalCandidates',
   available: ({ scope, essentia }) => scope.essentiaDiscovery === true
-    && process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1' && !!essentia?.lookupV2,
+    && (process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+      || (trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1'))
+    && !!essentia?.lookupV2,
   build: ctx => {
-    const uncapped = process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
-      && process.env.SUBWAVE_MUSIC_CONTEXT_UNCAPPED === '1';
+    const maximalV3 = trajectoryEnabled() && process.env.SUBWAVE_MI_DIRECTOR_V3 === '1';
+    const uncapped = maximalV3 || (process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
+      && process.env.SUBWAVE_MUSIC_CONTEXT_UNCAPPED === '1');
     const richEnabled = uncapped || (process.env.SUBWAVE_MUSIC_EVIDENCE_V2 === '1'
       && process.env.SUBWAVE_MUSIC_CONTEXT_V21 === '1');
     const idsSchema = z.array(z.string().min(1).max(256)).min(2).max(uncapped ? 12 : 4);
@@ -105,7 +109,8 @@ export default definePickerTool({
               return {
                 id,
                 musical_evidence: evidence ? (uncapped
-                  ? completeDiscoveryMusicEvidence(evidence) : compactMusicEvidence(evidence)) : null,
+                  ? maximalV3 ? maximalMusicEvidence(evidence)
+                    : completeDiscoveryMusicEvidence(evidence) : compactMusicEvidence(evidence)) : null,
                 ...(predecessor && evidence ? { predecessor_comparison: compareMusicalEvidence(
                   predecessor, evidence, { sameShow: true, predecessorReliable: true, request: false },
                 ) } : {}),

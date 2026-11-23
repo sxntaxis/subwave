@@ -149,7 +149,7 @@ export function createPlanModel(
   let unavailableUntil = 0;
   let unavailableStatus = 404;
   let unavailableCode = 'model_unavailable';
-  const generate = async (options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> => {
+  const generateOnce = async (options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> => {
     if (Date.now() < quotaUntil) throw new PlanStreamError('subscription_sharing_usage_limit_exceeded');
     if (Date.now() < unavailableUntil) throw new PlanStreamError(unavailableCode, unavailableStatus);
     const body = planRequest(modelId, options);
@@ -232,6 +232,34 @@ export function createPlanModel(
         }
       } else if (error instanceof PlanStreamError && error.code === 'subscription_sharing_usage_unavailable') quotaUntil = Date.now() + 15 * 60_000;
       throw error;
+    }
+  };
+  // A terminal response.incomplete with NO declared reason may be a temporary
+  // provider failure. Retry only the affected model *step*, using the exact
+  // same prompt and preserved tool results. Do not rerun the whole DJ agent:
+  // doing so could repeat discovery tools and lose grounded evidence.
+  // Explicit token exhaustion, filtering, quota/auth, and deadline failures
+  // are not retryable by replaying the identical request.
+  const generate = async (options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> => {
+    try {
+      return await generateOnce(options);
+    } catch (error) {
+      if (!(error instanceof PlanStreamError)
+        || error.terminalEventKind !== 'response.incomplete'
+        || error.incompleteReason !== 'unknown'
+        || error.code !== 'response.incomplete'
+        || options.abortSignal?.aborted) throw error;
+      // The caller's shared phase deadline owns this recovery. A provider
+      // timeout is not an invitation to extend its allowed wall-clock time.
+      console.warn('[chatgpt-plan] incomplete model step without declared reason; retrying once');
+      try {
+        return await generateOnce(options);
+      } catch (retryError) {
+        if (retryError instanceof PlanStreamError && retryError.providerDiagnostic) {
+          retryError.providerDiagnostic.retryRecoveryAttempted = true;
+        }
+        throw retryError;
+      }
     }
   };
   return {

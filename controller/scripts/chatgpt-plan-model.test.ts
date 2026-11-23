@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateText, isStepCount, tool } from 'ai';
 import { z } from 'zod';
 import { createPlanModel, planRequest } from '../src/llm/internal/provider/chatgpt-plan-model.js';
+import type { PlanStreamError } from '../src/llm/internal/provider/chatgpt-plan-sse.js';
 import { failureDiagnostics } from '../src/llm/internal/core/pure.js';
 
 function completed(output: unknown[]) {
@@ -104,6 +105,59 @@ test('incomplete response diagnostics are bounded, contextual, and do not retry'
   assert.equal(JSON.stringify(failureDiagnostics(err, false)).includes('must-not-leak'), false);
   assert.equal(JSON.stringify(failureDiagnostics(err, false)).includes('private'), false);
   assert.equal(calls, 1, 'classification does not make another provider request');
+});
+
+test('unknown incomplete retries only the failed provider step, preserving prior tool evidence', async () => {
+  const requests: Record<string, unknown>[] = [];
+  let searches = 0;
+  const fakeFetch: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    requests.push(body);
+    if (requests.length === 1) return completed([
+      { type: 'function_call', namespace: 'subwave', name: 'search', call_id: 'known', arguments: '{"query":"cars"}' },
+    ]);
+    if (requests.length === 2) return new Response(
+      'data: {"type":"response.incomplete","response":{"status":"incomplete"}}\n\n',
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    );
+    return completed([
+      { type: 'function_call', namespace: 'subwave', name: 'done', call_id: 'answer', arguments: '{"trackId":"car-song"}' },
+    ]);
+  };
+  const result = await generateText({
+    model: createPlanModel('fixture-model', async () => 'token', fakeFetch),
+    prompt: 'Select a matching track.',
+    tools: {
+      search: tool({ inputSchema: z.object({ query: z.string() }), execute: async () => {
+        searches++;
+        return [{ id: 'car-song' }];
+      } }),
+      done: tool({ inputSchema: z.object({ trackId: z.string() }) }),
+    },
+    toolChoice: 'required',
+    stopWhen: isStepCount(2),
+    prepareStep: ({ stepNumber }) => ({ activeTools: stepNumber === 0 ? ['search'] : ['done'], toolChoice: 'required' }),
+  });
+  assert.equal(searches, 1, 'the already completed discovery tool is not replayed');
+  assert.equal(requests.length, 3, 'only the failed model step was retried');
+  assert.deepEqual(requests[1], requests[2], 'the failed step is retried with the same grounded prompt');
+  assert.deepEqual(result.steps[1]?.toolCalls[0]?.input, { trackId: 'car-song' });
+});
+
+test('unknown incomplete retries at most once and records that a retry happened', async () => {
+  let calls = 0;
+  const fakeFetch: typeof fetch = async () => {
+    calls++;
+    return new Response('data: {"type":"response.incomplete","response":{"status":"incomplete"}}\n\n');
+  };
+  const model = createPlanModel('fixture-model', async () => 'token', fakeFetch);
+  const err = await model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'test' }] }] } as any).then(
+    () => assert.fail('incomplete response must not be accepted'),
+    error => error as PlanStreamError,
+  );
+  assert.equal(calls, 2);
+  assert.equal(err.providerDiagnostic?.retryRecoveryAttempted, true);
+  assert.equal(err.providerDiagnostic?.terminalEventKind, 'response.incomplete');
 });
 
 test('subscription quota prevents immediate repeated requests', async () => {

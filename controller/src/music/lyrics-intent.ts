@@ -1,6 +1,6 @@
-// Interpret a listener's intended *lyrical meaning* separately from acoustic
-// style, genre, a named track, and mood. This is resolved before DJ discovery:
-// the request agent must not decide whether to call a lyric tool.
+// Interpret a listener's lyrical intent independently of acoustic style. The
+// request DJ proposes semantic expansions in its normal first run; code handles
+// retrieval and requires grounded evaluation before queue admission.
 import { explicitLyricTheme } from './lyrics-theme-core.js';
 
 export type LyricIntentMode = 'required' | 'supporting';
@@ -23,17 +23,28 @@ const clean = (s: unknown, max: number): string => typeof s === 'string'
 
 export function resolveLyricIntent(text: string, meaning?: RequestMeaning | null): LyricIntent | null {
   const explicit = explicitLyricTheme(text);
-  // A deterministic explicit cue survives provider unavailability or an LLM
-  // misclassifying the topic as merely a musical mood.
+  // An explicit cue preserves the need for evidence if a provider fails or
+  // misclassifies. It does NOT provide a subject-specific synonym dictionary.
   if (!explicit && (!meaning || meaning.kind === 'chat' || meaning.lyrical_mode === 'none')) return null;
   const mode = explicit ? 'required' : meaning?.lyrical_mode;
   if (mode !== 'required' && mode !== 'supporting') return null;
-  const topic = clean(explicit ?? meaning?.lyrical_subject, 120);
+  // An explicit cue requires lyrical grounding, but the model may refine the
+  // subject (e.g. cars -> driving, vehicle culture). Use the literal theme as
+  // the fallback when the model cannot supply a meaningful interpretation.
+  const hasModelMeaning = meaning?.lyrical_mode === 'required' || meaning?.lyrical_mode === 'supporting';
+  const topic = clean(hasModelMeaning ? meaning?.lyrical_subject : null, 120)
+    || clean(explicit, 120);
   if (topic.length < 3) return null;
   // The model may propose linguistic paraphrases or indirect concepts. Treat
   // them as recall hints, NEVER as proof that the requested meaning is present.
-  const concepts = [...new Set((meaning?.lyrical_concepts ?? [])
-    .filter((s): s is string => typeof s === 'string')
+  const rawConcepts = (hasModelMeaning ? meaning?.lyrical_concepts ?? [] : [])
+    .filter((s): s is string => typeof s === 'string');
+  // Preserve the exact listener subject as one recall term when the model
+  // reframes it. It is not a privileged vocabulary expansion.
+  if (explicit && topic.toLocaleLowerCase('und') !== explicit.toLocaleLowerCase('und')) {
+    rawConcepts.unshift(explicit);
+  }
+  const concepts = [...new Set(rawConcepts
     .map(s => clean(s, 42).toLocaleLowerCase('und'))
     .filter(s => s.length >= 3 && !/[\n{}<>]/.test(s)))].slice(0, 6);
   return { topic, mode, concepts };
@@ -59,14 +70,24 @@ export function groundedLyricChoice(pick: unknown, ids: { has(id: string): boole
     && typeof p.lyrical_reading === 'string' && p.lyrical_reading.trim().length >= 12);
 }
 
-/** A grounded pass is guaranteed for newly inferred meaning; a second search
- * on the existing slate needs genuinely new LLM-suggested concepts. */
-export function lyricHydrationNeeded(
-  preloaded: LyricIntent | null, inferred: LyricIntent | null, initialGrounded: boolean,
-): boolean {
-  const resolved = preloaded ?? inferred;
-  if (!resolved) return false;
-  if (!preloaded) return true;
-  return resolved.mode === 'required' && !initialGrounded
-    && !!inferred?.concepts.some(c => !preloaded.concepts.includes(c));
+/** A query plan is not lyrical evidence. A model-declared lyrical request
+ * always requires a controller-run lyric search and a grounded evaluation. */
+export function lyricHydrationNeeded(intent: LyricIntent | null): boolean {
+  return !!intent;
+}
+
+/** Bounded merge of independently proposed retrieval concepts, never an
+ * endorsement of their semantic correctness. Used for one optional expansion. */
+export function mergeLyricConcepts(
+  initial: LyricIntent, suggested: LyricIntent | null,
+): LyricIntent {
+  if (!suggested) return initial;
+  const seen = new Set(initial.concepts);
+  const additions = suggested.concepts.filter(c => !seen.has(c));
+  // A full first-pass list must not prevent a genuine revised query. Give up
+  // to three new concepts room, while retaining the strongest earlier ones.
+  const space = Math.min(3, additions.length);
+  const concepts = [...initial.concepts.slice(0, 6 - space), ...additions.slice(0, space)];
+  return { ...initial, mode: initial.mode === 'required' || suggested.mode === 'required' ? 'required' : 'supporting',
+    concepts };
 }

@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { explicitLyricTheme, lyricThemeTerms, lyricThemeEvidence } from '../src/music/lyrics-theme-core.ts';
 
-test('only explicit lyrical-topic requests enter the constrained theme path', () => {
+test('explicit cues provide a required-evidence guard for any topic', () => {
   assert.equal(explicitLyricTheme('cannabis-related songs'), 'cannabis');
+  assert.equal(explicitLyricTheme('songs about cars'), 'cars');
   assert.equal(explicitLyricTheme('songs about cannabis'), 'cannabis');
   assert.equal(explicitLyricTheme('Can you play songs about leaving home?'), 'leaving home');
   assert.equal(explicitLyricTheme('canciones sobre marihuana'), 'marihuana');
@@ -14,7 +15,7 @@ test('only explicit lyrical-topic requests enter the constrained theme path', ()
 });
 
 test('lyrics supply topical evidence, not artist genre or production descriptors', () => {
-  const terms = lyricThemeTerms('cannabis');
+  const terms = lyricThemeTerms('cannabis', ['ganja', 'marijuana']);
   assert.ok(terms.some(t => t.text === 'ganja'));
   const explicit = lyricThemeEvidence('The garden grows ganja in the morning.\nThe market sells ganja in the afternoon.', terms);
   assert.equal(explicit?.strength, 'repeated_context');
@@ -23,7 +24,7 @@ test('lyrics supply topical evidence, not artist genre or production descriptors
 });
 
 test('a single ambiguous mention is not promoted to lyrical theme proof', () => {
-  const terms = lyricThemeTerms('cannabis');
+  const terms = lyricThemeTerms('cannabis', ['blunt']);
   const evidence = lyricThemeEvidence('A song about some other subject.\nAn unrelated blunt reference in the background.', terms);
   assert.equal(evidence?.strength, 'incidental_mention');
   assert.equal(lyricThemeEvidence('A long song about ordinary seaweed and riverbanks,\nnot drugs or smoking.', terms), null);
@@ -40,7 +41,7 @@ test('bounded evidence does not reveal complete stored lyric texts', () => {
 });
 
 test('a lyric embedded late in an unsplit long line is visible to the model', () => {
-  const terms = lyricThemeTerms('cannabis');
+  const terms = lyricThemeTerms('cannabis', ['sensimilla']);
   const longLine = 'Ordinary instrumental description ' .repeat(20)
     + 'The gardener planted sensimilla behind the old barn, a vivid central image of the song.';
   const evidence = lyricThemeEvidence(longLine, terms);

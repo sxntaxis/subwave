@@ -23,8 +23,12 @@ export async function searchLyricsTheme(theme: string, limit = 24, concepts: rea
       // This is a listener request on the live controller, not a batch job.
       // Bound the optional provider wait; lexical results must still work when
       // the embedding transport is slow or absent.
+      // Use the DJ's proposed semantic vocabulary for vector recall too, not
+      // just the literal subject. This is still the existing mixed text index:
+      // vector similarity suggests candidates, never establishes lyric meaning.
+      const semanticQuery = `Songs whose lyrics concern ${topic}. Related expressions: ${concepts.slice(0, 6).join(', ')}`.slice(0, 540);
       const vec = await Promise.race([
-        embeddings.embedQueryText(`songs about ${topic}`, library.embeddingIndexTextMode()),
+        embeddings.embedQueryText(semanticQuery, library.embeddingIndexTextMode()),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 2500)),
       ]);
       if (vec) {

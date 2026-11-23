@@ -123,7 +123,7 @@ export function requestSchema() {
     lyrical_subject: z.string().nullable()
       .describe('Concise subject addressed by the lyrics, if requested; null when lyrical_mode is none. Do not guess song titles.'),
     lyrical_concepts: z.array(z.string())
-      .describe('Up to six concrete lexical or figurative search concepts; these expand retrieval, never prove lyrical meaning.'),
+      .describe('Up to six varied, subject-specific search concepts YOU formulate for any lyrical request: synonyms, related expressions, relevant metaphors and multilingual terms. Never require a hard-coded dictionary. These are retrieval hints, not proof.'),
     lyrical_basis: z.enum(['central', 'contextual', 'incidental', 'unsupported', 'not_applicable'])
       .describe('For a lyric-evidence slate, independently judge whether the actual quoted lyrical passages make the topic central, meaningfully contextual, incidental, or unsupported. Metadata, genre and vector similarity are NOT lyrical proof. For other requests use not_applicable.'),
     lyrical_reading: z.string().describe('A specific short PRIVATE interpretation of what the candidate lyrics express and how they address the request; no lyric quotations. For non-lyrical requests use empty string.'),

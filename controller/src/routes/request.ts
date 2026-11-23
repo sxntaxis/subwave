@@ -357,9 +357,10 @@ async function resolveRequest(entry) {
     });
   }
 
-  // Cheap, deterministic preloading for obvious lyric subjects. Indirect
-  // meanings are inferred by the EXISTING request DJ within its selection
-  // call, then grounded before queue admission (never an optional tool call).
+  // An explicit lyrical cue is only a safety guard. The SAME request DJ
+  // formulates general semantic retrieval concepts before the controller
+  // searches lyrics, including for obvious themes. Indirect meanings are
+  // also inferred by that DJ and grounded before queue admission.
   const lyricIntent = resolveLyricIntent(text);
   let observedLyricIntent = lyricIntent;
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  resolveLyricIntent, needsLyricalMeaningReview, groundedLyricChoice, lyricHydrationNeeded,
+  resolveLyricIntent, needsLyricalMeaningReview, groundedLyricChoice, lyricHydrationNeeded, mergeLyricConcepts,
 } from '../src/music/lyrics-intent.js';
 import { redactPrivateLyricSlate, redactLyricToolResult } from '../src/music/lyrics-privacy.js';
 
@@ -9,15 +9,15 @@ test('normal sonic/artist requests require no librarian preflight or lyric pass'
   for (const q of ['hazy reggae', 'play something atmospheric', 'play Bob Marley', 'late-night jazz']) {
     assert.equal(resolveLyricIntent(q), null);
     assert.equal(needsLyricalMeaningReview(q), false);
-    assert.equal(lyricHydrationNeeded(null, null, false), false);
+    assert.equal(lyricHydrationNeeded(null), false);
   }
 });
 
-test('obvious topics preload evidence, with LLM unable to waive the requirement', () => {
+test('explicit topics require evidence but never preload ahead of the model semantic plan', () => {
   const early = resolveLyricIntent('cannabis-related songs');
   assert.equal(early?.mode, 'required');
   assert.equal(resolveLyricIntent('songs about cannabis', { kind: 'track', lyrical_mode: 'none' })?.mode, 'required');
-  assert.equal(lyricHydrationNeeded(early, early, true), false);
+  assert.equal(lyricHydrationNeeded(early), true);
 });
 
 test('indirect semantics declared by request DJ force a grounded second pass', () => {
@@ -26,7 +26,7 @@ test('indirect semantics declared by request DJ force a grounded second pass', (
     lyrical_concepts: ['exile', 'returning home'],
   });
   assert.equal(late?.topic, 'homesickness');
-  assert.equal(lyricHydrationNeeded(null, late, false), true);
+  assert.equal(lyricHydrationNeeded(late), true);
 });
 
 test('conflicting story cues invoke a conditional librarian review, not a keyword verdict', () => {
@@ -43,12 +43,14 @@ test('unsupported or arbitrary tracks cannot pass required lyrical admission', (
   assert.equal(groundedLyricChoice({ id:'real-lyric-id', lyrical_basis:'contextual', lyrical_reading:'A sustained and relevant narrative.' }, ids),true);
 });
 
-test('new LLM concepts can request one bounded retrieval expansion', () => {
-  const early = { topic:'cannabis', mode:'required' as const, concepts:[] };
-  const later = { ...early, concepts:['ganja'] };
-  assert.equal(lyricHydrationNeeded(early, later, false),true);
-  assert.equal(lyricHydrationNeeded(early, later, true),false);
-  assert.equal(lyricHydrationNeeded(early, null, false),false);
+test('new LLM concepts can request one bounded retrieval expansion even when the first plan is full', () => {
+  const first = { topic:'cars', mode:'required' as const,
+    concepts:['cars','vehicles','automobiles','motors','driving','highways'] };
+  const later = { ...first, concepts:['garages','road trips','racing'] };
+  assert.deepEqual(mergeLyricConcepts(first, later).concepts,
+    ['cars','vehicles','automobiles','garages','road trips','racing']);
+  assert.equal(lyricHydrationNeeded(first), true);
+  assert.equal(lyricHydrationNeeded(null), false);
 });
 
 test('private lyric tool passages and prompt excerpts never reach audit copies', () => {

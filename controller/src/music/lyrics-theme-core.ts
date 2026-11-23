@@ -40,14 +40,9 @@ export function explicitLyricTheme(text: string): string | null {
 
 const STOP = new Set(['the','and','with','from','that','this','about','songs','song','music','tracks','related','what','where','when','some','canciones','sobre','de','del','las','los','una','unos','que','con','para','are','how','feel','feeling','something','things','life','a','an','to','of','in','is','my','me','you','your','and']);
 
-/** Canonical spelling expansion where existing general embeddings mix up the
- * *sound* of a style with its subject. Narrow and evidence-bearing; ambiguous
- * words like "smoke", "high", "pot" and "grass" are intentionally excluded. */
-const KNOWN: Array<{ match: RegExp; terms: string[] }> = [
-  { match: /\b(cannabis|marijuana|marihuana|weed|ganja|kush|mota|hierba|420|sensimilla|sinsemilla)\b/i,
-    terms: ['cannabis','marijuana','marihuana','weed','ganja','kush','sensimilla','sinsemilla','spliff','blunt','mota','420'] },
-];
-
+/** Search vocabulary is generic: the request DJ supplies expansions for ANY
+ * subject. Never give one subject a hard-coded thesaurus or promote synonyms
+ * into evidence without reading actual stored lyrics. */
 export function lyricThemeTerms(theme: string, concepts: readonly string[] = []): LyricThemeTerm[] {
   const normalized = fold(theme);
   const terms = new Map<string, number>();
@@ -57,18 +52,13 @@ export function lyricThemeTerms(theme: string, concepts: readonly string[] = [])
   const tokens = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
   for (const token of tokens) add(token, token.length >= 5 ? 1 : 0.8);
   if (tokens.length > 1 && tokens.length <= 5) add(tokens.join(' '), 1.8);
-  // LLM-derived concepts only broaden recall. A suggestion can be wrong; its
+  // LLM-derived concepts broaden recall for every topic. A suggestion can be wrong; its
   // presence does not make a track eligible without real lyrics to interpret.
   for (const concept of concepts.slice(0, 6)) {
     if (typeof concept !== 'string') continue;
     const words = fold(concept).match(/[\p{L}\p{N}]+/gu) ?? [];
-    for (const word of words) add(word, 0.75);
-    if (words.length > 1 && words.length <= 4) add(words.join(' '), 0.95);
-  }
-  for (const group of KNOWN) {
-    if (group.match.test(normalized)) {
-      for (const term of group.terms) add(term, term === '420' || term === 'blunt' ? 0.6 : 1.4);
-    }
+    for (const word of words) add(word, 0.95);
+    if (words.length > 1 && words.length <= 4) add(words.join(' '), 1.25);
   }
   return [...terms.entries()].map(([text, weight]) => ({ text, weight }))
     .sort((a, b) => b.weight - a.weight || b.text.length - a.text.length)
@@ -77,8 +67,8 @@ export function lyricThemeTerms(theme: string, concepts: readonly string[] = [])
 
 function occurrencesIn(line: string, term: string): number {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Escape literal regex punctuation and exclude substring hits (e.g. "weed"
-  // inside "seaweed"). Use Unicode-aware boundaries, not ASCII \b.
+  // Escape literal regex punctuation and exclude substring hits (e.g. "car"
+  // inside "scar"). Use Unicode-aware boundaries, not ASCII \b.
   const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'gu');
   return [...line.matchAll(re)].length;
 }

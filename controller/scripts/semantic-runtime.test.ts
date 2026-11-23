@@ -164,7 +164,7 @@ test('semantic seam uses the canonical djObject transport and routing policy', (
   assert.equal(options.schema, SemanticTrackResultSchema);
   assert.equal(
     createHash('sha256').update(readFileSync(join(here, '../src/llm/internal/strategy/object.ts'))).digest('hex'),
-    'ff820d602282275144cad53fe2308206eb9cac957eb5e28b9cd3b0f229c1f107',
+    '3e852f5e4e074e5822f9aff25e6c1787c533879ade8dbcd10674337921f8b093',
   );
 });
 

@@ -107,6 +107,17 @@ test('Director transport schemas accept verbose prose that bounded validators cl
   assert.equal(review?.alternate.length, 120);
 });
 
+test('Director transport schemas reject whitespace-only reasons', () => {
+  assert.throws(() => directorV3SeedSchema.parse({
+    action: 'seed', movement: 'Warm movement', destination: 'A softer landing',
+    next: 'Ease the pulse', horizonMinutes: 30, energy: 'hold', reason: '   \n ',
+  }));
+  assert.throws(() => directorV3ReviewSchema.parse({
+    decision: 'continue', next: 'Keep the warmth', alternate: 'Ease back',
+    reason: '   \t ',
+  }));
+});
+
 test('store permits only latest verified start to seed/review, and preserves human authority', () => {
   const old = { d: process.env.SUBWAVE_MUSIC_DIRECTION_V1, v2: process.env.SUBWAVE_MUSIC_DIRECTOR_V2,
     tr: process.env.SUBWAVE_MUSIC_TRAJECTORY_V1, v3: process.env.SUBWAVE_MI_DIRECTOR_V3 };

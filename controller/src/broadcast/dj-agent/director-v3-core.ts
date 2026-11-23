@@ -16,14 +16,14 @@ export const directorV3SeedSchema = z.object({
   next: z.string().min(1).nullable(),
   horizonMinutes: z.number().int().min(15).max(40).nullable(),
   energy: z.enum(['build', 'release', 'hold', 'contrast']).nullable(),
-  reason: z.string().min(1),
+  reason: z.string().trim().min(1),
 });
 
 export const directorV3ReviewSchema = z.object({
   decision: z.enum(['continue', 'resolve', 'reroute']),
   next: z.string().min(1),
   alternate: z.string().min(1),
-  reason: z.string().min(1),
+  reason: z.string().trim().min(1),
 });
 
 /** djObject returns a transport envelope containing `value`; the schema-

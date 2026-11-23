@@ -1,9 +1,30 @@
 // MI v3: pure editorial cadence and output validation. No LLM, queue, DB, or IO.
 // A musical movement is an intention, not an itinerary or an acoustic score.
+import { z } from 'zod';
 import type { MovementProposal } from './music-direction-core.js';
 import type { DirectionDevelopment } from './music-director-v2-core.js';
 
 export type DirectorV3Action = 'seed' | 'review' | null;
+
+// Model wording is bounded at the existing pure validators below. Do not put
+// those storage/display limits on the transport schema: a slightly verbose
+// response must not invalidate the whole seed before it can be clipped.
+export const directorV3SeedSchema = z.object({
+  action: z.enum(['seed', 'defer']),
+  movement: z.string().min(1).nullable(),
+  destination: z.string().min(1).nullable(),
+  next: z.string().min(1).nullable(),
+  horizonMinutes: z.number().int().min(15).max(40).nullable(),
+  energy: z.enum(['build', 'release', 'hold', 'contrast']).nullable(),
+  reason: z.string().min(1),
+});
+
+export const directorV3ReviewSchema = z.object({
+  decision: z.enum(['continue', 'resolve', 'reroute']),
+  next: z.string().min(1),
+  alternate: z.string().min(1),
+  reason: z.string().min(1),
+});
 
 /** djObject returns a transport envelope containing `value`; the schema-
  * validated model answer is inside that field, never at the envelope root. */

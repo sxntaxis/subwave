@@ -1,7 +1,6 @@
 // MI v3 independent editorial Director. Non-blocking: the mixer/picker never
 // waits for this LLM or its optional context readers. Read-only exploration;
 // the only write is an event- and revision-fenced direction-store commit.
-import { z } from 'zod';
 import * as settings from '../../settings.js';
 import * as library from '../../music/library.js';
 import { getFullContext } from '../../context.js';
@@ -15,26 +14,13 @@ import { logEvent } from '../../observability/events.js';
 import { incomingShowPhase } from './show-phase.js';
 import { projectVerifiedAirplay } from './verified-airplay-context.js';
 import { musicDirection, directorV3Enabled } from './music-direction.js';
-import { directorV3Due, directorV3ModelResult } from './director-v3-core.js';
+import {
+  directorV3Due, directorV3ModelResult, directorV3SeedSchema, directorV3ReviewSchema,
+} from './director-v3-core.js';
 import { inspectVerifiedTrajectory } from '../../music/trajectory-runtime.js';
 
 export type DirectorV3Start = { eventId: string; trackId: string | null; showId: string | null;
   at: number; source: 'auto' | 'listener' | 'admin' };
-
-const SEED = z.object({
-  action: z.enum(['seed','defer']),
-  movement: z.string().min(1).max(100).nullable(),
-  destination: z.string().min(1).max(120).nullable(),
-  next: z.string().min(1).max(120).nullable(),
-  horizonMinutes: z.number().int().min(15).max(40).nullable(),
-  energy: z.enum(['build','release','hold','contrast']).nullable(),
-  reason: z.string().min(1).max(180),
-});
-const REVIEW = z.object({
-  decision: z.enum(['continue','resolve','reroute']),
-  next: z.string().min(1).max(120), alternate: z.string().min(1).max(120),
-  reason: z.string().min(1).max(180),
-});
 
 const SYSTEM = `You are the independent editorial Music Director of a music-only freeform radio station.
 You plan musical movements, not songs or schedules. You never control the queue, claim a
@@ -113,7 +99,7 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
         prompt: `Editorial context (read-only facts): ${JSON.stringify(input)}\n\n${action === 'seed'
           ? 'Seed one viable 15–40 minute movement within remaining show airtime. If the available evidence or time makes this unwise, choose action:defer and set the nullable fields to null.'
           : 'Review actual progress and choose continue, resolve or reroute. Do not claim a destination was measured.'}`,
-        schema: action === 'seed' ? SEED : REVIEW, maxOutputTokens: 1400,
+        schema: action === 'seed' ? directorV3SeedSchema : directorV3ReviewSchema, maxOutputTokens: 1400,
         temperature: 0.45, maxRetries: 0, signal: abort.signal }));
     } finally { clearTimeout(timeout); }
     if (action === 'seed' && (result as { action?: string })?.action === 'defer') {

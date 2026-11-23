@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { directorV3Due, directorV3ModelResult, validDirectorSeed, validDirectorReview, movementClock } from '../src/broadcast/dj-agent/director-v3-core.js';
+import {
+  directorV3Due, directorV3ModelResult, directorV3SeedSchema, directorV3ReviewSchema,
+  validDirectorSeed, validDirectorReview, movementClock,
+} from '../src/broadcast/dj-agent/director-v3-core.js';
 import { MusicDirectionStore } from '../src/broadcast/dj-agent/music-direction.js';
 import { approvedCulturalFeed } from '../src/broadcast/dj-agent/director-v3-research.js';
 
@@ -75,6 +78,33 @@ test('Director consumes the SDK model value, not the structured-output transport
   const review = { decision: 'continue', next: 'Keep warmth', alternate: 'Reduce tempo', reason: 'Stable mood' };
   assert.equal(validDirectorReview(directorV3ModelResult({ value: review, via: 'ai-sdk' }))?.decision, 'continue');
   assert.equal(directorV3ModelResult({ value: { action: 'defer' } }) !== null, true);
+});
+
+test('Director transport schemas accept verbose prose that bounded validators clip', () => {
+  const verboseSeed = directorV3SeedSchema.parse({
+    action: 'seed',
+    movement: 'M'.repeat(140),
+    destination: 'D'.repeat(160),
+    next: 'N'.repeat(180),
+    horizonMinutes: 30,
+    energy: 'release',
+    reason: 'R'.repeat(220),
+  });
+  const seed = validDirectorSeed(verboseSeed, 35);
+  assert.equal(seed?.movement.length, 100);
+  assert.equal(seed?.destination.length, 120);
+  assert.equal(seed?.next.length, 120);
+  assert.equal(seed?.horizonMinutes, 30);
+
+  const verboseReview = directorV3ReviewSchema.parse({
+    decision: 'continue',
+    next: 'N'.repeat(180),
+    alternate: 'A'.repeat(180),
+    reason: 'R'.repeat(220),
+  });
+  const review = validDirectorReview(verboseReview);
+  assert.equal(review?.next.length, 120);
+  assert.equal(review?.alternate.length, 120);
 });
 
 test('store permits only latest verified start to seed/review, and preserves human authority', () => {

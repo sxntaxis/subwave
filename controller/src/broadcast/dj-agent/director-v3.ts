@@ -112,12 +112,14 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
     const latestShow = settings.resolveActiveShow();
     if ((latestShow?.id ?? null) !== start.showId
       || JSON.stringify(briefShow(latestShow)) !== captured.showSignature) return;
+    let rejection: string | undefined;
     const accepted = musicDirection.commitDirectorV3({ eventId: start.eventId,
       trackId: start.trackId, showId: start.showId, at: start.at,
       expectedRevision: captured.revision, expectedMovementId: captured.movementId,
       remainingMinutes: incomingShowPhase(null).minutesRemaining,
-      action, output: result });
-    logEvent('direction.v3_result', { action, accepted, showId: start.showId });
+      action, output: result }, reason => { rejection = reason; });
+    logEvent('direction.v3_result', { action, accepted, showId: start.showId,
+      ...(rejection ? { rejection } : {}) });
     if (accepted) retryAfter = Date.now() + 90_000;
   } catch (err) {
     retryAfter = Date.now() + 180_000;

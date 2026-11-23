@@ -231,26 +231,35 @@ export class MusicDirectionStore {
     expectedRevision: number; expectedMovementId: string | null;
     remainingMinutes: number | null;
     action: 'seed' | 'review'; output: unknown;
-  }): boolean {
-    if (!this.enabled || !directorV3Enabled()) return false;
+  }, onRejected?: (reason: string) => void): boolean {
+    const reject = (reason: string) => {
+      onRejected?.(reason);
+      return false;
+    };
+    if (!this.enabled || !directorV3Enabled()) return reject('disabled');
     const s = this.state;
     const observed = s.memory?.recent[0];
     if (!input.eventId || s.lastStart !== input.eventId || !observed
       || observed.eventId !== input.eventId.slice(0, 220)
       || observed.trackId !== input.trackId || observed.showId !== input.showId
-      || s.revision !== input.expectedRevision || s.pending) return false;
+      ) return reject('stale-start');
+    if (s.revision !== input.expectedRevision) return reject('stale-revision');
+    if (s.pending) return reject('pending-direction');
     const now = Date.now();
     if (this.snapshot(input.showId, now)?.steering || !Number.isFinite(input.at)
-      || input.at > now + 10_000 || now - input.at > 120_000) return false;
+      ) return reject('human-steering');
+    if (!Number.isFinite(input.at) || input.at > now + 10_000 || now - input.at > 120_000) {
+      return reject('stale-airtime');
+    }
     const m = s.movement;
-    if ((m?.id ?? null) !== input.expectedMovementId) return false;
+    if ((m?.id ?? null) !== input.expectedMovementId) return reject('movement-changed');
     const out = input.output as Record<string, unknown>;
     const reason = boundedDirectorReason(out?.reason);
-    if (!reason) return false;
+    if (!reason) return reject('missing-reason');
     if (input.action === 'seed') {
-      if (m) return false;
+      if (m) return reject('movement-exists');
       const proposal = validDirectorSeed(out, input.remainingMinutes);
-      if (!proposal) return false;
+      if (!proposal) return reject('invalid-seed');
       const startedAt = date(input.at);
       const lastDecision = { decision: 'seed' as const, at: date(now), starts: 1,
         eventId: input.eventId, reason };
@@ -266,10 +275,10 @@ export class MusicDirectionStore {
       logEvent('direction.v3_commit', { kind: 'seed', showId: input.showId, eventId: input.eventId });
       return true;
     }
-    if (!m || m.plannedBy !== 'director-v3') return false;
-    if (m.lastDecision?.eventId === input.eventId) return false;
+    if (!m || m.plannedBy !== 'director-v3') return reject('not-director-movement');
+    if (m.lastDecision?.eventId === input.eventId) return reject('duplicate-review');
     const review = validDirectorReview(out);
-    if (!review) return false;
+    if (!review) return reject('invalid-review');
     const lastDecision = { decision: review.decision, at: date(now),
       starts: m.progress?.starts ?? 1, eventId: input.eventId, reason };
     if (review.decision === 'continue') {

@@ -128,7 +128,9 @@ test('store permits only latest verified start to seed/review, and preserves hum
     const args = { eventId: 'ev1', trackId: 'song1', showId: 'A', at: now,
       expectedRevision: revision, expectedMovementId: null, remainingMinutes: 34,
       action: 'seed' as const, output };
-    assert.equal(store.commitDirectorV3({ ...args, eventId: 'not-a-start' }), false);
+    let rejection: string | undefined;
+    assert.equal(store.commitDirectorV3({ ...args, eventId: 'not-a-start' }, reason => { rejection = reason; }), false);
+    assert.equal(rejection, 'stale-start');
     assert.equal(store.commitDirectorV3(args), true);
     const m = store.snapshot('A')?.movement;
     assert.equal(m?.plannedBy, 'director-v3');

@@ -15,6 +15,28 @@ import type { VerifiedAirplayContext } from './verified-airplay-context.js';
 const MAX_HISTORY = 12;
 const MAX_CATALOGUE = 12;
 
+/** The same verified acoustic evidence and trajectory status passed to the LLM. */
+export function directorV3EvidenceForPrompt(
+  evidence: {
+    verifiedHistory: unknown[];
+    candidatePalette: unknown[];
+    coverage: unknown;
+    meaning: string;
+  },
+  acoustic: unknown,
+) {
+  return {
+    verifiedRecent: evidence.verifiedHistory,
+    cataloguePalette: evidence.candidatePalette,
+    evidenceCoverage: evidence.coverage,
+    evidenceMeaning: evidence.meaning,
+    acoustic: acoustic ?? {
+      status: 'unavailable',
+      note: 'No verified acoustic observation available; never infer completion.',
+    },
+  };
+}
+
 // Remote playlist resolution is useful context, never permission to delay a
 // separate editorial decision indefinitely. Pending reads remain optional.
 async function optionalRead<T>(request: Promise<T>, timeoutMs = 3500): Promise<T | null> {
@@ -172,6 +194,7 @@ export async function buildDirectorEvidence(
         [...recent.map(h => h.trackId!), ...selected.map(t => t.id)].filter(id => evidence.profiles.has(id)).length,
       historyStarts: recent.length, catalogueSampled: selected.length,
       catalogueFilteredCount: floor.length, catalogueOrigin: origin, playlistStatus },
+    lookupFailures: evidence.failures,
     meaning: 'Native, uncalibrated sparse Essentia windows; absence is unknown, not a zero. Catalogue samples are NOT reservations, guaranteed eligibility, or verified airplay.',
     verifiedHistory: recent.map(h => ({ ...h.entry, acoustic: profile(h.trackId!) })),
     candidatePalette: selected.map((track, i) => ({ ...candidateFacts(track, i), acoustic: profile(track.id) })),

@@ -12,7 +12,7 @@ export const DIRECTION_TEXT_LIMITS = {
   destination: 400,
   next: 400,
   alternate: 400,
-  reason: 400,
+  reason: 800,
 } as const;
 export interface MovementProposal {
   movement: string;

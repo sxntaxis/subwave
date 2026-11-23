@@ -19,7 +19,7 @@ import {
   directorV3GroundingCheck,
 } from './director-v3-core.js';
 import { inspectVerifiedTrajectory } from '../../music/trajectory-runtime.js';
-import { buildDirectorEvidence } from './director-v3-evidence.js';
+import { buildDirectorEvidence, directorV3EvidenceForPrompt } from './director-v3-evidence.js';
 
 export type DirectorV3Start = { eventId: string; trackId: string | null; showId: string | null;
   at: number; source: 'auto' | 'listener' | 'admin'; listenerExpression?: string };
@@ -119,8 +119,12 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
       catalogueSampled: evidence.coverage.catalogueSampled,
       catalogueOrigin: evidence.coverage.catalogueOrigin,
       lookup: evidence.coverage.lookup,
+      lookupFailures: evidence.lookupFailures,
       verifiedHistoryProfiles: evidence.verifiedHistory.filter(h => h.acoustic.status === 'verified').length,
       verifiedCatalogueProfiles: evidence.candidatePalette.filter(c => c.acoustic.status === 'verified').length,
+      trajectoryStatus: acoustic?.status ?? 'unavailable',
+      trajectoryObserved: acoustic?.observed ?? 0,
+      trajectoryMissing: acoustic?.missing ?? 0,
     });
     const culture = action === 'seed' ? await fetchDirectorCulture() : [];
     const input = {
@@ -138,17 +142,13 @@ export async function observeDirectorV3(start: DirectorV3Start): Promise<void> {
         unit: context.weather?.tempUnit, daylight: context.weather?.isDay },
         festival: context.festival ? { name: context.festival.name,
           description: context.festival.description, mood: context.festival.mood } : null },
-      verifiedRecent: evidence.verifiedHistory,
-      cataloguePalette: evidence.candidatePalette,
-      evidenceCoverage: evidence.coverage,
-      evidenceMeaning: evidence.meaning,
+      ...directorV3EvidenceForPrompt(evidence, acoustic),
       editorialMemory: snapshot.memory,
       movement: snapshot.movement ? { movement: snapshot.movement.movement,
         destination: snapshot.movement.destination, next: snapshot.movement.next,
         energy: snapshot.movement.energy, progress: snapshot.movement.progress,
         startedAt: snapshot.movement.startedAt, expiresAt: snapshot.movement.expiresAt,
         lastDecision: snapshot.movement.lastDecision } : null,
-      acoustic: acoustic ?? { status: 'unavailable', note: 'No verified acoustic observation available; never infer completion.' },
       transition: briefing,
       culturalHeadlines: culture,
     };

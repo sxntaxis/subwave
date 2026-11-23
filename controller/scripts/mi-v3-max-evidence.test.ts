@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseDirectorCatalogueSample } from '../src/broadcast/dj-agent/director-v3-evidence.js';
+import { chooseDirectorCatalogueSample, directorV3EvidenceForPrompt } from '../src/broadcast/dj-agent/director-v3-evidence.js';
 import { directorV3GroundingCheck } from '../src/broadcast/dj-agent/director-v3-core.js';
 import { maximalMusicEvidence, attachMaximalMusicEvidence } from '../src/music/music-evidence-profile.js';
 import { readVerifiedModelProfiles } from '../src/music/music-evidence-reader.js';
@@ -60,8 +60,82 @@ test('verified socket transport-limit splits the same IDs and does not invent mi
   assert.equal(result.status, 'partial');
   assert.equal(result.profiles.size, 2);
   assert.equal(result.profiles.has('lost'), false);
+  assert.equal(result.failures.profile_missing, 1);
   assert.ok(calls.some(ids => ids.length === 3));
   assert.ok(calls.some(ids => ids.length === 1));
+});
+
+test('transient profile-reader contention retries the same IDs and accounts for unresolved causes', async () => {
+  let calls = 0;
+  const reader = {
+    lookupV2Result: async (ids: readonly string[]) => {
+      calls++;
+      if (calls === 1) return { status: 'unavailable', reason: 'busy' } as const;
+      return { status: 'ok', rows: new Map(ids.map(id => [id, source(id)])) } as const;
+    },
+  } as EssentiaReader;
+  const result = await readVerifiedModelProfiles(['one', 'two'], reader);
+  assert.equal(calls, 2);
+  assert.equal(result.status, 'available');
+  assert.equal(result.profiles.size, 2);
+  assert.deepEqual(result.failures, {});
+
+  let busyCalls = 0;
+  const busyReader = {
+    lookupV2Result: async () => {
+      busyCalls++;
+      return { status: 'unavailable', reason: 'busy' } as const;
+    },
+  } as EssentiaReader;
+  const unavailable = await readVerifiedModelProfiles(['one', 'two'], busyReader);
+  assert.equal(busyCalls, 7);
+  assert.equal(unavailable.status, 'unavailable');
+  assert.equal(unavailable.failures.busy, 2);
+});
+
+test('timed-out multi-ID profile reads split into bounded exact-ID lookups', async () => {
+  const calls: string[][] = [];
+  const reader = {
+    lookupV2Result: async (ids: readonly string[]) => {
+      calls.push([...ids]);
+      if (ids.length > 1) return { status: 'unavailable', reason: 'timeout' } as const;
+      return { status: 'ok', rows: new Map([[ids[0], source(ids[0])]]) } as const;
+    },
+  } as EssentiaReader;
+  const result = await readVerifiedModelProfiles(['one', 'two'], reader);
+  assert.equal(result.status, 'available');
+  assert.deepEqual(calls, [['one', 'two'], ['one'], ['two']]);
+});
+
+test('successful socket responses with no indexed profiles are reported as missing evidence', async () => {
+  const reader = {
+    lookupV2Result: async () => ({ status: 'ok', rows: new Map() }) as const,
+  } as EssentiaReader;
+  const result = await readVerifiedModelProfiles(['one', 'two'], reader);
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.incomplete, 2);
+  assert.equal(result.failures.profile_missing, 2);
+});
+
+test('bounded Director reason preserves longer acoustic evidence while retaining a hard ceiling', async () => {
+  const { boundedDirectorReason } = await import('../src/broadcast/dj-agent/director-v3-core.js');
+  const reason = `${'measured acoustic evidence '.repeat(20)}final citation H12`;
+  assert.equal(boundedDirectorReason(reason), reason);
+  assert.equal(boundedDirectorReason('x'.repeat(900)).length, 800);
+});
+
+test('Director prompt context carries verified profiles and the measured trajectory together', () => {
+  const history = [{ historyRef: 'H1', acoustic: { status: 'verified', data: { arousal: 0.71 } } }];
+  const candidates = [{ catalogueRef: 'C1', acoustic: { status: 'verified', data: { danceability: 0.62 } } }];
+  const evidence = { verifiedHistory: history, candidatePalette: candidates, coverage: { lookup: 'available' },
+    meaning: 'Missing scores are unknown.' };
+  const trajectory = { status: 'measured', observed: 5, missing: 0, valenceChange: -0.04 };
+  const prompt = directorV3EvidenceForPrompt(evidence, trajectory);
+  assert.deepEqual(prompt.verifiedRecent, history);
+  assert.deepEqual(prompt.cataloguePalette, candidates);
+  assert.equal(prompt.evidenceCoverage, evidence.coverage);
+  assert.equal(prompt.acoustic, trajectory);
+  assert.deepEqual(JSON.parse(JSON.stringify(prompt)).acoustic, trajectory);
 });
 
 test('catalogue sampling rotates, respects exclusions, and avoids repeat artists when possible', () => {

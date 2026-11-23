@@ -128,7 +128,7 @@ export function MusicalDirectionCard() {
     {query.isError ? <p className="text-[12px] text-muted">Unable to read direction: {errorMessage(query.error)}</p>
       : !data ? <p className="text-[12px] text-muted">Loading direction…</p>
       : !enabled ? <p className="text-[12px] text-muted">Direction disabled</p>
-      : <div className="grid gap-3 text-[12px]">
+      : <div className="grid min-w-0 gap-3 text-[12px]">
         <div className="flex flex-wrap items-center gap-1.5">
           <Pill tone={steering ? 'accent' : movement ? 'accent' : 'default'}>
             {steering ? `${steering.source} steer` : movement ? 'movement active' : 'no active movement'}
@@ -187,7 +187,7 @@ export function MusicalDirectionCard() {
             <div><span className="text-muted">Toward · </span><span className="text-ink">{movement.destination}</span></div>
             <div><span className="text-muted">Next · </span><span className="text-ink">{movement.next}</span></div>
             {movement.progress?.alternate && <div><span className="text-muted">Alternate · </span>{movement.progress.alternate}</div>}
-            {movement.lastDecision?.reason && <div className="pt-1 text-[11px] text-muted">
+            {movement.lastDecision?.reason && <div className="min-w-0 pt-1 text-[11px] [overflow-wrap:anywhere] text-muted">
               <span className="font-semibold">Decision evidence · </span>{movement.lastDecision.reason}
             </div>}
           </div>

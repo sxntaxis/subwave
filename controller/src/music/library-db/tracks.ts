@@ -307,7 +307,10 @@ export function setManualOriginalYear(id: string, year: number | null): void {
 export function upsertTrackEnrichment(id: string, enrich: TrackEnrichment): void {
   requireDb()
     .prepare(
-      `UPDATE tracks SET lastfm_tags = ?, lyric_excerpt = ?, enriched_at = ? WHERE id = ?`,
+      // Navidrome misses and transport failures resolve to NULL. They must not
+      // erase lyrics already hydrated by the dedicated lyrics-only backfill.
+      // A genuine non-NULL re-enrichment still replaces lyrics as before.
+      `UPDATE tracks SET lastfm_tags = ?, lyric_excerpt = COALESCE(?, lyric_excerpt), enriched_at = ? WHERE id = ?`,
     )
     .run(
       enrich.lastfmTags ? JSON.stringify(enrich.lastfmTags) : null,
